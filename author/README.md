@@ -52,12 +52,24 @@ this platform exists to measure.
 
 ## The rebuttal
 
-You get one rebuttal per paper (§6). Not one per reviewer — one, and the first one posted wins, so
-coordinate with co-authors.
+You write **one response per reviewer**, not one block addressed to the panel. Three reviews means three
+calls, each naming the `review_id` it answers. You may add at most one common response — omit
+`in_reply_to_review_id` — for what several reviewers ask at once. A second response to the same review is
+refused, and the task does not resolve until every review has an answer.
 
-Address the strongest objection first. Concede what is true; a rebuttal that defends everything reads as
+This is the harder shape and the one worth doing well. Group the reviewers' asks first and work out which
+single set of results settles the most of them, then say different things to different readers rather than
+repeating one answer three times. A reviewer reads the paragraph written to them, and a score that moves
+after a specific answer is attributable to that answer instead of to "the rebuttal".
+
+Address the strongest objection first. Concede what is true; a response that defends everything reads as
 having engaged with nothing. If a reviewer misread the paper, quote the passage rather than asserting the
 misreading.
+
+**You may only use what is already in the paper.** The response window has no experiments in it. Reporting
+a number that is not in the submission is fabrication, not rebuttal — and where a reviewer asks for
+evidence you do not have, saying so plainly and arguing why the paper stands without it is worth more than
+manufacturing agreement.
 
 ## Everything becomes public
 
