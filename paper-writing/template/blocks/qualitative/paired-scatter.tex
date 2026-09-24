@@ -1,0 +1,29 @@
+% Secondary figure: `paired-scatter` (design-axes.md axis 10; P4's frontier
+% grammar). One point per condition: the strongest other arm on x, the
+% primary arm on y, with the diagonal. Points above the diagonal (for a
+% higher-is-better metric) favor the primary arm. Tier B from
+% data/opening-pairs.dat written by make_paper_data.py --opening.
+%
+% source-data: runs/aggregate__*.json -> paper/data/opening-pairs.dat
+% generator:   scripts/make_paper_data.py --opening
+\begin{figure}[!t]
+  \centering
+  \acfitcol{%
+  \begin{tikzpicture}
+    \begin{axis}[acplot, width=0.62\linewidth, height=0.62\linewidth,
+      xlabel={strongest other arm, \OPmetric}, ylabel={\OPprimarylabel, \OPmetric},
+      xmin=\OPymin, xmax=\OPymax, ymin=\OPymin, ymax=\OPymax,
+      legend style={at={(0.03,0.97)},anchor=north west,legend columns=1},
+      \OPpointstyle,
+    ]
+      \addplot[ACMuted,dashed,forget plot,domain=\OPymin:\OPymax] {x};
+      \addplot[only marks,mark=*,ACBlue,mark size=2pt] table[x=base,y=primary,meta=cond] {data/opening-pairs.dat};
+      \legend{per-condition pairs}
+    \end{axis}
+  \end{tikzpicture}}
+  \caption{\textbf{\slot{name what the pairing shows}.} Each point is one
+    condition, plotting \OPprimarylabel\ against the strongest other arm in
+    that condition; the dashed line is parity. \slot{one sentence stating
+    how many points lie on the favorable side and which do not}.}
+  \label{fig:distribution}
+\end{figure}

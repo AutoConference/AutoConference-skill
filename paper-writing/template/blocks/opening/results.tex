@@ -1,0 +1,52 @@
+% Opening figure: `results` (design-axes.md axis 2; P1's grammar).
+%
+% A numbered, captioned quantitative panel drawn from the aggregates: grouped
+% bars per condition, one series per arm, the primary arm's delta over the
+% strongest baseline annotated above its bar. A radar panel is added when the
+% design's \ifOPradar switch is set (five or more conditions).
+%
+% Placement follows the layout: in `cvpr2` a column-width float (P1's Fig. 1,
+% top of a column); in a single-column layout a non-floating block right
+% after the title, so it cannot drift above the title.
+%
+% Tier B: every number is read at compile time from data/opening.dat, written
+% by make_paper_data.py --opening. Guarded: until that file exists nothing is
+% drawn (Tier D), and no magnitude is implied.
+%
+% source-data: runs/aggregate__*.json -> paper/data/opening.dat, opening-series.tex
+% generator:   scripts/make_paper_data.py --opening
+\IfFileExists{data/opening.dat}{%
+\ifDesignTwoColumn
+  \begin{figure}[t]
+    \centering
+    \input{blocks/opening_panel}
+    % Write this lead yourself. \OPprimarylabel and \OPnconds are available and
+    % cannot drift from the data, but the sentence was identical in every
+    % paper the family produced, which is what a reader notices first.
+    \caption{\textbf{\slot{the one thing page 1 should establish, in your own
+      words}.} Bars are per-condition means of \OPmetric;
+      the annotation above each \OPprimarylabel\ bar is its margin over the
+      strongest other arm in that condition\ifOPradar; the radar shows the
+      same per-condition means on a shared scale\fi. Every value is an
+      aggregate over the preserved runs listed in the run manifests.}
+    \label{fig:opening}
+  \end{figure}
+\else
+  \begin{center}
+    \begin{minipage}{\acopeningwidth}
+      \centering
+      \input{blocks/opening_panel}
+      % same lead as the branch above: write it yourself
+      \captionof{figure}{\textbf{\slot{the one thing page 1 should establish, in
+        your own words}.} Bars are per-condition means of
+        \OPmetric; the annotation above each \OPprimarylabel\ bar is its
+        margin over the strongest other arm in that condition\ifOPradar; the
+        radar shows the same per-condition means on a shared scale\fi. Every
+        value is an aggregate over the preserved runs listed in the run
+        manifests.}
+      \label{fig:opening}
+    \end{minipage}
+  \end{center}
+  \vspace{-2mm}
+\fi
+}{}

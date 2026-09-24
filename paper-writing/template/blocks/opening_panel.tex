@@ -1,0 +1,62 @@
+% The quantitative panel every `results*` and `composite` opening draws.
+% Not a float itself: the opening block wraps it. Reads data/opening.dat and
+% data/opening-series.tex, both written by make_paper_data.py --opening, so
+% the number of arms, their labels, and which one carries the delta
+% annotation are decided by the generator, never here.
+%
+% source-data: runs/aggregate__*.json -> paper/data/opening.dat
+% generator:   scripts/make_paper_data.py --opening
+% the design decides whether a radar belongs here; the data decides whether it can be drawn
+\IfFileExists{data/opening-radar.dat}{}{\OPradarfalse}
+\ifOPradar
+  \begin{minipage}[c]{0.60\linewidth}\centering
+\fi
+% Rotated condition labels hang below-left of their tick, so a long one runs
+% past the text column's left edge -- invisible to every source-reading gate and
+% caught by check_render.py. Shrink the picture to the available width, and only
+% ever shrink: \width is the natural width, so a panel that already fits is left
+% at its own size rather than blown up.
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{%
+\begin{tikzpicture}
+  \begin{axis}[acplot,
+    unbounded coords=discard,   % the signed delta layers park the other sign at nan
+    width=\ifOPradar\linewidth\else 0.92\linewidth\fi, height=4.8cm,
+    ybar, bar width=\OPbarwidth, enlarge x limits=0.14,
+    xtick=data, xticklabels from table={data/opening.dat}{cond},
+    xticklabel style={font=\OPxfont,rotate=\OPxrot,anchor=\OPxanchor},
+    ylabel={\OPmetric\ \OPdirection}, ymin=\OPymin, ymax=\OPymax,
+    % the delta is drawn by a separate label plot at the top of each condition's
+    % group (data/opening-series.tex), so a losing primary bar never hides it
+    % the label carries its own \textcolor, chosen by the sign of the delta
+    % `fixed` alone drops trailing zeros, so a delta that rounds to a whole
+    % number loses its decimals: a tie printed as `+0` beside `+2.5`, which
+    % reads as missing data rather than as the honest zero it is. `zerofill`
+    % is what keeps every annotation the same shape.
+    nodes near coords style={font=\tiny,anchor=south,/pgf/number format/showpos,
+                             /pgf/number format/fixed,/pgf/number format/fixed zerofill=true,
+                             /pgf/number format/precision=\OPdeltaprec},
+    legend style={at={(0.5,1.02)},anchor=south,legend columns=-1,font=\tiny},
+    legend cell align=left,
+  ]
+    \input{data/opening-series}
+  \end{axis}
+\end{tikzpicture}}
+\ifOPradar
+  \end{minipage}\hfill
+  \begin{minipage}[c]{0.38\linewidth}\centering
+  % the radar's condition labels sit outside its axis, so the same shrink-to-fit
+  \resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{%
+  \begin{tikzpicture}
+    \begin{polaraxis}[width=\linewidth, height=\linewidth,
+      xtick/.expanded={\OPradarangles}, xticklabels/.expanded={\OPradarlabels}, xticklabel style={font=\tiny},
+      ytick distance={(\OPymax-\OPymin)/3},
+      ytick style={draw=none},
+      yticklabels={}, ymin=\OPymin, ymax=\OPymax,   % the bar panel carries the scale
+      grid style={ACMuted!25}, axis line style={ACMuted!40},
+      legend style={draw=none,fill=none,font=\tiny,at={(0.5,-0.08)},anchor=north,legend columns=2},
+    ]
+      \input{data/opening-radar-series}
+    \end{polaraxis}
+  \end{tikzpicture}}
+  \end{minipage}
+\fi

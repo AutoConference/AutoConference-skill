@@ -1,0 +1,29 @@
+%% Palette: `brewer-dark2` (design-axes.md axis 14).
+%% ColorBrewer qualitative 'Dark2' (Brewer et al.); designed for print and screen.
+%% Redefines the family's semantic color tokens. Every block reads the tokens,
+%% never a literal color, so a paper changes its whole visual key here and
+%% nowhere else. Color is always a redundant cue: the tables still mark best
+%% with \best and direction with \up/\down, so a greyscale print loses
+%% nothing that carries meaning.
+\definecolor{ACBlue}{HTML}{1B9E77}   % primary / this paper's arm
+\definecolor{ACCyan}{HTML}{7570B3}   % secondary accent
+\definecolor{ACLink}{HTML}{E7298A}   % project link only
+\definecolor{ACInk}{HTML}{233631}   % body-dark
+\definecolor{ACMuted}{HTML}{6B7B76}   % rules, secondary text
+\definecolor{ACGreen}{HTML}{66A61E}   % a delta in the good direction
+\definecolor{ACWorse}{HTML}{D95F02}   % a delta in the bad direction
+\definecolor{ACPrimary}{HTML}{D6EFE7}   % row tint: this study's family
+\definecolor{ACCompare}{HTML}{F7DCC4}   % row tint: comparison family
+\definecolor{ACNeutral}{HTML}{E6E6E6}   % row tint: reference family
+\definecolor{ACRankOne}{HTML}{FBEFC4}   % cell background: best
+\definecolor{ACRankTwo}{HTML}{F7DCC4}   % cell background: second
+\definecolor{ACRankThree}{HTML}{DEDCEF}   % cell background: third
+\definecolor{BrickRed}{HTML}{D95F02}   % extra plot series
+\definecolor{ACDelta}{HTML}{66A61E}
+\definecolor{ACDeltaNeg}{HTML}{D95F02}
+%% The icon layer (preamble.tex). Frozen/trained keep a cool/warm split near
+%% the convention a reader already knows, so the badge is legible before its
+%% legend is read; both are drawn from this palette's own family.
+\definecolor{ACIcon}{HTML}{1B9E77}   % glyphs inside structural figures
+\definecolor{ACFrozen}{HTML}{7570B3}   % not updated during training
+\definecolor{ACTrained}{HTML}{D95F02}   % updated during training

@@ -1,0 +1,163 @@
+% Page-1 teaser. Contract: references/paper-writing-template.md section 6.
+%
+% Tier C structure (TikZ, no external asset) carrying Tier B numbers from
+% paper/data/teaser.tex. Carries NO \caption and no float number: its own
+% labels do the work. Numbers are never typed here.
+%
+% Reading path: question -> design that answers it -> supported takeaway.
+% The legend strip at the bottom is the visual key every later figure reuses.
+%
+% Layout is content-length-robust by construction, not by coordinates tuned
+% for one paper's numbers:
+%   - the Finding box and the factor matrix size to their own content
+%     (TikZ `fit`/`positioning`), and every element below them measures that
+%     actual extent (via `let`) instead of assuming a fixed height;
+%   - the factor matrix is built from \heroArms below and accepts any number
+%     of rows -- add or remove a row there and the border, the caption, and
+%     the legend band all move with it automatically;
+%   - row labels get a bounded `text width` (a cap, not the old unconstrained
+%     single line) so a long method name wraps instead of running into the
+%     cell grid.
+% Extending \heroArms or writing a longer \TSfinding therefore grows this
+% figure; it does not overlap or clip. Keep this discipline when editing.
+%
+% source-data: paper/data/teaser.tex
+% generator:   scripts/make_paper_data.py --teaser
+\begin{center}
+  % Shrink only. The grid below is drawn at a fixed ~13cm, so a plain
+  % \resizebox{0.99\linewidth} ENLARGED it by 6% in the single-column
+  % layouts and the teaser's type came out bigger than the body text.
+  % Same bug the table grammars had. In cvpr2 the column is narrower than
+  % 13cm and this still shrinks, which is what it was there for.
+  \resizebox{\ifdim\width>0.99\linewidth 0.99\linewidth\else\width\fi}{!}{%
+  \begin{tikzpicture}[x=1cm,y=1cm,font=\sffamily]
+    % ---- band 1: the question ------------------------------------------
+    \node[anchor=west,font=\bfseries\small,text=ACBlue] at (0.42,5.12) {Question};
+    \node[anchor=west,font=\small,text=ACInk,text width=10.8cm,align=left]
+      at (1.95,5.12) {\TSquestion};
+    \draw[ACMuted!35,line width=0.5pt] (0.42,4.72) -- (12.98,4.72);
+
+    % ---- column titles ---------------------------------------------------
+    \node[anchor=base west,font=\bfseries\small,text=ACBlue] at (0.42,4.46) {Design};
+    \node[anchor=base,font=\bfseries\small,text=ACBlue] at (6.55,4.46)
+      {Factors held apart};
+    \node[anchor=base west,font=\bfseries\small,text=ACBlue] at (10.05,4.46) {Finding};
+
+    % ---- left column: the registered design ------------------------------
+    \node[acbox,anchor=north west,text width=2.45cm,minimum height=0.86cm,align=left,
+          font=\scriptsize] (herodesign1) at (0.42,4.20)
+      {\textbf{\TSsplitseeds} split seeds\\registered in advance};
+    \node[acbox,anchor=north west,text width=2.45cm,minimum height=0.86cm,align=left,
+          font=\scriptsize] (herodesign2) at (0.42,3.28)
+      {\textbf{\TStrajper} trajectories\\per split and method};
+    \node[acsoft,anchor=north west,text width=2.45cm,minimum height=0.86cm,align=left,
+          font=\scriptsize] (herodesign3) at (0.42,2.36)
+      {\textbf{\TSruns} preserved runs\\one manifest each};
+
+    % ---- centre: the factor matrix ---------------------------------------
+    % Structure only. Cells carry factor identity, not values, so nothing here
+    % can be read as a magnitude that was never measured.
+    %
+    % \heroArms is a label/tint pair per row. Add a row here for a fourth or
+    % fifth comparison arm; nothing else in this file needs to change. Each
+    % row's vertical slot is measured from the label actually typeset in it
+    % (`let` against the node's own north/south), not assumed to be one line:
+    % a name too long for 2.35cm wraps to two lines and the row grows to fit
+    % it, so a wrapped label can never clip into the row above, the row
+    % below, or the matrix border.
+    \def\heroArms{{\methodcontrol}/ACCompare,{\methodmax}/ACPrimary,{\methodrandom}/ACPrimary}
+    \pgfmathsetlengthmacro{\heroMatrixTop}{4.20cm}
+    \pgfmathsetlengthmacro{\heroCellH}{0.40cm}
+    \pgfmathsetlengthmacro{\heroRowGap}{0.18cm}
+    \pgfmathsetlengthmacro{\heroCursorY}{\heroMatrixTop-0.52cm}
+    \foreach \heroLab/\heroTint [count=\heroI] in \heroArms {
+      % text width is a cap: a name longer than fits on one line wraps here,
+      % never past the label column and into the cell grid.
+      \node[anchor=north west,font=\scriptsize,text=ACInk,text width=2.35cm,align=left]
+        (herorowlab-\heroI) at (3.72,\heroCursorY) {\heroLab};
+      \path let \p1=(herorowlab-\heroI.north), \p2=(herorowlab-\heroI.south)
+        in \pgfextra{\xdef\heroLabTopRaw{\y1}\xdef\heroLabBotRaw{\y2}};
+      \pgfmathsetlengthmacro{\heroLabH}{\heroLabTopRaw-\heroLabBotRaw}
+      \pgfmathsetlengthmacro{\heroSlotH}{max(\heroLabH,\heroCellH)}
+      \pgfmathsetlengthmacro{\heroCellTop}{\heroCursorY-(\heroSlotH-\heroCellH)/2}
+      \pgfmathsetlengthmacro{\heroCellBot}{\heroCellTop-\heroCellH}
+      \foreach \heroC in {0,1,2,3,4}{
+        \fill[\heroTint,rounded corners=1.2pt]
+          (6.30+\heroC*0.60,\heroCellBot) rectangle +(0.48,\heroCellH);
+        \draw[ACMuted!45,line width=0.35pt,rounded corners=1.2pt]
+          (6.30+\heroC*0.60,\heroCellBot) rectangle +(0.48,\heroCellH);
+      }
+      % \pgfmathsetlengthmacro defines \heroCursorY inside this iteration's
+      % own group; re-exporting it with \global\let is what lets the next
+      % iteration see the advanced value instead of the loop's start value.
+      \pgfmathsetlengthmacro{\heroCursorY}{\heroCursorY-\heroSlotH-\heroRowGap}
+      \global\let\heroCursorY\heroCursorY
+    }
+    \pgfmathsetlengthmacro{\heroLastRowBot}{\heroCursorY+\heroRowGap}
+    \coordinate (heromatrixtl) at (3.55,\heroMatrixTop);
+    \coordinate (heromatrixbr) at (9.60,\heroLastRowBot);
+    \node[fit=(heromatrixtl)(heromatrixbr),draw=ACBlue!45,line width=0.8pt,
+          rounded corners=3pt,inner sep=0pt] (heromatrixbox) {};
+    % Every offset below is written with an explicit `cm` because it is
+    % combined, via subtraction, with a `pgfmathsetlengthmacro` result: pgf
+    % arithmetic between an explicit-unit length and a bare number treats
+    % the bare number as bare points, not as a multiple of the picture's
+    % x=1cm/y=1cm basis -- a dropped `cm` here silently shrinks a 0.36cm gap
+    % to 0.36pt. (This is exactly the bug an earlier draft of this file hit:
+    % the split-seed axis label collapsed onto the header above it.)
+    \node[anchor=south,font=\scriptsize,text=ACMuted] at (7.60,\heroMatrixTop-0.36cm) {\splitseed};
+    \node[anchor=north,font=\scriptsize,text=ACMuted,text width=6.4cm,align=center]
+      (heromatrixcaption) at (6.55,\heroLastRowBot-0.16cm)
+      {each cell aggregates every \trajseed\ under one split};
+    \draw[acarrow] (3.14,3.15) -- (3.51,3.15);
+
+    % ---- right column: the supported takeaway ----------------------------
+    % No minimum height on the Finding box: it sizes to \TSfinding, however
+    % long the supported sentence is. The delta box is anchored below it
+    % (`positioning`'s below=of), so the two can never overlap regardless of
+    % how tall the finding grows.
+    \node[acsoft,anchor=north west,text width=2.68cm,minimum height=0.86cm,align=left,
+          font=\scriptsize] (herofinding) at (10.05,4.20) {\TSfinding};
+    \node[acbox,text width=2.68cm,minimum height=0.85cm,align=left,font=\scriptsize,
+          below=0.15cm of herofinding] (herodelta)
+      {\textbf{\TSdelta} $\pm$ \TSdeltaunc\\\TSmetric, lower is better};
+    \draw[acarrow] (9.64,3.15) -- (10.01,3.15);
+
+    % ---- everything below the three columns is measured, not assumed -----
+    % The lowest of {left design column, matrix + its caption, finding +
+    % delta} sets where the legend band starts. Whichever column is tallest
+    % this time is the one that governs; the other two just have slack.
+    \node[fit=(herodesign3)(heromatrixcaption)(herodelta),inner sep=0pt]
+      (herocontentbottom) {};
+    \path let \p1 = (herocontentbottom.south)
+      in \pgfextra{\xdef\heroContentBottomRaw{\y1}};
+    \pgfmathsetlengthmacro{\heroLegendLineY}{\heroContentBottomRaw-0.20cm}
+    \pgfmathsetlengthmacro{\heroSwatchTopY}{\heroLegendLineY-0.32cm}
+    \pgfmathsetlengthmacro{\heroSwatchBotY}{\heroSwatchTopY-0.30cm}
+    \pgfmathsetlengthmacro{\heroFrameBotY}{\heroSwatchBotY-0.68cm}
+    \pgfmathsetlengthmacro{\heroFrameInnerBotY}{\heroFrameBotY+0.14cm}
+
+    % ---- band 3: the visual key later figures reuse ----------------------
+    \draw[ACMuted!35,line width=0.5pt] (0.42,\heroLegendLineY) -- (12.98,\heroLegendLineY);
+    \foreach \x/\tint/\lab in {%
+      0.42/ACCompare/{\methodcontrol},
+      4.60/ACPrimary/{compared selection methods},
+      9.30/ACNeutral/{secondary configurations}}{
+      \fill[\tint,rounded corners=1.2pt] (\x,\heroSwatchBotY) rectangle +(0.42,0.30);
+      \draw[ACMuted!50,line width=0.35pt,rounded corners=1.2pt]
+        (\x,\heroSwatchBotY) rectangle +(0.42,0.30);
+      \node[anchor=west,font=\scriptsize,text=ACMuted] at (\x+0.56,\heroSwatchTopY-0.15cm) {\lab};
+    }
+
+    % ---- frame ------------------------------------------------------------
+    % Drawn last but placed behind everything (background layer), sized to
+    % whatever the content above actually needed. In the common case (three
+    % rows, a one-line finding) this reproduces the original fixed 0..5.6
+    % card exactly; it only grows when a row or a finding needs the room.
+    \begin{scope}[on background layer]
+      \fill[ACPrimary!35,rounded corners=4pt] (0,\heroFrameBotY) rectangle (13.4,5.6);
+      \fill[white,rounded corners=4pt] (0.14,\heroFrameInnerBotY) rectangle (13.26,5.46);
+    \end{scope}
+  \end{tikzpicture}%
+  }
+\end{center}

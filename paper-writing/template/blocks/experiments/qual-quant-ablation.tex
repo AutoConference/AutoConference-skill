@@ -1,0 +1,53 @@
+% Experiments: `qual-quant-ablation` (design-axes.md axis 7; P7).
+% Opens with a bullet list of research questions, each pointing at the
+% subsection that answers it; then Setup -> Qualitative -> Quantitative ->
+% Ablation. Bold leads with sub-bullets in the setup.
+\section{Experiments}
+\label{sec:experiments}
+
+In the following sections, we aim to answer the following research questions
+that guide our experimental evaluation:
+\begin{itemize}[leftmargin=1.4em,itemsep=1pt,topsep=2pt]
+  \item \slot{How does the method compare with the strongest alternatives}?
+    (\cref{sec:qualitative}, \cref{sec:quantitative})
+  \item \slot{Does the effect hold across conditions}? (\cref{sec:quantitative})
+  \item \slot{How does each component contribute}? (\cref{sec:ablations})
+\end{itemize}
+
+\subsection{Experimental Setup}
+\label{sec:setup}
+
+\textbf{Implementation Details.}
+\slot{base configuration, scale, seeds, hardware}
+
+\textbf{Baselines.}
+\slot{every compared arm and why it is a fair comparison}
+
+\textbf{Evaluation Metrics.}
+\begin{itemize}[leftmargin=1.4em,itemsep=1pt,topsep=2pt]
+  \item \textbf{\slot{Metric family one}.} \slot{what it measures and its direction}
+  \item \textbf{\slot{Metric family two}.} \slot{what it measures and its direction}
+\end{itemize}
+
+\subsection{Qualitative Results}
+\label{sec:qualitative}
+
+\IfFileExists{data/opening.dat}{\input{figures/results_panel}}{}
+\slot{read the figure per condition: where the primary arm holds and where
+it does not; name the caveat plainly}
+
+\subsection{Quantitative Results}
+\label{sec:quantitative}
+
+\input{tables/main_results}
+As shown in \cref{tab:main-results}, \slot{read the table: the primary arm's
+margin per group; the one place a rival scores higher and why}.
+\input{tables/secondary_results}
+\slot{read the second table}
+
+\subsection{Ablation Study}
+\label{sec:ablations}
+
+\input{tables/ablations}
+\slot{read the w/o rows: what each removed component costs, and which loss
+is the largest}

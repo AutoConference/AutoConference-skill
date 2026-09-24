@@ -1,0 +1,47 @@
+% Canonical terminology. One macro per defined object.
+%
+% Prose uses the macro, never a hand-typed synonym. This enforces the banana
+% rule mechanically: scripts/check_prose_quality.py reports any hand-typed
+% occurrence of a term that has a macro here.
+%
+% Rename a concept in exactly one place: here. Every default below is a
+% placeholder the writer replaces; a macro body must be a distinctive
+% technical object (a method, a factor, a metric, a dataset), never a
+% generic phrase such as "the model".
+
+% --- study identity -------------------------------------------------------
+\newcommand{\projectname}{\slot{Project name}\xspace}
+\newcommand{\methodname}{\slot{Method name}\xspace}
+
+% --- compared arms --------------------------------------------------------
+\newcommand{\armprimary}{\slot{primary arm}\xspace}
+\newcommand{\armbaseline}{\slot{strongest baseline}\xspace}
+\newcommand{\armcontrol}{\slot{control or second baseline}\xspace}
+
+% --- experimental factors ------------------------------------------------
+% PLURALS: every macro here ends in \xspace, which inserts a space before a
+% following letter. `\condition s` therefore renders as "dataset s", and
+% `\condition{}s` does the same. It has shipped in a draft and no gate but
+% a reader caught it. Write the plural as literal text, or give it its own
+% macro. check_prose_quality.py now refuses `\macro s`.
+\newcommand{\condition}{\slot{condition factor, e.g. data split}\xspace}
+\newcommand{\repetition}{\slot{repetition factor, e.g. training seed}\xspace}
+
+% --- quantities ----------------------------------------------------------
+\newcommand{\metricname}{\slot{primary metric}\xspace}
+
+% --- symbols -------------------------------------------------------------
+% Defined once here, used identically in prose, equations, tables, captions.
+\newcommand{\dataset}{\mathcal{D}}         % data set
+\newcommand{\model}{f_\theta}              % the model
+
+% --- compatibility aliases for the legacy page-1 card (figures/hero.tex) ----
+% Only figures/hero.tex (the never-drawn design-card fallback) still uses
+% these names. They resolve to the generic arms and factors above.
+\newcommand{\methodcontrol}{\armcontrol}
+\newcommand{\methodmax}{\armbaseline}
+\newcommand{\methodrandom}{\armprimary}
+\newcommand{\splitseed}{\condition}
+\newcommand{\trajseed}{\repetition}
+\newcommand{\evalsem}{evaluation semantics\xspace}
+\newcommand{\certbound}{\metricname}

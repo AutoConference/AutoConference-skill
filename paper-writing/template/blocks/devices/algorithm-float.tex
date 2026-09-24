@@ -1,0 +1,18 @@
+% Algorithm float, installed when the design draws equations = sectioned
+% (P4). \input{blocks/algorithm} in the method, in its own short
+% subsection ("\slot{Method} Algorithm"). Line numbers, an optional-step
+% comment, inputs and output stated first.
+\begin{algorithm}[t]
+  \caption{\textbf{\slot{name the procedure}.} \slot{one sentence on what it
+    takes, what it returns, and where the main body narrates it}}
+  \label{alg:main}
+  \begin{algorithmic}[1]
+    \State \textbf{Inputs:} \slot{the inputs and the parameters, with symbols}
+    \State \textbf{Output:} \slot{the output, with its symbol}
+    \State \textbf{Init:} \slot{the initial state}
+    \State \slot{the core update, as a formula}
+    \State \slot{the second step}
+    \State \slot{an optional refinement} \Comment{Optional}
+    \State \textbf{Return} \slot{the output symbol}
+  \end{algorithmic}
+\end{algorithm}

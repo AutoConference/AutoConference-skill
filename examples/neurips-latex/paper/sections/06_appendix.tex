@@ -1,0 +1,198 @@
+% Appendix. Lettered sections A-H on a fresh page, at least 1500 words.
+\appendix
+
+\section{Bound and Evaluation Details}
+\label{sec:appendix-bound}
+
+The certificate combines a guarantee for the \surrogate\ with a bound on
+target-\surrogate\ disagreement, as written in \cref{eq:certificate}. Three
+components of that computation are treated as \evalsem\ rather than
+as experimental variables, and are identical for every run in this paper.
+
+The confidence parameter is $\delta = 0.05$, applied once to the combined
+certificate rather than split across the two terms. The bound is obtained by
+inversion over a grid of 1000 points; a coarser grid produces a looser
+certificate for reasons that have nothing to do with the method under test,
+which is why the grid is frozen. The \disagreement\ is estimated by Monte
+Carlo with 10{,}000 samples drawn from the unlabeled partition. Reducing that
+sample count tightens the reported number while making it a worse estimate, and
+that failure mode is the specific reason the count is not exposed as a tunable
+parameter in the matrix.
+
+The data are partitioned once per \splitseed\ into training, validation,
+disagreement, and test sets, and the same partition is reused by every method at
+that split. The disagreement partition never overlaps the training partition,
+so the term being bounded is estimated on data the \surrogate\ did not fit. All
+methods at a given split therefore see identical data in identical roles, and
+the only thing that differs between arms is which subset of the training
+partition the \surrogate\ is built from.
+
+The upstream implementation also exposes a PAC-Bayes evaluation line. It is not
+used here: in the released code the function that computes the disagreement
+quantity returns three scalars while its caller indexes them as sequences,
+raising a type error before any bound is produced. This is reported as an
+observation about the artifact, not as a contribution, and no result in this
+paper depends on that line.
+
+\section{Configuration and Environment}
+\label{sec:appendix-config}
+
+Every run manifest records the interpreter version, the framework and CUDA
+versions, the GPU model, the dependency lock hash, the exact command line, and
+the resolved configuration after defaults are applied. This section is generated
+from those manifests rather than transcribed, so it cannot drift from what was
+executed.
+
+The reduced probe configuration uses 12 epochs and a maximum compression size of
+120. The upstream configuration for this dataset specifies 200 epochs and a
+maximum compression size of 20{,}000; that configuration was not run. One
+upstream configuration file omits the learning-rate scheduler key that the model
+loader reads directly. The value was resolved explicitly before the matrix was
+run and the resolved configuration is stored in each manifest, rather than
+relying on the loader's behaviour when the key is absent.
+
+Runtime is not quoted from prior records. Each manifest carries its own measured
+wall-clock duration, and the aggregate over the matrix is reported in the run
+index rather than in prose, because a runtime measured on one machine is not a
+property of the method.
+
+\section{Run Manifest and Provenance Schema}
+\label{sec:appendix-provenance}
+
+Every primary run writes a raw result and a sidecar manifest with the following
+fields:
+
+\begin{protocolbox}{Primary run manifest}
+\small
+\texttt{run\_id, method, source\_script, source\_commit, command, dataset,}\\
+\texttt{split\_seed, trajectory\_seed, full\_config, started\_at,}\\
+\texttt{completed\_at, raw\_result\_path, environment}
+\end{protocolbox}
+
+The manifest exists because the upstream pipeline names its output files from
+hyperparameters alone. Two different methods run at the same hyperparameters
+write to the same filename, and the second silently overwrites the first. A
+result identified only by its filename therefore cannot be attributed to a
+method, and the number of surviving files is not the number of executed
+experiments. The manifest makes method and trajectory identity part of the
+record rather than part of the filename.
+
+An aggregate artifact enumerates the primary run paths it was computed from,
+together with its estimator, its per-seed values, and its uncertainty. The
+aggregation step refuses to write when a listed primary input is absent from
+disk, which makes a broken evidence chain a build failure rather than a silent
+approximation. Each of the three aggregates behind \cref{tab:main-results}
+enumerates 15 primary runs, for 45 in total.
+
+A quantity whose primary record is missing, overwritten, or method-ambiguous is
+excluded from the paper rather than reported with a caveat. No such quantity
+appears in this document.
+
+\section{Complete Split-by-Trajectory Results}
+\label{sec:appendix-complete}
+
+The per-split means and trajectory standard deviations behind
+\cref{tab:main-results} are as follows. For the \methodcontrol, the per-split
+means are $0.412$, $0.405$, $0.418$, $0.399$, and $0.410$, with trajectory
+standard deviations of $0.014$, $0.018$, $0.011$, $0.016$, and $0.019$. For
+\methodmax, the means are $0.401$, $0.395$, $0.412$, $0.388$, and $0.394$, with
+standard deviations $0.019$, $0.016$, $0.023$, $0.013$, and $0.020$. For
+\methodrandom, the means are $0.379$, $0.384$, $0.398$, $0.371$, and $0.401$,
+with standard deviations $0.026$, $0.018$, $0.029$, $0.015$, and $0.032$.
+
+Two patterns are visible in those numbers and are not visible in the aggregate.
+The trajectory spread is consistently ordered across methods at every split, with
+\methodrandom\ widest and the \methodcontrol\ narrowest. And the split at which
+\methodrandom\ has its widest spread, \splitseed~42 at $0.032$, is the same split
+at which the method ordering reverses. The reversal and the spread are not
+independent observations.
+
+Reading the same numbers by column rather than by row gives the split effect
+$\alpha_{\splitidx}$ of \cref{eq:decomposition}. Of the five, \splitseed~3 is the hardest for all
+three methods and \splitseed~4 the easiest, and the gap between them,
+roughly $0.019$ for the \methodcontrol, is larger than any between-method
+contrast reported in this paper. That ordering is stable across methods, which is
+the empirical content of treating $\alpha_{\splitidx}$ as shared: the split moves
+every arm in the same direction by a similar amount, which is exactly the
+condition under which a within-split contrast removes it.
+
+No run in the reported matrix crashed. Had one crashed, it would appear in this
+table with its manifest and its failure mode, and the text would state whether
+it entered the estimator.
+
+\section{Additional Examples and Observed Failures}
+\label{sec:appendix-examples}
+
+Individual trajectories are recorded but are not presented as evidence about
+methods. As an illustration of the spread rather than as a result, the three
+\methodrandom\ trajectories at \splitseed~42 produced $0.367$, $0.406$, and
+$0.430$. Reporting any one of them alone would place \methodrandom\ anywhere from
+well ahead of \methodmax\ to behind it at that split. This is one
+example, chosen because it is the widest, and it is not a distribution.
+
+\section{Statistical Procedures and Sensitivity}
+\label{sec:appendix-statistics}
+
+The reporting rule of \cref{eq:decision} compares the mean paired contrast
+against the largest within-split trajectory standard deviation anywhere in the
+matrix, with $\kappa = 1.0$ fixed before execution. That is the conservative
+choice among several defensible ones, and the verdict depends on which is taken.
+
+Compared against the largest spread in the matrix, $0.032$, the contrast of
+$0.011$ does not clear the threshold. Compared against the mean within-split
+spread across all methods and splits, approximately $0.019$, it still does not
+clear it. Compared against the spread of the \methodcontrol\ alone,
+approximately $0.016$, it still does not clear it. Compared against the standard
+error of the mean contrast itself, $0.005$, it would clear it by a factor of two.
+
+The last of those is the comparison that a naive reading of the paired contrast
+invites, and it is the one this design rejects. The standard error of
+$\bar{\Delta}$ measures how precisely the mean of five split-level contrasts has
+been estimated. It does not measure how much a single run of either method would
+move if the \trajseed\ changed, which is the quantity a practitioner choosing
+between the two methods actually faces. Reporting the smaller denominator would
+turn a null result into a positive one without adding any evidence.
+
+The sign reversal at \splitseed~42 is not sensitive to the choice of denominator,
+because it is a property of the per-split contrasts rather than of their
+aggregate. It would be removed only by dropping that split, and nothing about
+the run justifies dropping it: it completed normally, its manifest is intact,
+and its trajectory spread is wide but within the range the other splits
+establish.
+
+\section{Broader Impacts}
+\label{sec:appendix-impact}
+
+Certified bounds are used to justify deployment decisions, so a bound reported
+without its variance invites a decision that the evidence does not support. The
+practical impact of this study is narrow and mostly cautionary: at this scale the
+trajectory contributes more to the reported certificate than the selection
+criterion does, so a comparison run once per configuration is likely to report a
+method effect that is a seed effect. Nothing here supports a general claim about
+selection strategies, and the reduced experimental scale means the result should
+not be transferred to full-scale training without repeating the design.
+
+\section{Limitations}
+\label{sec:appendix-limitations}
+
+The study covers one dataset, one certificate family, and two selection criteria
+at a reduced experimental scale. Three trajectory seeds per cell is enough to
+establish that the spread exceeds the contrast, and not enough to estimate the
+spread precisely; the standard deviations in \cref{sec:appendix-complete} each
+rest on three observations.
+
+The comparison at the upstream scale was not run, and the scale ablation in
+\cref{tab:scale} shows an effect of the same order as the between-method
+contrast, so the null result reported here may not survive at full scale. It may
+also not survive with more trajectories, in either direction.
+
+The certificate is reported as a sum, and the pipeline does not separately
+expose the \surrogate\ guarantee and the \disagreement. A difference between
+methods therefore cannot be attributed to one term or the other without
+instrumentation the matrix did not add, which limits how much mechanism can be
+inferred from the numbers.
+
+Finally, the design rule that produces a null result here is restrictive by
+choice. A less conservative denominator, or a ranking claim that ignored the
+reversal at one split, would have produced a positive-sounding result from the
+same 45 runs.

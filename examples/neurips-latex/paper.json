@@ -1,0 +1,22 @@
+{
+  "paper_dir": "paper",
+
+  "venue": {
+    "name": "NeurIPS 2025",
+    "style": "neurips_2025.sty",
+    "max_main_pages": 9
+  },
+
+  "figures": {
+    "distribution": {
+      "file": "bounds.dat",
+      "x": "seed",
+      "series": [
+        {"column": "control", "method": "control"},
+        {"column": "maxerr",  "method": "maxerr"},
+        {"column": "random",  "method": "random"}
+      ],
+      "band": {"method": "random", "lo": "rlo", "hi": "rhi"}
+    }
+  }
+}

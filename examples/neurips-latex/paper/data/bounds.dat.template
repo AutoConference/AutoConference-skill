@@ -1,0 +1,20 @@
+# Tier B plot data for paper/figures/results_panel.tex
+#
+# Rename to bounds.dat once real values exist. The figure is guarded with
+# \IfFileExists, so the float and its narrating sentence simply do not appear
+# until this file is generated. That is Tier D of references/figure-ladder.md:
+# omit rather than fake.
+#
+# Written by the same script that writes the aggregation JSON, so a plotted
+# value and a tabled value can never disagree.
+#
+# source-data: runs/aggregate__<label>.json
+# generator:   scripts/make_paper_data.py --figure distribution
+#
+# columns:
+#   seed     split seed label, must match the main results table
+#   control  reproduced control mean over trajectory seeds
+#   maxerr   max-error selection mean over trajectory seeds
+#   random   random selection mean over trajectory seeds
+#   rlo/rhi  random selection trajectory range, for the error band
+seed control maxerr random rlo rhi

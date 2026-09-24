@@ -1,0 +1,158 @@
+% Overview: `mechanism-zoom` (design-axes.md axis 15; P7).
+% The pipeline row, and under it a zoom into the one module the paper
+% contributes, drawn with the score grid it operates on and its two operators
+% keyed in a legend. P7 spends a whole second figure on this; here both live in
+% one float so the zoom cannot drift from the overview it explains.
+%
+% The grid is \acgrid (preamble.tex): a checkered square that says "a matrix of
+% scores happens here" and nothing about their values. It is structure, not
+% data, and must never be read as a heat map of real numbers.
+%
+% ------------------------------------------------------------ density pass
+% A zoom panel that only narrates its two operators in prose is honest but
+% thin. This grammar's own proof (paper-batch-v2/S26-pointcloud-registration,
+% OAM: an overlap prior gating a similarity score before matching) went from
+% 19 objects to 43 by working the zoom's own grid on a handful of RANKED
+% items rather than describing it only in words:
+%
+%   - a ruler of RANKED positions (by whatever the grid scores candidates
+%     on), not a ruler of time. Reused by every row below it, exactly like
+%     a temporal ruler would be.
+%   - two rows -- a naive rule that reads the grid alone, and this paper's
+%     own rule -- using `acitemkeep` / `acitemdrop` so a cell's colour and
+%     glyph (\cmark / \xmark) ARE the kept/dropped verdict, never a neutral
+%     cell with a badge beside it.
+%   - ONE named item the two rows disagree on, tagged directly above its
+%     ruler position. That single, specific disagreement is what makes two
+%     rows of checkmarks a finding instead of a repeated pattern -- pick the
+%     item your method's own motivating example already names (the
+%     high-similarity-low-overlap pair, the confident-but-wrong detection,
+%     whatever your method's failure case is), never an invented one.
+%
+% If your module's contribution has a third, undisputed step downstream of
+% the zoom (a solver, a decoder, a projection with no learned parameters of
+% its own), it is worth its own stage in the top row rather than folding into
+% "Output" -- see the proof's `\weightedsolver` stage. Skip it if the paper
+% has no such separate step.
+%
+% \acitem* / acruler / acrowlabel are declared once in preamble.tex's shared
+% tikzset block (not here). Anchor the worked instance below the ALREADY
+% RESOLVED zoom panel and grid (a coordinate midpoint between their two
+% `.south` anchors, never a hand-guessed offset from the top row) -- and do
+% not draw a leader line between the two rows' disagreeing cells: the
+% shortest path between them crosses straight through whichever row's own
+% bracket label sits between them, a collision no gate reads and only
+% opening the rendered page catches.
+%
+% source-data: none (Tier C structural diagram)
+\begin{acwidefigure}
+  \centering
+  \acfit{%
+  \begin{tikzpicture}[x=1cm,y=1cm]
+    \node[accard,text width=2.4cm] (a) at (0,0)
+      {\acicon{\acIconInput}\\[1pt]\textbf{\slot{Input}}\\\slot{what enters}};
+    \node[actrap,right=0.8 of a,text width=2.2cm] (b)
+      {\acicon{\acIconModel}\\[1pt]\textbf{\slot{Shared stage}}\\\slot{one line}};
+    % A deck, not a card: P7's zoomed block carries a bare "x N" because the
+    % thing it opens up is stacked, and a single rectangle beside that label
+    % contradicts it. Delete the two backing nodes and the tag (and the deck
+    % style on `m`) if this paper's module runs once, the way the proof does.
+    \node[acdeck,right=0.8 of b,text width=2.6cm] (m2) {};
+    \node[acdeck,text width=2.6cm] (m1) at ($(m2.center)+(0.08,0.08)$) {};
+    \node[accard,text width=2.6cm] (m) at ($(m2.center)+(0.16,0.16)$)
+      {\acicon{\acIconMech}\\[1pt]\textbf{\slot{The module}}\\\slot{what it changes}};
+    \node[actag,anchor=west] (mn) at ($(m2.east)+(3pt,0)$) {$\times\,\slot{N}$};
+    % OPTIONAL third stage: a separate, undisputed step downstream of the
+    % module with no learned parameters of its own (a solver, a decoder). It
+    % is still part of what this paper adds if the module's OWN output feeds
+    % it and no other arm has it -- fit it into `ours` below. Delete `solver`
+    % and wire `m` directly to `c` if the module's output is already final.
+    \node[actrap,right=0.8 of m,text width=2.2cm] (solver)
+      {\acicon{\acIconEvid}\\[1pt]\textbf{\slot{Solver or decoder}}\\\slot{closed-form or parameter-free, name the equation}};
+    \node[accard,right=0.8 of solver,text width=2.2cm] (c)
+      {\acicon{\acIconOut}\\[1pt]\textbf{\slot{Output}}\\\slot{what is reported}};
+    \draw[acarrow] (a) -- (b); \draw[acarrow] (b) -- (m2.west);
+    \draw[acarrow] (m) -- (solver); \draw[acarrow] (solver) -- (c);
+    % The badges are named and included in the fit below. Left out, they
+    % land exactly ON the tinted region's top border, because `above=3pt of
+    % b` and the region's edge are the same line. Same bug as linear-pipeline.
+    \node[actag,above=3pt of b] {\acsnow\ \slot{FROZEN}};
+    \node[actag,above=3pt of m,text=ACBlue] (mt) {\acflame\ \slot{TRAINED}};
+    \begin{scope}[on background layer]
+      \node[acours,fit=(m)(m1)(m2)(mt)(solver),inner sep=7pt] (ours) {};
+    \end{scope}
+    % the zoom: the module opened up, with the object it operates on drawn
+    \node[acpanel,text width=11.2cm,anchor=north] (z) at ($(b.east)!0.5!(m.west)+(0.9,-1.5)$)
+      {\textbf{\aciconat{ACIcon}{\acIconMech}\ \slot{the module, named}}\\[3pt]
+       \slot{what it receives} \;\acop{1}\; \slot{the operation it performs}
+       \;\acop{2}\; \slot{what it emits}\\[3pt]
+       \slot{one line on why the naive alternative fails here}};
+    % Hung off the panel, not the module: placed relative to the module it
+    % landed underneath the tinted region's own bottom edge and was unreadable.
+    \node[actag,anchor=south west] at ($(z.north west)+(1pt,2pt)$) {\slot{ZOOM}};
+    % Leaders stop at the zoom panel's own corners. Run out to the row's
+    % extreme ends they read as a second, empty container.
+    \draw[draw=ACMuted!60,dashed] (ours.south west) -- (z.north west);
+    \draw[draw=ACMuted!60,dashed] (ours.south east) -- (z.north east);
+    \node[inner sep=0pt,anchor=west] (g) at ($(z.east)+(0.35,0)$) {\acgrid{5}};
+    \node[actag,below=2pt of g,text width=2.2cm,align=center] {\slot{what the module scores}};
+
+    % ================================================================
+    % WORKED INSTANCE (delete this whole block if the module's grid has no
+    % natural ranking to work -- the zoom panel above is then a complete,
+    % honest, shorter figure on its own).
+    % ================================================================
+    \coordinate (zgmid) at ($(z.south)!0.5!(g.south)$);
+    \node[actag,text width=9.0cm,align=center,anchor=north,below=0.55 of zgmid] (zoomhdr)
+      {\slot{FIVE RANKED ITEMS, ONE RULE PER ROW} --- \slot{SAME ITEMS, WHAT
+       EACH RULE KEEPS}};
+
+    \node[acruler,below=0.7 of zoomhdr,xshift=-3.2cm] (p1) {\slot{$1$}};
+    \node[acruler,right=0.6 of p1] (p2) {\slot{$2$}};
+    \node[acruler,right=0.6 of p2] (p3) {\slot{$3$}};
+    \node[acruler,right=0.6 of p3] (p4) {\slot{$4$}};
+    \node[acruler,right=0.6 of p4] (p5) {\slot{$5$}};
+    \node[actag,below=1pt of p3,text=ACBlue,text width=2.6cm,align=center]
+      {\slot{name the one item the two rows will disagree on}};
+
+    % Row A: \slot{the naive rule that reads the grid alone}.
+    \node[acitemkeep,below=0.85 of p1] (rA1) {\cmark};
+    \node[acitemkeep,below=0.85 of p2] (rA2) {\cmark};
+    \node[acitemkeep,below=0.85 of p3] (rA3) {\cmark};
+    \node[acitemkeep,below=0.85 of p4] (rA4) {\cmark};
+    \node[acitemdrop,below=0.85 of p5] (rA5) {\xmark};
+    \node[acrowlabel,left=0.35 of rA1] (rowA) {\slot{naive rule}};
+    \draw[ACBlue!65,line width=0.7pt]
+      (rA1.south west)+(0,-0.08) -- ++(0,-0.08)
+      -- ($(rA4.south east)+(0,-0.16)$) -- ++(0,0.08);
+    \node[actag,text=ACBlue,anchor=north] at ($(rA1.south east)!0.5!(rA4.south west)+(0,-0.34)$)
+      {\small\slot{span, symbol or count only}};
+
+    % Row B: this paper's own rule. Every cell is `below=1.0 of` its row-A
+    % counterpart -- real clearance under row A's own bracket and label.
+    \node[acitemkeep,below=1.0 of rA1] (rB1) {\cmark};
+    \node[acitemkeep,below=1.0 of rA2] (rB2) {\cmark};
+    \node[acitemdrop,below=1.0 of rA3] (rB3) {\xmark};
+    \node[acitemkeep,below=1.0 of rA4] (rB4) {\cmark};
+    \node[acitemdrop,below=1.0 of rA5] (rB5) {\xmark};
+    \node[acrowlabel,left=0.35 of rB1] (rowB) {\slot{this paper's rule}};
+    \draw[ACBlue!65,line width=0.7pt]
+      (rB1.south west)+(0,-0.08) -- ++(0,-0.08)
+      -- ($(rB2.south east)+(0,-0.16)$) -- ++(0,0.08);
+    \node[actag,text=ACBlue,anchor=north] at ($(rB1.south east)!0.5!(rB2.south west)+(0,-0.34)$)
+      {\small\slot{span, symbol or count only}};
+
+    % No leader line between the two rows' disagreeing cells -- the ruler
+    % tag above the column and the colour change between rows already say
+    % it, and a line drawn here crosses row A's own bracket label.
+    \node[aclegend,below=0.85 of rB1,xshift=1.6cm,text width=9.4cm,anchor=north]
+      {\cmark~\slot{what kept means downstream} \quad
+       \xmark~\slot{what dropped means}\\[3pt]
+       \acop{1}~\slot{name the first operator} \quad \acop{2}~\slot{name the second}\\[3pt]
+       \textcolor{ACBlue!80}{\rule[0.12em]{5mm}{0.8pt}}~\slot{what flows between the top row's stages}};
+  \end{tikzpicture}}
+  \caption{\textbf{\slot{name the mechanism}.} \slot{Top}: \slot{one sentence on
+    the pipeline}. \slot{Bottom}: \slot{two sentences on the module the paper
+    contributes, what it replaces, and what the worked instance shows}.}
+  \label{fig:overview}
+\end{acwidefigure}

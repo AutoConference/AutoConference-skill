@@ -1,0 +1,34 @@
+% Tier B results figure: pgfplots reading a data file written by the analysis
+% script. Guarded with \IfFileExists so that, before the data exists, the float
+% does not appear at all (Tier D of references/figure-ladder.md).
+%
+% source-data: runs/aggregate__{control,maxerr,random}.json -> paper/data/bounds.dat
+% generator:   scripts/make_paper_data.py --figure distribution
+\begin{figure}[!t]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[acplot,
+      xlabel={\splitseed}, ylabel={\certbound\ $\downarrow$},
+      xtick=data, symbolic x coords={1,2,3,4,42},
+      enlarge x limits=0.12,
+    ]
+      \addplot[name path=lo,draw=none,forget plot] table[x=seed,y=rlo] {data/bounds.dat};
+      \addplot[name path=hi,draw=none,forget plot] table[x=seed,y=rhi] {data/bounds.dat};
+      \addplot[ACBlue!14,forget plot] fill between[of=lo and hi];
+      \addplot+[ACMuted, mark=triangle*, dashed]
+        table[x=seed,y=control] {data/bounds.dat};
+      \addplot+[ACCompare!55!black, mark=square*]
+        table[x=seed,y=maxerr] {data/bounds.dat};
+      \addplot+[ACBlue, mark=*]
+        table[x=seed,y=random] {data/bounds.dat};
+      \legend{\methodcontrol, \methodmax, \methodrandom}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{\textbf{Per-split \certbound\ and trajectory spread.} Each marker is
+    the mean over 3 trajectory seeds at a fixed \splitseed, under identical
+    \evalsem; the shaded band is the trajectory range of \methodrandom. The band
+    contains the \methodmax\ mean at every split, so the ordering visible in the
+    means is not separable from trajectory noise. The comparison is read across
+    splits, not at a single split: the ordering reverses at \splitseed~42.}
+  \label{fig:distribution}
+\end{figure}

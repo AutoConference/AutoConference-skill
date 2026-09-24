@@ -1,0 +1,34 @@
+% Secondary figure: `distribution-lines` (design-axes.md axis 10; P3).
+% Per-condition means as lines, one per arm, the primary arm's spread as a
+% band. Tier B from data/opening.dat and data/opening-lines.tex written by
+% make_paper_data.py --opening.
+%
+% source-data: runs/aggregate__*.json -> paper/data/opening.dat
+% generator:   scripts/make_paper_data.py --opening
+\begin{figure}[!t]
+  \centering
+  \acfitcol{%
+  \begin{tikzpicture}
+    \begin{axis}[acplot,
+      xlabel={condition}, ylabel={\OPmetric\ \OPdirection},
+      xtick=data, xticklabels from table={data/opening.dat}{cond},
+      % same treatment as the opening panel: a long condition name laid flat
+      % under a column-width axis collides with its neighbour
+      xticklabel style={font=\OPxfont,rotate=\OPxrot,anchor=\OPxanchor},
+      enlarge x limits=0.12, ymin=\OPymin, ymax=\OPymax,
+    ]
+      \addplot[name path=lo,draw=none,forget plot] table[x expr=\coordindex,y=lo] {data/opening.dat};
+      \addplot[name path=hi,draw=none,forget plot] table[x expr=\coordindex,y=hi] {data/opening.dat};
+      \addplot[ACBlue!14,forget plot] fill between[of=lo and hi];
+      \input{data/opening-lines}
+    \end{axis}
+  \end{tikzpicture}}
+  % Name this panel yourself: a caption every paper in the family shares is a
+  % fingerprint. \OPmetric carries the metric name, the rest is yours.
+  \caption{\textbf{\slot{what this panel shows, in your own words} (\OPmetric).}
+    Each marker is a per-condition mean; the shaded band is the
+    \OPprimarylabel\ range across repetitions. \slot{one sentence stating
+    what to notice: where the ordering holds and where the band contains a
+    rival's mean}.}
+  \label{fig:distribution}
+\end{figure}

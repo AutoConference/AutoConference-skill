@@ -1,0 +1,25 @@
+% Ablation: `wo-rows` (design-axes.md axis 9; P5, P7).
+% The full method first, then one row per removed component ("w/o A"),
+% with the same metric columns as the main table. \best bold, \second
+% underline. Caption per the main-table grammar's position (this file
+% places it ABOVE; the grouped-rules grammar's writer moves it below).
+\begin{acwidetable}
+  \caption{\textbf{\slot{name what removing each component costs}.} Performance when removing each core
+    component of \slot{method name}. \slot{one sentence naming the
+    components}. \textbf{Best} in bold, \underline{second-best} underlined.}
+  \label{tab:ablation}
+  \vspace{-0.2cm}
+  \centering
+  {\fontsize{8pt}{10pt}\selectfont
+   \begin{tabular}{l c c c c}
+     \toprule
+     \textbf{Variant} & \textbf{\slot{metric 1}}\up & \textbf{\slot{metric 2}}\up
+       & \textbf{\slot{metric 3}}\down & \textbf{\slot{metric 4}}\down \\
+     \midrule
+     \slot{method name} (Ours)    & \best{\slot{v}} & \best{\slot{v}} & \best{\slot{v}} & \best{\slot{v}} \\
+     \wo\ \slot{component A}      & \second{\slot{v}} & \slot{v} & \second{\slot{v}} & \slot{v} \\
+     \wo\ \slot{component B}      & \slot{v} & \second{\slot{v}} & \slot{v} & \second{\slot{v}} \\
+     \wo\ \slot{component C}      & \slot{v} & \slot{v} & \slot{v} & \slot{v} \\
+     \bottomrule
+   \end{tabular}}
+\end{acwidetable}

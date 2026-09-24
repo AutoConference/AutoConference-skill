@@ -1,0 +1,25 @@
+% Numeric content of the page-1 teaser.
+%
+% Every number the teaser renders is defined here and nowhere else, so the
+% teaser cannot drift away from the main results table. Each value must be
+% copied from a traceable aggregate, never from prose, memory, or a narrative
+% Markdown file.
+%
+% Draft state: \slot{...} renders as a grey marker.
+% Final build:  build_paper.sh --final turns any surviving
+%               \slot into a hard LaTeX error.
+%
+% source-data: runs/aggregate__<label>.json
+% generator:   scripts/make_paper_data.py --teaser
+
+% --- study design ---------------------------------------------------------
+\newcommand{\TSsplitseeds}{\slot{n splits}}      % registered split seeds
+\newcommand{\TStrajper}{\slot{n traj}}           % trajectory seeds per split
+\newcommand{\TSruns}{\slot{n runs}}              % total preserved primary runs
+
+% --- headline finding -----------------------------------------------------
+\newcommand{\TSquestion}{\slot{the one-sentence research question}}
+\newcommand{\TSfinding}{\slot{the one supported takeaway}}
+\newcommand{\TSdelta}{\slot{delta}}              % headline contrast
+\newcommand{\TSdeltaunc}{\slot{uncertainty}}     % its uncertainty
+\newcommand{\TSmetric}{\slot{metric name}}       % lower-is-better or higher-is-better

@@ -1,0 +1,27 @@
+% Tier C structural overview. First float of the Method section, placed before
+% the section's first equation. Carries no magnitudes: it states what goes in,
+% what the method does, and what comes out, in three boxes with two callouts.
+% Boxes and callouts use `text width` (a cap): longer labels wrap downward and
+% never grow sideways into each other.
+\begin{acwidefigure}
+  \centering
+  \acfit{%
+  \begin{tikzpicture}[x=1cm,y=1cm]
+    \node[acbox,text width=3.4cm,align=center] (a) at (1.9,1.1)
+      {\textbf{\slot{Input}}\\\slot{what the method consumes}\\\slot{what is held fixed}};
+    \node[acbox,text width=3.4cm,align=center] (b) at (6.7,1.1)
+      {\textbf{\slot{Method}}\\\slot{component one}\\\slot{component two}};
+    \node[acbox,text width=3.6cm,align=center] (c) at (11.7,1.1)
+      {\textbf{\slot{Output}}\\\slot{what is produced}\\\slot{what is reported}};
+    \draw[acarrow] (a) -- (b);
+    \draw[acarrow] (b) -- (c);
+    % anchored at their south edge: a longer callout grows upward, never down into the boxes
+    \node[acsoft,text width=3.6cm,align=center,anchor=south] at (5.0,2.05)
+      {\slot{callout: the one design decision that makes the comparison fair}};
+    \node[acsoft,text width=3.6cm,align=center,anchor=south] at (9.1,2.05)
+      {\slot{callout: what every reported number traces back to}};
+  \end{tikzpicture}}
+  \caption{\textbf{Overview of \methodname.} \slot{what is shown, what is
+    compared, and what to notice, in two sentences}.}
+  \label{fig:overview}
+\end{acwidefigure}

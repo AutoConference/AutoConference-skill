@@ -1,0 +1,65 @@
+% Related Work. Contract: ../references/section-playbook.md
+% 420-650 words, thematic paragraphs, each ending by positioning this work.
+\section{Related Work}
+\label{sec:related-work}
+
+\textbf{Certificates that route around the target model.}
+PAC-Bayesian analysis supplies most of the machinery behind non-vacuous bounds
+for over-parameterised networks, and a long line of work has sharpened
+it: fast-rate forms~\cite{yang2019fastrate, grnwald2021pacbayes}, extensions to
+unbounded losses~\cite{casado2024pacbayeschernoff}, non-i.i.d.\ data~\cite{ralaivola2009chromatic},
+meta-learning~\cite{farid2021generalization, leblanc2024generalization}, and
+data-dependent priors~\cite{dziugaite2018datadependent, pitas2022posteriors}.
+Broader surveys connect these guarantees to information-theoretic
+quantities~\cite{hellstrm2023generalization}, and negative results delimit what
+the framework can deliver at all~\cite{livni2020limitation}. A second family
+certifies the target by certifying a compressed description of
+it~\cite{arora2018stronger, zhou2018nonvacuous, shin2021compressing,
+guha2023generalization, bazinet2024sample}, sometimes using coresets as the
+compression mechanism~\cite{baykal2018datadependent}. Both families share a
+structural feature that matters here: the certificate is assembled from a
+\surrogate\ object, and the quality of that object is a modelling choice rather
+than a consequence of the theory.
+
+\textbf{Disagreement as the bridging term.}
+Disagreement between independently trained models is a surprisingly accurate
+predictor of generalization~\cite{jiang2021assessing}, though the explanation
+for why is contested~\cite{kirsch2022assessing}. The quantity has since been
+used as a training signal in domain generalization~\cite{zhang2022adaptive},
+as a selection criterion for annotation~\cite{benkert2024effective}, and as a
+supervision signal in its own right~\cite{daniels2025diverse}. Used inside a
+certificate, disagreement plays a different role: it is the term that transfers
+a guarantee from the \surrogate\ to the target, and it is measured on unlabeled
+data rather than optimized against a held-out label set. That distinction is
+what makes the selection question sharp, because the same choice that lowers
+the disagreement estimate also changes the \surrogate\ whose guarantee is being
+transferred.
+
+\textbf{Which examples the \surrogate\ is built from.}
+Coreset construction offers a large menu of principled
+answers~\cite{jubran2019introduction, blmer2016coreset, maalouf2021unified,
+jaiswal2023universal, chhaya2020coresets, jourdan2025coreset, chen2024tuningfree},
+and the deep learning literature adds selection criteria driven by proxy
+models~\cite{coleman2019selection}, performance constraints~\cite{xia2023refined},
+optimal transport~\cite{feng2024tarot}, pruning~\cite{kousar2025pruningbased},
+and information-theoretic arguments~\cite{foggo2019analyzing}; recent surveys
+cover the space at scale~\cite{albalak2024survey}. These strategies are
+routinely compared by the downstream metric they produce. The comparisons are
+usually reported at a single data split and a single training run, which leaves
+the method effect entangled with the randomness of the run that produced it.
+
+\textbf{How much of a reported difference is the seed.}
+Seed-to-seed variation is large enough to change conclusions in fine-tuning
+regimes~\cite{bui2025assessing}, in certified robustness~\cite{le2026extreme},
+and in training-variance studies more
+generally~\cite{steier2026margin, sun2026varianceaware}; variance-aware training
+procedures exist partly because of it~\cite{zantedeschi2021stochastic,
+viallard2024leveraging, warrell2022higherorder}. What is missing is the same
+measurement for a disagreement-based certificate, where two distinct sources of
+randomness act on the reported number through different paths.
+
+\textbf{Scope of this paper.}
+Prior work reports method-level outcomes for selection strategies, and separately
+establishes that seed variance is large. This paper measures the two together on
+one certificate, under one frozen evaluation, and reports the full matrix rather
+than its most favorable cell.

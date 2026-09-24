@@ -1,0 +1,13 @@
+{
+  "paper_dir": "paper",
+
+  "venue": {
+    "name": "set by design_paper.py from the drawn layout",
+    "style": "set by design_paper.py from the drawn layout",
+    "max_main_pages": 9
+  },
+
+  "metric_direction": "up",
+
+  "figures": {}
+}

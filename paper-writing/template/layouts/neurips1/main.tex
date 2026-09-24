@@ -1,0 +1,60 @@
+% Executable paper template, layout `neurips1` (design-axes.md axis 1).
+% Structure lives here; prose lives in sections/. Contract:
+% ../references/paper-writing-template.md and ../references/design-axes.md
+\documentclass{article}
+\PassOptionsToPackage{table,dvipsnames}{xcolor}
+\PassOptionsToPackage{numbers,compress}{natbib}
+\usepackage[final]{neurips_2025}
+\input{preamble}
+\input{macros}
+\IfFileExists{data/teaser.tex}{\input{data/teaser}}{}
+\IfFileExists{data/opening.tex}{\input{data/opening}}{}
+\input{blocks/contributions}
+\input{blocks/limitations}
+\input{blocks/devices}
+
+\title{%
+  \TitleBlock{%
+    \textbf{\slot{First title line}}\\
+    \scalebox{0.98}{\textbf{\slot{Second title line}}}
+  }
+}
+
+\author{%
+  \AuthorBlock{%
+    \textbf{\slot{Author One}\textsuperscript{1},
+            \slot{Author Two}\textsuperscript{1},
+            \slot{Author Three}\textsuperscript{2}}\\
+    \textsuperscript{1}\slot{Institution} \qquad
+    \textsuperscript{2}\slot{Institution}\\
+    \texttt{\slot{contact@institution}}\\
+    \textcolor{ACLink}{\texttt{\slot{project URL, or delete this line}}}
+  }
+}
+
+\begin{document}
+\maketitle
+
+% The opening figure block is one of: none / results / results-wide /
+% composite. In this layout every kind sits here, full width, before the
+% abstract (P2, P3 position). `none` inputs nothing.
+\vspace{-4mm}
+\input{figures/opening}
+
+\begin{abstract}
+\input{sections/00_abstract}
+\end{abstract}
+
+\input{sections/01_introduction}
+\input{sections/02_related_work}
+\input{sections/03_method}
+\input{sections/04_experiments}
+\IfFileExists{sections/04b_ablation.tex}{\input{sections/04b_ablation}}{}
+\input{sections/05_conclusion}
+\AfterConclusionBlocks
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\ifDesignAppendix\clearpage\input{sections/06_appendix}\fi
+\end{document}

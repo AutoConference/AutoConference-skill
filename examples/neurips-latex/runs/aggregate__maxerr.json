@@ -1,0 +1,81 @@
+{
+ "label": "maxerr-matrix",
+ "method": "maxerr",
+ "metric": "p2l_bound",
+ "estimator": "mean over trajectory seeds, per split seed",
+ "primary_inputs": [
+  "runs/maxerr-split1-traj0__demo000.json",
+  "runs/maxerr-split1-traj1__demo000.json",
+  "runs/maxerr-split1-traj2__demo000.json",
+  "runs/maxerr-split2-traj0__demo000.json",
+  "runs/maxerr-split2-traj1__demo000.json",
+  "runs/maxerr-split2-traj2__demo000.json",
+  "runs/maxerr-split3-traj0__demo000.json",
+  "runs/maxerr-split3-traj1__demo000.json",
+  "runs/maxerr-split3-traj2__demo000.json",
+  "runs/maxerr-split4-traj0__demo000.json",
+  "runs/maxerr-split4-traj1__demo000.json",
+  "runs/maxerr-split4-traj2__demo000.json",
+  "runs/maxerr-split42-traj0__demo000.json",
+  "runs/maxerr-split42-traj1__demo000.json",
+  "runs/maxerr-split42-traj2__demo000.json"
+ ],
+ "per_split": {
+  "1": {
+   "mean": 0.401,
+   "std": 0.0191,
+   "n": 3,
+   "values": [
+    0.381,
+    0.403,
+    0.419
+   ]
+  },
+  "2": {
+   "mean": 0.395,
+   "std": 0.0155,
+   "n": 3,
+   "values": [
+    0.379,
+    0.396,
+    0.41
+   ]
+  },
+  "3": {
+   "mean": 0.412,
+   "std": 0.0226,
+   "n": 3,
+   "values": [
+    0.388,
+    0.415,
+    0.433
+   ]
+  },
+  "4": {
+   "mean": 0.388,
+   "std": 0.013,
+   "n": 3,
+   "values": [
+    0.375,
+    0.388,
+    0.401
+   ]
+  },
+  "42": {
+   "mean": 0.394,
+   "std": 0.0203,
+   "n": 3,
+   "values": [
+    0.372,
+    0.398,
+    0.412
+   ]
+  }
+ },
+ "overall": {
+  "mean": 0.398,
+  "std": 0.0091,
+  "range": 0.024,
+  "n_splits": 5
+ }
+}

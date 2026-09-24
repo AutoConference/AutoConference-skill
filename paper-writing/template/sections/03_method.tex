@@ -1,0 +1,45 @@
+% Method. Contract: ../references/section-playbook.md and equation-grammar.md
+% The overview figure is the first thing in the section. Then the drawn
+% method opening (blocks/method_open.tex: roadmap / formal / components /
+% preliminaries). Then three or four subsections carrying the mechanism.
+% The equation register the design drew sets how many numbered displays
+% belong here (DESIGN-BRIEF.md); every display follows the narration
+% sandwich: motivation sentence -> display -> `where` sentence -> role.
+% If the design drew `sectioned` equations, \input{blocks/algorithm} in a
+% short "Algorithm" subsection. If it drew the `principle` device, use
+% \principle{1}{...} at most twice.
+\section{Method}
+\label{sec:method}
+\input{figures/method_overview}
+
+\input{blocks/method_open}
+
+\subsection{\slot{Formulation or first component}}
+\label{sec:method-one}
+
+% Formulation opens inline, not with a display, so the section starts with
+% reading rather than with a wall of symbols.
+\slot{define the task, the notation, and the objects the paper reasons
+about; introduce the central tuple or objective inline}
+
+\slot{motivation sentence for the first display, if the register allows one}
+% \begin{equation}\label{eq:one}
+%   ...
+% \end{equation}
+% where ... . \Cref{eq:one} is what ...
+
+\subsection{\slot{The core mechanism}}
+\label{sec:method-two}
+
+\textbf{\slot{Sub-topic one}.}
+\slot{name the problem with the existing approach, then what this paper
+changes and why; narrate any display}
+
+\textbf{\slot{Sub-topic two}.}
+\slot{same shape}
+
+\subsection{\slot{The remaining component, or training and inference}}
+\label{sec:method-three}
+
+\textbf{\slot{Sub-topic}.}
+\slot{what is fixed, what is learned, what the procedure is at inference}

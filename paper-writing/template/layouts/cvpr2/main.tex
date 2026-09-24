@@ -1,0 +1,60 @@
+% Executable paper template, layout `cvpr2`, column-width opening variant.
+% CVPR two columns. The opening figure block (`none` or `results`) is a
+% normal column-width float that the class places at the top of a column
+% (P1's Figure 1). For `results-wide` design_paper.py installs main-wide.tex
+% instead, which uses the \twocolumn[...] slot above the abstract.
+\documentclass[10pt,twocolumn,letterpaper]{article}
+\PassOptionsToPackage{table,dvipsnames}{xcolor}
+\PassOptionsToPackage{numbers,compress,sort}{natbib}
+\usepackage[pagenumbers]{cvpr}
+\input{preamble}
+\input{macros}
+\IfFileExists{data/teaser.tex}{\input{data/teaser}}{}
+\IfFileExists{data/opening.tex}{\input{data/opening}}{}
+\input{blocks/contributions}
+\input{blocks/limitations}
+\input{blocks/devices}
+
+\def\paperID{0000}
+\def\confName{CVPR}
+\def\confYear{2026}
+
+% cvpr.sty's \maketitle never flushes \thanks: a footnote placed there
+% compiles clean and silently disappears. Any author note belongs in the
+% author block below instead.
+\title{\slot{Title: one or two lines}}
+
+\author{%
+  \slot{Author One}\textsuperscript{1}\quad
+  \slot{Author Two}\textsuperscript{1}\quad
+  \slot{Author Three}\textsuperscript{2}\\
+  \textsuperscript{1}\slot{Institution}\quad
+  \textsuperscript{2}\slot{Institution}\\
+  {\tt\small \slot{contact@institution}}
+}
+
+\begin{document}
+\maketitle
+
+% column-width opening (P1): floats to the top of the right column
+\input{figures/opening}
+
+\begin{abstract}
+\input{sections/00_abstract}
+\end{abstract}
+
+\input{sections/01_introduction}
+\input{sections/02_related_work}
+\input{sections/03_method}
+\input{sections/04_experiments}
+\IfFileExists{sections/04b_ablation.tex}{\input{sections/04b_ablation}}{}
+\input{sections/05_conclusion}
+\AfterConclusionBlocks
+
+{\small
+\bibliographystyle{ieeenat_fullname}
+\bibliography{references}
+}
+
+\ifDesignAppendix\clearpage\input{sections/06_appendix}\fi
+\end{document}

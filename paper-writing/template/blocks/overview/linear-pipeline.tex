@@ -1,0 +1,177 @@
+% Overview: `linear-pipeline` (design-axes.md axis 15; the generic form, and
+% what P1's training-loop figure reduces to without its artwork).
+% Four stages left to right, each led by its role's icon; a tint over the
+% stages this paper contributed and a grey one over what every compared arm
+% already had; frozen / trained as icon badges rather than words; a legend that
+% keys both. Carries no magnitudes.
+%
+% Icons come from the five role macros (\acIconInput and friends, preamble.tex).
+% A design draws them; if the drawn glyph is wrong for this paper's domain,
+% renew it once in macros.tex from references/figure-icons.md rather than
+% hard-coding a name here.
+%
+% ------------------------------------------------------------ density pass
+% The four-stage row above is the whole figure only when the mechanism has
+% nothing repeated for a reader to see happen. Most methods do: a layer, a
+% timestep, a sample, an iteration, a candidate -- some countable sub-unit
+% the mechanism treats differently from a baseline. When your paper has one,
+% open it up below the row as a WORKED INSTANCE, the way this grammar's own
+% proof does (paper-batch-v2/S10-fewshot-segmentation, PromptSeg: which of
+% the encoder's 12 blocks receive a prompt). That pass took this grammar
+% from 18 drawn objects to 51 on a page-width float, and the structure that
+% kept it legible rather than noisy was:
+%
+%   - ONE ruler of positions/items, reused by every row below it. Never
+%     redraw the ruler per row -- that is what makes two rows a comparison
+%     instead of two unrelated diagrams.
+%   - a cell's STATUS is its own fill and glyph (`acitem*` below), never a
+%     neutral cell plus a badge beside it.
+%   - if your paper's rule is a decision (a threshold, a criterion, a
+%     learned gate) rather than a fixed placement, add the small
+%     feature-to-decision cluster at the bottom: `acfeat` nodes for 2-5
+%     things the decision reads, feeding one small node (a spare `accard`
+%     works) naming the rule. Delete it if the mechanism makes no per-item
+%     decision.
+%   - a bracket under a row's active span carries a SYMBOL, never a count
+%     read off a result (references/figure-ladder.md, Tier C): an
+%     architecture constant such as a fixed $N$ is fine to write in full,
+%     the way \Cref{eq:inject}'s own $l=1,\dots,N$ is, because it is not a
+%     measured effect.
+%
+% If your paper has no such repeated sub-unit -- a one-shot transform with
+% nothing to index -- leave the worked instance out rather than inventing
+% one; the four-stage row alone is a complete, honest figure, just a
+% shorter one.
+%
+% \acitem / acitemkeep / acitemdrop / acitemgate / acitemna, \acruler,
+% \acrowlabel and \acfeat are declared once in preamble.tex's shared
+% tikzset block (not here), so any linear-pipeline figure reuses them
+% without redeclaring anything. Anchor every new row to the ALREADY-PLACED
+% ruler node above it (`below=... of l1`, never a hand-computed coordinate
+% guessed before the row above it was drawn) -- a coordinate that exists but
+% whose true extent does not yet is exactly the bug that made an earlier
+% draft's callout print underneath its own section header.
+%
+% source-data: none (Tier C structural diagram; see references/figure-ladder.md)
+\begin{acwidefigure}
+  \centering
+  \acfit{%
+  \begin{tikzpicture}[x=1cm,y=1cm]
+    \node[accard,text width=2.5cm] (a) at (0,0)
+      {\acicon{\acIconInput}\\[1pt]\textbf{\slot{Input}}\\\slot{what enters}};
+    \node[actrap,right=0.75 of a,text width=2.2cm] (b)
+      {\acicon{\acIconModel}\\[1pt]\textbf{\slot{Shared stage}}\\\slot{common to every arm}};
+    \node[accard,right=1.05 of b,text width=2.5cm] (c)
+      {\acicon{\acIconMech}\\[1pt]\textbf{\slot{The mechanism}}\\\slot{what this paper adds}};
+    \node[accard,right=0.75 of c,text width=2.5cm] (d)
+      {\acicon{\acIconOut}\\[1pt]\textbf{\slot{Output}}\\\slot{what is reported}};
+    % the representation between the shared stage and the mechanism, drawn
+    % rather than named: six tokens, no magnitude implied.
+    \node[inner sep=0pt] (rep) at ($(b.east)!0.5!(c.west)$) {\actokens{6}};
+    \node[actag,text=ACIcon,above=1pt of rep] {\slot{$h$}};
+    \draw[acarrow] (a) -- (b);
+    \draw[acarrow] (b) -- (rep);
+    \draw[acarrow] (rep) -- (c);
+    \draw[acarrow] (c) -- (d);
+    % State badges go BELOW the cards. Above, they collided with the region
+    % tag, which sits on the tinted box's top edge: two small uppercase
+    % labels at the same height read as one broken line.
+    \node[actag,below=3pt of b] (bf) {\acsnow\ \slot{FROZEN}};
+    \node[actag,below=3pt of c,text=ACBlue] (ct) {\acflame\ \slot{TRAINED}};
+    \begin{scope}[on background layer]
+      \node[acbase,fit=(a)(b)(bf),inner sep=8pt] (base) {};
+      \node[acours,fit=(c)(d)(ct),inner sep=8pt] (ours) {};
+    \end{scope}
+    \node[actag,anchor=south west] at ([xshift=3pt,yshift=2pt]base.north west)
+      {\slot{COMMON TO EVERY ARM}};
+    \node[actag,anchor=south west,text=ACBlue] at ([xshift=3pt,yshift=2pt]ours.north west)
+      {\slot{CONTRIBUTED BY THIS PAPER}};
+    \node[aclegend,anchor=north west] (toplegend) at ($(base.south west)+(0,-0.35)$)
+      {\acsnow~\slot{what is not updated} \quad \acflame~\slot{what is}\\[2pt]
+       \textcolor{ACBlue!80}{\rule[0.12em]{5mm}{0.8pt}}~\slot{what flows along the solid arrows}};
+    \node[acsoft,text width=4.6cm,align=center,anchor=north west]
+      (callout) at ($(ours.south west)+(0.2,-0.35)$)
+      {\slot{callout: the one design decision that makes the comparison fair}};
+
+    % ================================================================
+    % WORKED INSTANCE (delete this whole block if the mechanism has no
+    % repeated sub-unit to index -- see the note above). \slot{N} is
+    % whatever your method counts: layers, steps, samples, candidates.
+    % The ruler below shows a representative window with an ellipsis; if
+    % your $N$ is small enough to show in full (5 or fewer), delete the
+    % ellipsis node and draw every position instead.
+    % ================================================================
+    \coordinate (bottommid) at ($(toplegend.south)!0.5!(callout.south)$);
+    \node[actag,text width=8.6cm,align=center,anchor=north,
+          below=0.5 of bottommid] (zoomhdr)
+      {\slot{WHAT HAPPENS AT EACH OF THE $N$ \dots (SAMPLES / STEPS / LAYERS)} ---
+       \slot{SAME INPUT, TWO RULES BELOW}};
+
+    \node[acruler,below=0.7 of zoomhdr,xshift=-3.4cm] (i1) {\slot{$1$}};
+    \node[acruler,right=0.55 of i1]                   (i2) {\slot{$2$}};
+    \node[acruler,right=0.55 of i2]                   (idots) {$\cdots$};
+    \node[acruler,right=0.55 of idots]                (in1) {\slot{$N{-}1$}};
+    \node[acruler,right=0.55 of in1]                  (in)  {\slot{$N$}};
+
+    % Row A: \slot{the baseline or restricted condition}. Swap acitemgate /
+    % acitemna for acitemkeep / acitemdrop if the row's status is a
+    % correctness judgment (kept/dropped) rather than a presence/absence
+    % one -- whichever pair matches what your mechanism actually decides.
+    \node[acitemgate,below=0.5 of i1]     (rA1) {\slot{status glyph or blank}};
+    \node[acitemgate,below=0.5 of i2]     (rA2) {\slot{status glyph or blank}};
+    \node[acitemna,  below=0.5 of idots]  (rAdots) {\slot{status glyph or blank}};
+    \node[acitemna,  below=0.5 of in1]    (rAn1) {\slot{status glyph or blank}};
+    \node[acitemna,  below=0.5 of in]     (rAn) {\slot{status glyph or blank}};
+    \node[acrowlabel,left=0.35 of rA1] (rowA) {\slot{baseline rule}};
+    \draw[ACBlue!65,line width=0.7pt]
+      (rA1.south west)+(0,-0.08) -- ++(0,-0.08)
+      -- ($(rA2.south east)+(0,-0.16)$) -- ++(0,0.08);
+    \node[actag,text=ACBlue,anchor=north] at ($(rA1.south east)!0.5!(rA2.south west)+(0,-0.34)$)
+      {\small\slot{span, symbol only}};
+
+    % Row B: \slot{this paper's own rule}. Every cell is `below=1.0 of` its
+    % row-A counterpart -- a full centimetre of real clearance under row A's
+    % own bracket and label, not a hand-picked offset.
+    \node[acitemgate,below=1.0 of rA1]    (rB1) {\slot{status glyph or blank}};
+    \node[acitemgate,below=1.0 of rA2]    (rB2) {\slot{status glyph or blank}};
+    \node[acitemgate,below=1.0 of rAdots] (rBdots) {\slot{status glyph or blank}};
+    \node[acitemgate,below=1.0 of rAn1]   (rBn1) {\slot{status glyph or blank}};
+    \node[acitemgate,below=1.0 of rAn]    (rBn) {\slot{status glyph or blank}};
+    \node[acrowlabel,left=0.35 of rB1] (rowB) {\slot{this paper's rule}};
+    \draw[ACBlue!65,line width=0.7pt]
+      (rB1.south west)+(0,-0.08) -- ++(0,-0.08)
+      -- ($(rBn.south east)+(0,-0.16)$) -- ++(0,0.08);
+    \node[actag,text=ACBlue,anchor=north] at ($(rB1.south east)!0.5!(rBn.south west)+(0,-0.34)$)
+      {\small\slot{span, symbol only}};
+
+    % ----------------------------------------------------------------
+    % OPTIONAL: what the mechanism reads to make its per-item call. Delete
+    % this cluster (and its two connecting draws below) if the rule above
+    % is a fixed placement rather than a learned or thresholded decision.
+    % ----------------------------------------------------------------
+    \node[acfeat,below=1.05 of rB1,xshift=1.3cm] (f1) {\slot{feature 1}};
+    \node[acfeat,right=0.5 of f1]                (f2) {\slot{feature 2}};
+    \node[actag,above=3pt of f1,anchor=south west,text=ACIcon,text width=3.4cm]
+      {\slot{what these features are, cite the equation}};
+    \draw[acstat] (rB1.south) .. controls +(0,-0.7) and +(-0.3,0.5) .. (f1.north);
+    \node[accard,text width=3.1cm,font=\tiny,below=0.7 of f1,xshift=0.6cm] (decide)
+      {\aciconat{ACIcon}{\acIconMech}\ \slot{the rule this paper's mechanism applies to f1, f2, ...}};
+    \draw[acstat] (f1.south) -- (decide.north west);
+    \draw[acstat] (f2.south) -- (decide.north east);
+
+    % ----------------------------------------------------------------
+    % Legend: keys every encoding introduced below the top row. The
+    % frozen/trained line is already keyed in `toplegend` above; do not
+    % repeat it here unless this legend has drifted out of that one's reach.
+    % ----------------------------------------------------------------
+    \node[aclegend,below=0.55 of decide,text width=10.4cm,anchor=north]
+      {\slot{status glyph}~\slot{what it means at a position} \quad
+       \slot{status glyph}~\slot{what the other state means}\\[3pt]
+       \textcolor{ACBlue!70}{\rule[0.15em]{2.5mm}{0.8pt}\,\rule[0.15em]{2.5mm}{0.8pt}}~\slot{what the span bracket marks, under each rule}};
+  \end{tikzpicture}}
+  \caption{\textbf{\slot{name the pipeline}.} \slot{Top}: \slot{what is shown, what is
+    compared, and what to notice, in two or three sentences}. \slot{Bottom}:
+    \slot{one or two sentences on what the worked instance shows at each
+    position, and what to notice comparing the two rows}.}
+  \label{fig:overview}
+\end{acwidefigure}

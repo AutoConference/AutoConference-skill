@@ -1,0 +1,41 @@
+% Paired ablation tables. Contract: references/table-grammar.md, pattern 3.
+\begin{table}[t!]
+  \centering
+  \begin{minipage}{0.48\textwidth}
+    \centering
+    \captionsetup{justification=centering,singlelinecheck=false}
+    \caption{\textbf{Effect of trajectory count (\down).}}
+    \vspace{-0.1cm}
+    \label{tab:trajectory-count}
+    {\fontsize{8pt}{11pt}\selectfont
+     \begin{NiceTabular}{l ccc}[colortbl-like]
+       \toprule[1.2pt]
+       \textbf{Statistic} & \textbf{1} & \textbf{2} & \textbf{3} \\
+       \midrule[1.2pt]
+       Mean \certbound       & 0.362 & 0.376 & 0.387 \\
+       Between-split std.    & 0.013 & 0.013 & 0.013 \\
+       Mean paired contrast  & 0.014 & 0.012 & 0.011 \\
+       \bottomrule[1.2pt]
+     \end{NiceTabular}%
+    }
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.44\textwidth}
+    \centering
+    \captionsetup{justification=centering,singlelinecheck=false}
+    \caption{\textbf{Effect of experiment scale (\down).}}
+    \vspace{-0.1cm}
+    \label{tab:scale}
+    {\fontsize{8pt}{11pt}\selectfont
+     \begin{NiceTabular}{l ccc}[colortbl-like]
+       \toprule[1.2pt]
+       \textbf{Setting} & \textbf{Epochs} & \textbf{Comp.} & \textbf{Bound} \\
+       \midrule[1.2pt]
+       Reduced      &  12 &   120 & 0.387 \\
+       Intermediate &  12 &   240 & 0.381 \\
+       Original     & 200 & 20000 & --    \\
+       \bottomrule[1.2pt]
+     \end{NiceTabular}%
+    }
+  \end{minipage}
+\end{table}

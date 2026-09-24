@@ -1,0 +1,32 @@
+% Conclusion. 180-320 words. Only gate-passed claims. No new numbers.
+\section{Conclusion}
+\label{sec:conclusion}
+
+A comparison between selection strategies for a disagreement-based certificate
+is identifiable only when the \splitseed\ and the \trajseed\ are varied
+independently under frozen \evalsem. We registered that matrix before running
+it, preserved every run with a manifest identifying its method and seeds, and
+reported the full set of per-split contrasts rather than the most favorable one.
+
+On MNIST at a reduced probe scale, \methodrandom\ and \methodmax\ are
+indistinguishable. The mean paired contrast favours \methodrandom, but it is
+smaller than the largest within-split trajectory spread in the matrix, and it
+changes sign at one of the five splits. What the matrix does establish is the
+size of the nuisance: the trajectory alone moves the certificate by more than
+the selection criterion does, and the between-split range grows with how
+aggressively a method selects. A study that reports one trajectory per
+configuration is measuring that nuisance and attributing it to the method.
+
+The scope is narrow by construction. One dataset, one certificate family, two
+selection criteria, and a reduced experimental scale. The comparison at the
+upstream scale of 200 epochs and 20{,}000 compression size was not run, and the
+scale ablation shows an effect there of the same order as the between-method
+contrast, so that comparison is the one most likely to change the answer.
+Disagreement-aware and hybrid selection criteria are untested here and need the
+same paired design rather than a single additional run. Whether the trajectory
+spread narrows at full scale, or is an intrinsic property of the certificate, is
+the question this design is now sized to answer.
+
+\section*{Acknowledgments}
+This document is a demonstration instance produced by the AutoConference
+paper-writing skill. Its numbers are synthetic and describe no real experiment.

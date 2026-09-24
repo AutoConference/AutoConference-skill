@@ -1,0 +1,23 @@
+% Opening figure: `results-wide` (design-axes.md axis 2; P2/P4/P7's position).
+%
+% The results panel placed full width above the abstract. In `cvpr2` this
+% block is input inside the \twocolumn[...] slot of main-wide.tex, so it must
+% not open a floating environment; \captionof gives it a number and caption.
+% In a single-column layout it is the same non-floating block after the title.
+%
+% source-data: runs/aggregate__*.json -> paper/data/opening.dat, opening-series.tex
+% generator:   scripts/make_paper_data.py --opening
+\IfFileExists{data/opening.dat}{%
+  \begin{minipage}{\acopeningwidth}
+    \centering
+    \input{blocks/opening_panel}
+    % Write this lead yourself; see the note in opening/results.tex.
+    \captionof{figure}{\textbf{\slot{the one thing page 1 should establish, in
+      your own words}.} Bars are per-condition means of
+      \OPmetric; the annotation above each \OPprimarylabel\ bar is its margin
+      over the strongest other arm in that condition\ifOPradar; the radar
+      shows the same per-condition means on a shared scale\fi. Every value is
+      an aggregate over the preserved runs listed in the run manifests.}
+    \label{fig:opening}
+  \end{minipage}
+}{}

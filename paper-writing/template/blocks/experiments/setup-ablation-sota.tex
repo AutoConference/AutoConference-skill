@@ -1,0 +1,45 @@
+% Experiments: `setup-ablation-sota` (design-axes.md axis 7; P2).
+% Setup -> Ablation study (argued figure-first, one table last) ->
+% Comparison with state of the art (table + optional user study).
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Experimental Setting}
+\label{sec:setup}
+
+\textbf{Implementation details.}
+\slot{base configuration, scale, seeds, hardware}
+
+\textbf{Benchmark.}
+\slot{the evaluation set and how it was constructed or selected}
+
+\textbf{Metrics.}
+\slot{each metric, its direction, and what it measures}
+
+\subsection{Ablation Study}
+\label{sec:ablations}
+
+\textbf{Investigation on \slot{component one}.}
+\IfFileExists{data/opening.dat}{\input{figures/results_panel}}{}
+\slot{read the figure or the first rows of the ablation table: what removing
+or replacing this component does}
+
+\textbf{Investigation on \slot{component two}.}
+\slot{same shape}
+
+\textbf{Quantitative comparisons.}
+\input{tables/ablations}
+\Cref{tab:ablation} \slot{reads the cumulative table: each added component's
+contribution, and that all numerical results concur with the analysis above}
+
+\subsection{Comparison with State-of-the-art}
+\label{sec:sota}
+
+\textbf{Quantitative comparison.}
+\input{tables/main_results}
+As shown in \cref{tab:main-results}, \slot{read the main table: the primary
+arm against every other arm, where it wins, where it does not}.
+
+\textbf{\slot{Secondary comparison}.}
+\input{tables/secondary_results}
+\slot{read the second table}

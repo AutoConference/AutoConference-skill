@@ -1,0 +1,54 @@
+% Main table: `plain-bold` (design-axes.md axis 8; P2, P5).
+% Plain booktabs, no tints, no vertical rules. \best marks the winning cell
+% in each metric column; the direction is stated once per column header.
+% A Group/Dataset multirow may group rows. Caption ABOVE.
+%
+% Reporting uncertainty (references/table-grammar.md, "Reporting
+% uncertainty" -- read that section before filling this in): every metric
+% cell, for every arm, carries `mean [lo, hi]`, lo/hi = min/max of that arm's
+% own per_split[condition]['values'] -- bracket, never `mean $\pm$ std`,
+% because the range is observed and generally asymmetric, not a symmetric
+% half-width. Both real draws of this grammar (S16, P247) fit the full
+% per-cell treatment at 8pt with \acfit added defensively (the unbracketed
+% version did not always need it; the bracketed one can cross \linewidth
+% even for a "plain" 4-5-column table). If this grammar is drawn with an
+% Overall/Mean column (P247's shape does; the block below does not), that
+% column stays a point estimate: its own `std`, if the aggregate reports
+% one, is spread ACROSS conditions, not repeated-run noise.
+\begin{acwidetable}
+  \caption{\textbf{\slot{Main comparison, named}.} \slot{one sentence on the
+    protocol, the estimator, and the precision reported}; bracketed values
+    are $[\min,\max]$ over the repeated runs behind each mean.}
+  \label{tab:main-results}
+  \vspace{-0.2cm}
+  \centering
+  {\fontsize{8pt}{10pt}\selectfont
+   % \acfit, not \resizebox: shrink to the float width when the table is too
+   % wide, and leave it alone when it is not (references/table-grammar.md).
+   % A plain-looking table without it was the one that most often surprised a
+   % writer by crossing \linewidth once every cell grew an interval.
+   \acfit{%
+   \begin{tabular}{l l c c c c}
+     \toprule
+     \textbf{Group} & \textbf{Arm}
+       & \textbf{\slot{metric 1}\down} & \textbf{\slot{metric 2}\down}
+       & \textbf{\slot{metric 3}\up} & \textbf{\slot{metric 4}\up} \\
+     \midrule
+     \multirow{3}{*}{\textbf{\slot{Group A}}}
+       & \slot{baseline one} & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi}
+                             & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi} \\
+       & \slot{baseline two} & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi}
+                             & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi} \\
+       & \slot{primary arm}  & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}}
+                             & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}} \\
+     \midrule
+     \multirow{3}{*}{\textbf{\slot{Group B}}}
+       & \slot{baseline one} & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi}
+                             & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi} \\
+       & \slot{baseline two} & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi}
+                             & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi} \\
+       & \slot{primary arm}  & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}}
+                             & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}} \\
+     \bottomrule
+   \end{tabular}}}
+\end{acwidetable}

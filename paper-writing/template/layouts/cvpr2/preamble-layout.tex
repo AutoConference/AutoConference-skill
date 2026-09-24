@@ -1,0 +1,14 @@
+% Layout `cvpr2`: CVPR two columns, official cvpr.sty unmodified.
+%
+% Full-width floats span both columns via figure* / table*. Blocks use the
+% \acwidefigure / \acwidetable environments so the same block compiles in a
+% single-column layout, where they are plain figure / table.
+\newenvironment{acwidefigure}[1][t]{\begin{figure*}[#1]}{\end{figure*}}
+\newenvironment{acwidetable}[1][t!]{\begin{table*}[#1]}{\end{table*}}
+\newcommand{\acfloatwidth}{0.99\textwidth}
+\newcommand{\acopeningwidth}{0.95\textwidth}
+% Two-column type: tables and plots read at 8pt; captions stay small.
+\captionsetup{font=small}
+% cvpr.sty sets the abstract in italics itself. Column-width plots default to
+% the column, not the page.
+\pgfplotsset{acplot/.append style={width=0.95\linewidth,height=4.6cm}}

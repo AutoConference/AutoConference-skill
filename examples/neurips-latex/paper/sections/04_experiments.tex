@@ -1,0 +1,114 @@
+% Experiments. Contract: ../references/section-playbook.md
+% 600-1000 words in four subsections: setup, main results, distribution, ablations.
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Experimental setup}
+\label{sec:setup}
+
+\textbf{Data and evaluation.}
+All runs use MNIST with the upstream four-way partition into training,
+validation, disagreement, and test sets. The \evalsem\ are frozen as described in
+\cref{sec:setting}: $\delta = 0.05$, a 1000-point bound-inversion grid, and
+10{,}000 Monte Carlo samples for the disagreement estimate. These values are
+identical for every run below and were fixed before the comparison matrix was
+registered.
+
+\textbf{Scale.}
+Runs use a reduced probe scale of 12 epochs and a maximum compression size of
+120, against the upstream configuration's 200 epochs and 20{,}000. Scale is a
+free parameter of this study, but it is applied identically on both sides of
+every comparison, so a change in scale cannot produce a difference between
+methods. \Cref{tab:scale} reports what changes when the compression budget is
+doubled.
+
+\textbf{Compared configurations.}
+\tightcolorbox{ACCompare}{\textbf{\methodcontrol.}} The unmodified pipeline,
+re-run and recorded in this environment.
+\tightcolorbox{ACPrimary}{\textbf{Selection methods.}} \methodmax\ and
+\methodrandom, differing only in which examples the \surrogate\ is built from,
+as described in \cref{sec:methods}.
+
+\textbf{Seeds and repetition.}
+5 \splitseed{}s $\{1,2,3,4,42\}$, 3 trajectory seeds per split and method, giving
+45 preserved primary runs. Statistics follow \cref{eq:persplit} and
+\cref{eq:contrast}; the reporting threshold of \cref{eq:decision} was fixed at
+$\kappa = 1.0$ before execution.
+
+\textbf{Environment and failure handling.}
+All runs executed on a single GPU under one dependency lock, recorded in each run
+manifest and reproduced in \cref{sec:appendix-config}. No run in the reported
+matrix crashed. Crashed runs, had there been any, would be preserved with their
+manifests and counted rather than silently retried or dropped from the
+denominator.
+
+\subsection{Main results}
+\label{sec:main-results}
+
+\input{tables/main_results}
+
+\textbf{Does the selection method change the \certbound?}
+\Cref{tab:main-results} gives the aggregate view. Both selection methods improve
+on the \methodcontrol: \methodmax\ by $0.011$ and \methodrandom\ by $0.022$ in
+paired within-split contrast. Between the two selection methods the paired
+contrast is $0.011 \pm 0.005$ in favour of \methodrandom. The largest within-split
+trajectory spread anywhere in the matrix is $0.032$, so by \cref{eq:decision} the
+between-method contrast does not clear the noise it is measured against. The
+supported statement is that the two methods are indistinguishable at this scale,
+with a direction that favours \methodrandom\ but is not established.
+
+\textbf{Is the ordering stable across splits?}
+\input{tables/secondary_results}
+\Cref{tab:paired} reports the same comparison split by split. The contrast
+favours \methodrandom\ at four of the five splits and reverses at \splitseed~42,
+where \methodmax\ is lower by $0.007$. Under the design rule of
+\cref{sec:factors}, a ranking requires consistency across splits, so no ranking
+is reported. A mean contrast computed over splits whose individual contrasts
+disagree in sign describes the sample, not the method.
+
+Notice also that the between-split range grows monotonically with how aggressively
+the method selects: $0.019$ for the \methodcontrol, $0.024$ for \methodmax, and
+$0.030$ for \methodrandom. Whatever a selection criterion does to the mean, it
+also changes how much the certificate moves when the split changes, and the
+latter effect is the larger one here.
+
+\subsection{Trajectory variation}
+\label{sec:trajectory}
+
+\IfFileExists{data/bounds.dat}{%
+  \input{figures/results_panel}%
+  \Cref{fig:distribution} shows the per-split means for all three
+  configurations, with the trajectory range of \methodrandom\ as a shaded band.
+  The band is wide enough at every split to contain the corresponding
+  \methodmax\ mean, which is the same conclusion \cref{eq:decision} reaches
+  arithmetically.%
+}{}
+
+Within-split trajectory standard deviations range from $0.011$ to $0.032$ across
+the matrix, and are systematically larger for \methodrandom\ than for the
+\methodcontrol. Against that, the between-method contrast of $0.011$ is small. A
+comparison at this scale that used a single trajectory per configuration would
+have had roughly a one-in-three chance of reporting the opposite ordering, which
+is the practical reason the matrix is specified with repetition rather than
+breadth. Where an individual trajectory is discussed, it is discussed as an
+example: a single optimization path is an observation about that run, not an
+ablation result and not evidence about a policy.
+
+\subsection{Ablations}
+\label{sec:ablations}
+
+\input{tables/ablations}
+
+\Cref{tab:trajectory-count} varies the number of trajectory seeds aggregated per
+split. The estimated mean drifts upward as trajectories are added, from $0.362$
+at one trajectory to $0.387$ at three, while the between-split standard deviation
+is unchanged at $0.013$ and the mean paired contrast shrinks from $0.014$ to
+$0.011$. A one-trajectory estimate is therefore both optimistic about the bound
+and generous about the contrast, in the direction that would most easily produce
+a positive-sounding result. Three trajectories is where the contrast stops
+moving, not where it clears the threshold of \cref{eq:decision}.
+
+\Cref{tab:scale} compares compression budgets. Doubling the budget from 120 to
+240 lowers the bound for \methodrandom\ by $0.006$, an effect of the same order
+as the between-method contrast. The comparison at the upstream scale of 200
+epochs and 20{,}000 was not run, and no value is reported for it.

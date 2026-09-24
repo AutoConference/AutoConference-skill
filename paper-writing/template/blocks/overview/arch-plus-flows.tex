@@ -1,0 +1,133 @@
+% Overview: `arch-plus-flows` (design-axes.md axis 15; P6).
+% Left: the architecture as a vertical stack, the middle stage drawn as the
+% trapezium the literature uses for an encoder. Right: the two or three ways
+% the trained object is actually used, each a numbered one-line flow led by its
+% own icon. P6 uses exactly this split to explain a representation and its
+% applications in one float instead of two.
+%
+% The stack ends in a representation drawn as tokens (\actokens) rather than
+% named, because that object is what all three flows read; giving it a shape
+% rather than a word is what makes the three arrows legible.
+%
+% ------------------------------------------------------------ density pass
+% A flow described in one line is honest but thin next to a stack with real
+% structure. This grammar's own proof (paper-batch-v3/P247-ovd-shift,
+% VocAlign: a frozen encoder-vocabulary comparison read by three test-time
+% corrections) went from 19 objects to 40 by adding two things, neither of
+% them decoration:
+%
+%   - a small SHARED-EVIDENCE cluster at the foot of the stack, when two
+%     already-drawn quantities are compared to produce the signal every flow
+%     actually reads (a reference statistic vs. an incoming one, feeding an
+%     `\acop` difference into one named signal). Delete it if no such
+%     comparison exists in your method -- not every stack produces one.
+%   - opening ONLY the flow that is this paper's own contribution into a
+%     small sub-chain of `accard` nodes, while the other flows stay one line
+%     each. This is honest asymmetry, not favoritism: \cref{sec:method} is
+%     this paper's own account of its mechanism's steps, never of a baseline
+%     it did not write.
+%
+% A blending mechanism with two named limiting regimes (a shrinkage weight,
+% an interpolation coefficient, a schedule that saturates) is worth drawing
+% as its two collapses -- two small nodes naming the regimes, feeding the
+% step they degenerate to -- rather than stating it only in the caption; see
+% the proof for the shape. Not every mechanism has one; skip it if yours does
+% not, the way \Cref{eq:inject}'s own $l=1,\dots,N$ is fine to keep in full.
+%
+% `acfeat` is declared once in preamble.tex's shared tikzset block (not
+% here). Anchor a bracket, a tag, or a legend below an ALREADY-PLACED node
+% (`below=... of <name>`) or a coordinate midpoint between two already-placed
+% nodes' own anchors -- never a hand-computed offset from something drawn
+% earlier in the same block, which is what let an earlier draft's caption
+% print underneath its own tinted region's border instead of below it.
+%
+% source-data: none (Tier C structural diagram)
+\begin{acwidefigure}
+  \centering
+  \acfit{%
+  \begin{tikzpicture}[x=1cm,y=1cm]
+    % left: the stack
+    \node[accard,text width=3.0cm] (s1) at (0,3.3)
+      {\acicon{\acIconInput}\\[1pt]\textbf{\slot{Input}}\\\slot{what enters}};
+    \node[actrap,below=0.55 of s1,text width=2.8cm] (s2)
+      {\acicon{\acIconModel}\\[1pt]\textbf{\slot{Encoder or stage}}\\\slot{one line}};
+    \node[accard,below=0.55 of s2,text width=3.0cm] (s3)
+      {\acicon{\acIconMech}\\[1pt]\textbf{\slot{Latent or interface}}\\\slot{what it represents}};
+    \draw[acarrow] (s1) -- (s2); \draw[acarrow] (s2) -- (s3);
+    \node[actag,left=4pt of s2] {\acsnow\ \slot{FROZEN}};
+    \node[inner sep=0pt,below=0.24 of s3] (rep) {\actokens{7}};
+    \node[actag,below=1pt of rep,text=ACIcon] {\slot{what every flow below reads}};
+
+    % ----------------------------------------------------------------
+    % OPTIONAL shared-evidence cluster: delete muA/muB/op1/signal (and the
+    % `stack` fit's reference to them below) if no two already-drawn
+    % quantities are compared to produce what the flows read.
+    % ----------------------------------------------------------------
+    \node[acfeat,below=0.5 of rep,xshift=-0.95cm] (muA) {\slot{reference statistic}};
+    \node[acfeat,right=0.3 of muA] (muB) {\slot{incoming statistic}};
+    \node[inner sep=0pt] (op1) at ($(muA.south)!0.5!(muB.south)+(0,-0.35)$) {\acop{1}};
+    \draw[acstat] (muA.south) -- (op1.north west);
+    \draw[acstat] (muB.south) -- (op1.north east);
+    \node[actag,below=2pt of op1,text=ACIcon] (signal) {\slot{the signal every flow reads}};
+
+    \begin{scope}[on background layer]
+      \node[acbase,fit=(s1)(s2)(s3)(rep)(muA)(muB)(signal),inner sep=8pt] (stack) {};
+    \end{scope}
+    \node[actag,anchor=south west] at ([xshift=3pt,yshift=2pt]stack.north west)
+      {\slot{THE ARCHITECTURE}};
+    \draw[draw=ACMuted!45,dashed] ($(stack.north east)+(0.55,0.1)$) -- ($(stack.south east)+(0.55,-0.1)$);
+
+    % right: what it is used for. \slot{Use three} is this paper's own
+    % contribution -- open it into a short sub-chain, the way the proof
+    % does, rather than one more one-line card.
+    \node[acflow,text width=6.0cm,anchor=north west] (f1) at ($(stack.north east)+(1.1,-0.05)$)
+      {\textbf{\aciconat{ACIcon}{\acIconOut}\ 1.\ \slot{Use one}} --- \slot{what is fed in, what comes out}};
+    \node[acflow,text width=6.0cm,anchor=north west] (f2) at ($(f1.south west)+(0,-0.35)$)
+      {\textbf{\aciconat{ACIcon}{\acIconEvid}\ 2.\ \slot{Use two, or delete this row}} --- \slot{one line}};
+
+    \node[actag,anchor=north west,text=ACBlue] (f3label) at ($(f2.south west)+(0,-0.42)$)
+      {\textbf{\aciconat{ACBlue}{\acIconMech}\ 3.\ \slot{Use three (ours)}} --- \slot{one line naming the steps below}:};
+    \node[accard,text width=2.4cm,font=\tiny,below=0.22 of f3label,anchor=north west] (u1)
+      {\slot{step one, named}};
+    \node[accard,text width=2.4cm,font=\tiny,right=0.3 of u1] (u2)
+      {\slot{step two, named}};
+    \node[accard,text width=2.4cm,font=\tiny,right=0.3 of u2] (u3)
+      {\slot{step three, or delete}};
+    \draw[acarrow] (u1) -- (u2);
+    \draw[acarrow] (u2) -- (u3);
+    \begin{scope}[on background layer]
+      \node[acours,fit=(f3label)(u1)(u2)(u3),inner sep=6pt] (ours3) {};
+    \end{scope}
+
+    \draw[acstat] (signal.east) .. controls +(1.0,0.5) and +(-1.0,0.35) .. (f1.west);
+    \draw[acstat] (signal.east) .. controls +(1.0,0.05) and +(-1.0,0.25) .. (f2.west);
+    \draw[acstat] (signal.east) .. controls +(1.0,-0.5) and +(-1.0,0.1) .. (f3label.west);
+
+    % ----------------------------------------------------------------
+    % OPTIONAL: a blending mechanism's two limiting regimes, each drawn as
+    % what it collapses to. Delete both nodes and their two connecting
+    % draws (anchored FROM the step that does the blending, in `ours3`
+    % above) if your mechanism has no such interpolation.
+    % ----------------------------------------------------------------
+    \node[acfeat,below=0.3 of ours3,xshift=-2.4cm] (ext1) {\slot{regime one, named}};
+    \node[acfeat,right=2.6 of ext1] (ext2) {\slot{regime two, named}};
+    \node[actag,below=2pt of ext1,text width=2.6cm,align=center] (ext1lab)
+      {\slot{what it collapses to}};
+    \node[actag,below=2pt of ext2,text width=2.6cm,align=center,text=ACBlue] (ext2lab)
+      {\slot{what it collapses to at the other end}};
+    \draw[acstat] (u2.south) .. controls +(-0.4,-0.4) and +(0.3,0.5) .. (ext1.north);
+    \draw[acstat] (u2.south) .. controls +(0.4,-0.4) and +(-0.3,0.5) .. (ext2.north);
+    \coordinate (extbot) at ($(ext1lab.south)!0.5!(ext2lab.south)$);
+
+    \node[aclegend,below=0.45 of extbot,anchor=north,text width=11.0cm]
+      {\acsnow~\slot{what is not updated} \quad
+       \acop{1}~\slot{what the comparison above forms}\\[3pt]
+       \slot{which flows this paper evaluates, and which it only opens up}\\[3pt]
+       \textcolor{ACBlue!80}{\rule[0.12em]{5mm}{0.8pt}}~\slot{what flows along the stack's arrows}};
+  \end{tikzpicture}}
+  \caption{\textbf{\slot{name the framework}.} \slot{Left}: \slot{one sentence
+    on the stack, and the shared evidence at its foot if you drew one}.
+    \slot{Right}: \slot{one sentence on the uses, which of them this paper
+    evaluates, and what its own steps do}.}
+  \label{fig:overview}
+\end{acwidefigure}

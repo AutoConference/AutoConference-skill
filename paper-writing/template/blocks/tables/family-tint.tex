@@ -1,0 +1,56 @@
+% Main table: `family-tint` (design-axes.md axis 8; P3).
+% Rows tinted by family (ACNeutral reference / ACCompare comparison /
+% ACPrimary this paper), families separated by \midrule, \best bold and
+% \second underline, direction in the caption, swatches introduced in prose
+% before the table and restated in the caption. Caption ABOVE.
+%
+% Reporting uncertainty (references/table-grammar.md, "Reporting
+% uncertainty" -- read that section before filling this in): every
+% per-condition cell carries `mean [lo, hi]`, lo/hi = min/max of that arm's
+% own per_split[condition]['values'] -- bracket, never `mean $\pm$ std`, even
+% though this grammar's own source exemplar (table-grammar.md Pattern 1,
+% "Mean $\pm$ standard deviation") reports a symmetric spread: that exemplar
+% put Mean and Std. in SEPARATE columns, which is a different statistic (a
+% single repeated-trial std, symmetric by construction) from the `lo, hi`
+% this codebase's aggregates actually carry (an observed range, not
+% symmetric in general). Reusing its "$\pm$" prose is fine for describing an
+% estimator in a caption; do not use it as the per-cell notation. This
+% grammar has the most width margin of the six (one metric column per
+% condition, no vertical rules, no two-level header), so it takes the full
+% treatment on every row including both baselines. The Overall column stays
+% a point estimate -- its `std` is spread ACROSS conditions, not repeated-run
+% noise; see delta-rows.tex for the fuller version of this reasoning.
+\begin{acwidetable}
+  \caption{\textbf{\slot{Metric name} (\slot{\up\ or \down}) across
+    \slot{n} conditions.} \swatch{ACCompare} are \slot{the comparison
+    family}, \swatch{ACPrimary} are \slot{this paper's arms}. \slot{estimator
+    and repetition, in one sentence}; bracketed values are $[\min,\max]$ over
+    the repeated runs behind each mean.}
+  \label{tab:main-results}
+  \vspace{-0.2cm}
+  \centering
+  {\fontsize{8pt}{11pt}\selectfont
+   % \acfit, not \resizebox: shrink to the float width when the table is too
+   % wide, and leave it alone when it is not. A plain resizebox ENLARGES a
+   % narrow table to fill the measure, so a seven-column table at 8pt printed
+   % bigger than the body text -- the reader's words for it were "oddly large,
+   % out of proportion". Every grammar in this directory had it.
+   \acfit{%
+     \begin{NiceTabular}{l c c c c c}[colortbl-like]
+       \toprule[1.2pt]
+         & \textbf{\slot{cond.\ 1}} & \textbf{\slot{cond.\ 2}}
+         & \textbf{\slot{cond.\ 3}} & \textbf{\slot{cond.\ 4}} & \textbf{Overall} \\
+       \midrule[1.2pt]\midrule
+       \rowcolor{ACCompare}\slot{baseline arm one}
+         & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi}
+         & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi} & \slot{v} \\
+       \rowcolor{ACCompare}\slot{baseline arm two}
+         & \second{\slot{v} \slot{lo, hi}} & \second{\slot{v} \slot{lo, hi}}
+         & \second{\slot{v} \slot{lo, hi}} & \second{\slot{v} \slot{lo, hi}} & \second{\slot{v}} \\
+       \midrule
+       \rowcolor{ACPrimary}\slot{primary arm}
+         & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}}
+         & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v}} \\
+       \bottomrule
+     \end{NiceTabular}}}
+\end{acwidetable}

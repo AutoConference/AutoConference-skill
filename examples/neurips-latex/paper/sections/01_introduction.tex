@@ -1,0 +1,71 @@
+% Introduction. Contract: ../references/section-playbook.md
+% 420-650 words, four paragraphs, then 2-4 contribution items.
+\section{Introduction}
+\label{sec:introduction}
+
+% P1 - problem
+Certifying how a trained network will behave on unseen data is the point at
+which a great deal of applied machine learning stops being measurable. Bounds
+that are tight enough to be informative on realistic architectures have been
+difficult to obtain directly~\cite{livni2020limitation, hellstrm2023generalization},
+and the constructions that do succeed tend to route around the target model
+rather than through it. Compression-based arguments certify a network by
+certifying a smaller description of it~\cite{arora2018stronger, zhou2018nonvacuous,
+shin2021compressing, bazinet2024sample}. Disagreement-based arguments go one
+step further: they bound a tractable \surrogate, then bound how often the
+\surrogate\ and the target disagree on unlabeled data, and combine the two into
+a certificate for the target~\cite{jiang2021assessing, kirsch2022assessing}.
+The appeal is that both halves are measurable even when the target is not.
+
+% P2 - gap
+The construction leaves one choice to the practitioner: which examples the
+\surrogate\ is built from. Selection strategies for this role are well studied
+in their own right, from uniform sampling through error-aware and
+disagreement-aware criteria~\cite{coleman2019selection, xia2023refined,
+benkert2024effective, feng2024tarot}, and they differ in how much control they
+exert over the quantity the bound depends on. It would be natural to expect the
+strategy with the most direct control over disagreement to produce the tightest
+certificate. Reported comparisons do not consistently show that. However, the
+evidence behind those comparisons mixes at least three sources of variation:
+which data split was drawn, which selection method was used, and which
+optimization path the training run happened to take. A single number cannot
+separate them, so the observation is currently a result about a set of runs
+rather than a result about a method.
+
+% P3 - what this paper does
+This paper measures the three factors apart. We freeze the \evalsem\ that give
+the bound its meaning, register a comparison matrix before running it, and vary
+the \splitseed\ and the \trajseed\ independently across the compared selection
+methods. Contrasts are taken within a split, so the split effect cancels by
+construction rather than by assumption, and a reporting threshold fixed before
+execution decides whether a contrast is large enough to be called a finding at
+all. Every run is preserved with a manifest identifying its method, seeds,
+configuration, and exact command, so each reported statistic traces back to the
+primary runs it aggregates.
+
+% P4 - result and scope
+Across 5 \splitseed{}s and 3 trajectory seeds per split and method, \methodrandom\
+attains a lower mean \certbound\ than \methodmax\ by $0.011 \pm 0.005$. That
+contrast does not clear the largest within-split trajectory spread in the
+matrix, $0.032$, and its sign reverses at one of the five splits. The supported
+conclusion is therefore that the two strategies are indistinguishable at this
+scale, and that the trajectory, not the selection method, is the dominant
+source of variation in the certificate. This is measured on one dataset at a
+reduced experimental scale; it is not a claim about selection strategies in
+general.
+
+Our contributions are as follows:
+\begin{itemize}[itemsep=0.5ex, parsep=0pt, topsep=0pt]
+\item[\textbf{(1)}] A factorial design that separates \splitseed, selection
+method, and \trajseed\ under frozen \evalsem, together with a reporting
+threshold fixed in advance, which makes a method-level comparison identifiable
+rather than confounded.
+
+\item[\textbf{(2)}] A measurement of how large the trajectory-induced spread in
+a disagreement-based certificate actually is, and the finding that it exceeds
+the between-method contrast at this scale.
+
+\item[\textbf{(3)}] A provenance-preserving pipeline in which every reported
+aggregate enumerates the primary runs it was computed from, so any number in
+the paper can be checked against a preserved record.
+\end{itemize}

@@ -1,0 +1,21 @@
+% Device: `data-card` (design-axes.md axis 13; P2).
+% A tiny dataset-statistics table in the setup: datasets as columns, a few
+% rows (size, resolution/scale, a \cmark/\xmark property).
+\newcommand{\datacard}{%
+  \begin{table}[t!]
+    \caption{\textbf{\slot{name this data summary}.} \slot{what each row
+      measures}.}
+    \label{tab:data-card}
+    \vspace{-0.2cm}
+    \centering
+    {\fontsize{8pt}{10pt}\selectfont
+     \begin{tabular}{l c c c}
+       \toprule
+       \textbf{Dataset} & \textbf{\slot{A}} & \textbf{\slot{B}} & \textbf{\slot{C}} \\
+       \midrule
+       Size & \slot{v} & \slot{v} & \slot{v} \\
+       \slot{Scale} & \slot{v} & \slot{v} & \slot{v} \\
+       \slot{Property} & \cmark & \cmark & \xmark \\
+       \bottomrule
+     \end{tabular}}
+  \end{table}}

@@ -1,0 +1,37 @@
+% Opening figure: `composite` (design-axes.md axis 2; P3's grammar).
+%
+% Unnumbered, uncaptioned, full width, single-column layouts only. Left: one
+% worked instance of the task as a Tier-C schematic -- what goes in, what the
+% method does with it, what comes out -- for a single case, drawn with no
+% magnitude. Right: the results panel from the aggregates (Tier B).
+%
+% The instance box is filled by the writer with the study's own case. It must
+% describe ONE input and ONE output in words; it never states a number that
+% is not in data/opening.dat, and it never implies an image that does not
+% exist.
+%
+% source-data: runs/aggregate__*.json -> paper/data/opening.dat, opening-series.tex
+% generator:   scripts/make_paper_data.py --opening
+\IfFileExists{data/opening.dat}{%
+\begin{center}
+  \begin{minipage}[t]{0.40\linewidth}
+    \vspace{0pt}
+    \begin{tikzpicture}[x=1cm,y=1cm,font=\sffamily\scriptsize]
+      \node[acbox,text width=3.7cm,align=left] (in) at (0,0)
+        {\textbf{Input}\\\slot{one concrete instance of the task input, in words}};
+      \node[acsoft,text width=3.7cm,align=left,below=0.22cm of in] (m)
+        {\textbf{\slot{Method name}}\\\slot{what the method does to this instance, in one line}};
+      \node[acbox,text width=3.7cm,align=left,below=0.22cm of m] (out)
+        {\textbf{Output}\\\slot{what comes out for this instance, in words}};
+      \draw[acarrow] (in) -- (m);
+      \draw[acarrow] (m) -- (out);
+      \node[acnote,below=0.15cm of out,text width=3.7cm] {one instance; the panel at right is the aggregate};
+    \end{tikzpicture}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.58\linewidth}
+    \vspace{0pt}
+    \input{blocks/opening_panel}
+  \end{minipage}
+\end{center}
+\vspace{-3mm}
+}{}

@@ -1,0 +1,67 @@
+% Main table: `delta-rows` (design-axes.md axis 8; P1).
+% Rows are arms; columns are the overall metric then one column per
+% condition. The baseline family rows come first, then this paper's arm
+% (tinted), then a bold green Delta row with explicit + signs (\deltarow).
+% No bold cells: the Delta row carries the emphasis. One vertical rule
+% separates the overall column from the per-condition columns, as in P1.
+% Caption ABOVE. Every cell is filled from a traceable aggregate.
+%
+% Reporting uncertainty (references/table-grammar.md, "Reporting
+% uncertainty" -- read that section before filling this in): every
+% per-condition cell carries `mean [lo, hi]`, lo/hi = min/max of that arm's
+% own per_split[condition]['values'] in its aggregate -- the same repeated
+% runs the mean itself averages, and the same statistic
+% scripts/make_paper_data.py's write_opening() already uses for the primary
+% arm's figure error band. Bracket, never `mean $\pm$ std`: the range is
+% observed, not computed from a symmetric formula, so it is rarely symmetric
+% around the mean, and collapsing it to a half-width states a precision the
+% data does not have. This grammar's Overall column stays a POINT ESTIMATE,
+% never bracketed: its own `std` is the spread ACROSS conditions
+% (heterogeneity), not repeated-run noise, and reporting that as if it were
+% the mean's confidence interval would be a fabricated-spread defect, the
+% same failure mode quality.example.json warns against for instance counts.
+% The Delta row also stays a point value: it is a difference (or ratio) of
+% two already-uncertain quantities, and propagating an interval through that
+% arithmetic is a new statistical claim, not a transcription -- delta/contrast
+% columns are already exempt from check_paper_structure.py's numeric checks
+% for the same reason. Every real draw of this grammar so far (S03) fit the
+% full per-cell treatment at this grammar's default font size; if a future
+% instance has enough conditions that \acfit shrinks past legibility, drop a
+% condition column before falling back to bracketing only the primary row.
+\begin{acwidetable}
+  \caption{\textbf{\slot{Metric name} (\slot{\up\ or \down}) across
+    \slot{n} conditions.} \slot{one sentence naming the arms and the
+    protocol}; bracketed values are $[\min,\max]$ over the \slot{n} repeated
+    runs behind each mean. The $\Delta$ row is \slot{primary arm} minus the
+    strongest other arm in each column.}
+  \label{tab:main-results}
+  \vspace{-0.2cm}
+  \centering
+  {\fontsize{8pt}{10pt}\selectfont
+   % \acfit, not \resizebox: shrink to the float width when the table is too
+   % wide, and leave it alone when it is not. A plain resizebox ENLARGES a
+   % narrow table to fill the measure, so a seven-column table at 8pt printed
+   % bigger than the body text -- the reader's words for it were "oddly large,
+   % out of proportion". Every grammar in this directory had it.
+   \acfit{%
+     \begin{tabular}{l c | c c c c}
+       \toprule
+       \textbf{Arm} & \textbf{Overall}
+         & \textbf{\slot{cond.\ 1}} & \textbf{\slot{cond.\ 2}}
+         & \textbf{\slot{cond.\ 3}} & \textbf{\slot{cond.\ 4}} \\
+       \midrule
+       \slot{baseline arm one}   & \slot{v}
+         & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi}
+         & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi} \\
+       \slot{baseline arm two}   & \slot{v}
+         & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi}
+         & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi} \\
+       \rowcolor{ACPrimary}
+       \slot{+ primary arm}      & \slot{v}
+         & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi}
+         & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi} \\
+       $\Delta$ & \deltarow{\slot{+d}} & \deltarow{\slot{+d}} & \deltarow{\slot{+d}}
+                & \deltarow{\slot{+d}} & \deltarow{\slot{+d}} \\
+       \bottomrule
+     \end{tabular}}}
+\end{acwidetable}

@@ -1,0 +1,93 @@
+{
+ "label": "random-matrix",
+ "method": "random",
+ "metric": "p2l_bound",
+ "estimator": "mean over trajectory seeds, per split seed",
+ "primary_inputs": [
+  "runs/random-split1-traj0__demo000.json",
+  "runs/random-split1-traj1__demo000.json",
+  "runs/random-split1-traj2__demo000.json",
+  "runs/random-split2-traj0__demo000.json",
+  "runs/random-split2-traj1__demo000.json",
+  "runs/random-split2-traj2__demo000.json",
+  "runs/random-split3-traj0__demo000.json",
+  "runs/random-split3-traj1__demo000.json",
+  "runs/random-split3-traj2__demo000.json",
+  "runs/random-split4-traj0__demo000.json",
+  "runs/random-split4-traj1__demo000.json",
+  "runs/random-split4-traj2__demo000.json",
+  "runs/random-split42-traj0__demo000.json",
+  "runs/random-split42-traj1__demo000.json",
+  "runs/random-split42-traj2__demo000.json"
+ ],
+ "per_split": {
+  "1": {
+   "mean": 0.379,
+   "std": 0.0256,
+   "n": 3,
+   "values": [
+    0.352,
+    0.382,
+    0.403
+   ]
+  },
+  "2": {
+   "mean": 0.384,
+   "std": 0.0181,
+   "n": 3,
+   "values": [
+    0.365,
+    0.386,
+    0.401
+   ]
+  },
+  "3": {
+   "mean": 0.398,
+   "std": 0.0292,
+   "n": 3,
+   "values": [
+    0.367,
+    0.402,
+    0.425
+   ]
+  },
+  "4": {
+   "mean": 0.371,
+   "std": 0.0145,
+   "n": 3,
+   "values": [
+    0.356,
+    0.372,
+    0.385
+   ]
+  },
+  "42": {
+   "mean": 0.401,
+   "std": 0.0318,
+   "n": 3,
+   "values": [
+    0.367,
+    0.406,
+    0.43
+   ]
+  }
+ },
+ "overall": {
+  "mean": 0.3866,
+  "std": 0.0127,
+  "range": 0.03,
+  "n_splits": 5
+ },
+ "paired_contrast": {
+  "mean": 0.0114,
+  "uncertainty": 0.0049,
+  "against": "max-error",
+  "per_split": [
+   0.022,
+   0.011,
+   0.014,
+   0.017,
+   -0.007
+  ]
+ }
+}

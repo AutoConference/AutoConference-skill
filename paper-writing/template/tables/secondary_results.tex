@@ -1,0 +1,30 @@
+% Secondary table, shared by every experiments organization. A compact
+% per-condition view of the primary arm against the strongest baseline, so a
+% reader can see whether the aggregate hides a reversal. Booktabs only; the
+% Difference row is meaningful only because the pairing is exact.
+% One column per condition. With short condition keys (split seeds) this fits a
+% column; with benchmark names it does not, and an overfull \hbox in a CVPR
+% column is what you get. acwidetable is a plain table in a single-column
+% layout and table* in cvpr2, so this costs nothing where it already fitted.
+\begin{acwidetable}[t!]
+  % Write your own caption. The lead phrase named this table in all five of the
+  % first batch's papers because it used to be hardcoded here; a caption that
+  % every paper in a proceedings shares is a fingerprint, not a convention.
+  \caption{\textbf{\slot{name this comparison in your own words} (\slot{\up\ or \down}).}
+    \slot{what each column is, which direction favors which arm, and one
+    sentence on the estimator and repetition count}.}
+  \label{tab:paired}
+  \vspace{-0.2cm}
+  \centering
+  {\fontsize{8pt}{10pt}\selectfont
+   \begin{tabular}{l c c c c}
+     \toprule
+     & \textbf{\slot{c1}} & \textbf{\slot{c2}} & \textbf{\slot{c3}} & \textbf{\slot{c4}} \\
+     \midrule
+     \armbaseline & \slot{v} & \slot{v} & \slot{v} & \slot{v} \\
+     \armprimary  & \slot{v} & \slot{v} & \slot{v} & \slot{v} \\
+     \midrule
+     Difference   & \slot{d} & \slot{d} & \slot{d} & \slot{d} \\
+     \bottomrule
+   \end{tabular}}
+\end{acwidetable}

@@ -1,0 +1,29 @@
+%% Palette: `tol-bright` (design-axes.md axis 14).
+%% Paul Tol's 'bright' qualitative scheme (SRON technical note on colour schemes); colour-blind safe.
+%% Redefines the family's semantic color tokens. Every block reads the tokens,
+%% never a literal color, so a paper changes its whole visual key here and
+%% nowhere else. Color is always a redundant cue: the tables still mark best
+%% with \best and direction with \up/\down, so a greyscale print loses
+%% nothing that carries meaning.
+\definecolor{ACBlue}{HTML}{AA3377}   % primary / this paper's arm
+\definecolor{ACCyan}{HTML}{4477AA}   % secondary accent
+\definecolor{ACLink}{HTML}{AA3377}   % project link only
+\definecolor{ACInk}{HTML}{1F2A33}   % body-dark
+\definecolor{ACMuted}{HTML}{6E7B85}   % rules, secondary text
+\definecolor{ACGreen}{HTML}{228833}   % a delta in the good direction
+\definecolor{ACWorse}{HTML}{EE6677}   % a delta in the bad direction
+\definecolor{ACPrimary}{HTML}{EEDDF2}   % row tint: this study's family
+\definecolor{ACCompare}{HTML}{FBDDE1}   % row tint: comparison family
+\definecolor{ACNeutral}{HTML}{E7E7E7}   % row tint: reference family
+\definecolor{ACRankOne}{HTML}{F5EFC8}   % cell background: best
+\definecolor{ACRankTwo}{HTML}{F8DCC9}   % cell background: second
+\definecolor{ACRankThree}{HTML}{EEDDF2}   % cell background: third
+\definecolor{BrickRed}{HTML}{EE6677}   % extra plot series
+\definecolor{ACDelta}{HTML}{228833}
+\definecolor{ACDeltaNeg}{HTML}{EE6677}
+%% The icon layer (preamble.tex). Frozen/trained keep a cool/warm split near
+%% the convention a reader already knows, so the badge is legible before its
+%% legend is read; both are drawn from this palette's own family.
+\definecolor{ACIcon}{HTML}{4477AA}   % glyphs inside structural figures
+\definecolor{ACFrozen}{HTML}{4477AA}   % not updated during training
+\definecolor{ACTrained}{HTML}{EE7733}   % updated during training

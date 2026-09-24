@@ -1,0 +1,142 @@
+% Overview: `stacked-panels` (design-axes.md axis 15; P2).
+% A main pipeline row, then two titled sub-panels that open up the two
+% components the method actually contributes. P2's caption is a paragraph, not
+% a phrase: it walks the reader through the panels in order.
+%
+% Each row card leads with its role's icon (\acIconInput and friends,
+% preamble.tex); each sub-panel leads with the icon of the component it opens,
+% so the eye can carry a stage from the row down into its panel without
+% re-reading a label. Frozen and trained are badges, not words.
+%
+% ------------------------------------------------------------ density pass
+% A panel that only narrates its component in three lines of prose is honest
+% but thin -- a box of text is not a diagram. This grammar's own proof
+% (paper-batch-v2/S16-timeseries-contrastive, FCA: a band-limited augmentation
+% and a two-term pretraining objective) went from 14 objects to 38 by making
+% each panel a SMALL DIAGRAM of its own component's real sub-steps, not a
+% caption in a box:
+%
+%   - 2-4 `acfeat` nodes per panel for the component's actual sub-steps (a
+%     transform, an intermediate quantity, the two things a loss compares),
+%     connected by `acarrow` or `acstat`, exactly the way the top row's own
+%     stages connect.
+%   - if the component's input is drawn from a partitioned resource (one of
+%     $K$ bands, one of $N$ layers, one region of an image), a small strip of
+%     `acitemna` cells with the ACTIVE one in `acitemgate` and named --
+%     reusing the same shared-ruler vocabulary a temporal worked instance
+%     would, just applied to whatever axis this paper actually partitions.
+%   - if the two panels connect (one panel's output feeds the other's
+%     input, the way an augmented view feeds a contrastive pair), draw that
+%     ONE fact as a connector between them. It is usually the single most
+%     concrete sentence \cref{sec:method} states about how the components
+%     relate, and it is the reason two panels are one figure and not two.
+%
+% Do not diagram a component that has no real sub-steps to open -- a panel
+% that would only draw one box with the row card's own text again is not
+% density, it is decoration; keep it as prose in that case.
+%
+% `acfeat`, `acitem*`, `acruler` are declared once in preamble.tex's shared
+% tikzset block (not here). Two positioning rules the proof paid for:
+%
+%   - anchor each panel below the LOWER of the row's own legend/callout,
+%     never their average -- `\path let \p1=(X.south), \p2=(Y.south) in
+%     coordinate (rowbot) at (0,{min(\y1,\y2)});` -- a midpoint sits above
+%     whichever of the two is actually taller and prints the panel titles
+%     on top of it.
+%   - anchor anything below BOTH panels the same way, keyed off `pa.south`
+%     and `pb.south`: whichever panel carries more internal structure is
+%     usually taller, and a legend anchored to their average prints its own
+%     top border through that panel's last line instead of below it.
+%
+% source-data: none (Tier C structural diagram)
+\begin{acwidefigure}
+  \centering
+  \acfit{%
+  \begin{tikzpicture}[x=1cm,y=1cm]
+    \node[accard,text width=2.4cm] (a) at (0,0)
+      {\acicon{\acIconInput}\\[1pt]\textbf{\slot{Input}}\\\slot{what enters}};
+    \node[accard,right=0.7 of a,text width=2.6cm] (b)
+      {\acicon{\acIconMech}\\[1pt]\textbf{\slot{Component A}}\\\slot{one line}};
+    \node[accard,right=0.7 of b,text width=2.6cm] (c)
+      {\acicon{\acIconModel}\\[1pt]\textbf{\slot{Component B}}\\\slot{one line}};
+    \node[accard,right=0.7 of c,text width=2.4cm] (d)
+      {\acicon{\acIconOut}\\[1pt]\textbf{\slot{Output}}\\\slot{what is reported}};
+    \draw[acarrow] (a) -- (b); \draw[acarrow] (b) -- (c); \draw[acarrow] (c) -- (d);
+    % The badges are named and included in the fit below. Left out, they
+    % land exactly ON the tinted region's top border, because `above=3pt of
+    % b` and the region's edge are the same line. Same bug as linear-pipeline.
+    \node[actag,above=3pt of b] (bf) {\acsnow\ \slot{FROZEN, or NO LEARNED PARAMETERS}};
+    \node[actag,above=3pt of c,text=ACBlue] (cf) {\acflame\ \slot{TRAINED}};
+    \begin{scope}[on background layer]
+      \node[acours,fit=(b)(c)(bf)(cf),inner sep=7pt] (ours) {};
+    \end{scope}
+    \node[aclegend,anchor=north west,text width=5.6cm] (toplegend) at ($(a.south west)+(0,-0.35)$)
+      {\acsnow~\slot{what is not updated} \quad \acflame~\slot{what is}\\[2pt]
+       \textcolor{ACCyan!85}{\rule[0.12em]{1.4mm}{0.7pt}\,\rule[0.12em]{1.4mm}{0.7pt}\,\rule[0.12em]{1.4mm}{0.7pt}}~\slot{opened up below}};
+    \node[acsoft,text width=4.2cm,align=center,anchor=north west,right=0.5 of toplegend]
+      (callout) {\slot{one sentence on what every arm shares}};
+    \path let \p1=(toplegend.south), \p2=(callout.south) in
+      coordinate (rowbot) at (0,{min(\y1,\y2)});
+
+    % (a): component A opened up. Delete the inner tikzpicture and the
+    % optional resource strip if the component has no real sub-steps.
+    \path let \p1=(a.west), \p2=(rowbot) in
+      node[acpanel,text width=6.0cm,anchor=north west] (pa) at (\x1,{\y2-0.3cm})
+      {\textbf{\aciconat{ACIcon}{\acIconMech}\ (a) \slot{Component A, named}}\\[3pt]
+       \begin{tikzpicture}[x=1cm,y=1cm,baseline=0pt]
+         \node[acfeat,text width=1.6cm] (s1) at (0,0) {\slot{sub-step one}};
+         \node[acfeat,text width=1.6cm,right=0.35 of s1] (s2) {\slot{sub-step two}};
+         \node[acfeat,text width=1.6cm,right=0.35 of s2] (s3) {\slot{sub-step three, or delete}};
+         \draw[acarrow] (s1) -- (s2); \draw[acarrow] (s2) -- (s3);
+       \end{tikzpicture}\\[4pt]
+       % OPTIONAL: delete this whole nested picture if component A does not
+       % draw from a partitioned resource (one of $K$ bands, one of $N$
+       % positions, one region of many).
+       \slot{one line naming the resource this component partitions}:\\[2pt]
+       \begin{tikzpicture}[x=1cm,y=1cm,baseline=0pt]
+         \node[acitemna,minimum width=0.5cm] (r1) at (0,0) {};
+         \node[acitemna,minimum width=0.5cm,right=0.06 of r1] (r2) {};
+         \node[acitemgate,minimum width=0.5cm,right=0.06 of r2] (r3) {\slot{$\beta$}};
+         \node[acitemna,minimum width=0.5cm,right=0.06 of r3] (r4) {};
+         \node[acitemna,minimum width=0.5cm,right=0.06 of r4] (r5) {};
+         \node[acruler,below=1pt of r1] {\scriptsize\slot{low end}};
+         \node[acruler,below=1pt of r5] {\scriptsize\slot{high end}};
+       \end{tikzpicture}};
+
+    % (b): component B opened up, the same way.
+    \path let \p1=(d.east), \p2=(rowbot) in
+      node[acpanel,text width=6.4cm,anchor=north east] (pb) at (\x1,{\y2-0.3cm})
+      {\textbf{\aciconat{ACIcon}{\acIconModel}\ (b) \slot{Component B, named}}\\[3pt]
+       \begin{tikzpicture}[x=1cm,y=1cm,baseline=0pt]
+         \node[acfeat,text width=2.4cm] (t1) at (0,0) {\slot{the quantity both branches read}};
+         \node[acfeat,text width=2.2cm,below=0.3 of t1] (t2) {\slot{branch one, to a named term}};
+         \node[acfeat,text width=2.4cm,right=0.35 of t1] (t3) {\slot{branch two, to a named term}};
+         \draw[acstat] (t1.south) -- (t2.north);
+         \draw[acstat] (t1.east) -- (t3.west);
+         \node[inner sep=0pt] (plus) at ($(t2.east)!0.5!(t3.south)+(0.1,-0.35)$) {\acop{+}};
+         \draw[acstat] (t2.east) -- (plus.west);
+         \draw[acstat] (t3.south) -- (plus.north);
+         \node[actag,below=1pt of plus,text=ACIcon] {\slot{what the merge produces, cite the equation}};
+       \end{tikzpicture}\\[4pt]
+       \slot{one sentence on the fixed weight or schedule that merges the two terms}};
+
+    % OPTIONAL cross-panel connector: the one concrete fact about how the
+    % two components relate. Delete if they do not actually connect.
+    \draw[acstat] (pa.east) .. controls +(0.6,0) and +(-0.6,0) .. (pb.west);
+    \node[actag,anchor=south,text=ACIcon] at ($(pa.east)!0.5!(pb.west)+(0,0.12)$)
+      {\slot{how (a)'s output feeds (b)}};
+
+    \path let \p1=(pa.south), \p2=(pb.south) in
+      coordinate (panelbot) at (0,{min(\y1,\y2)});
+    \node[aclegend,anchor=north,text width=11.0cm,below=0.35 of panelbot,xshift=1.6cm]
+      {\acsnow~\slot{what is not updated} \quad \acflame~\slot{what is}\\[2pt]
+       \textcolor{ACCyan!85}{\rule[0.12em]{1.4mm}{0.7pt}\,\rule[0.12em]{1.4mm}{0.7pt}\,\rule[0.12em]{1.4mm}{0.7pt}}~\slot{how panel (a) feeds panel (b)}\\[2pt]
+       \acop{+}~\slot{what the merge combines, and on what fixed weight}};
+  \end{tikzpicture}}
+  \caption{\textbf{\slot{name the architecture}.} \slot{Row}: \slot{one
+    sentence on the row: what enters and what leaves}. \slot{(a)}: \slot{one
+    or two sentences on panel (a): the problem it solves and how}.
+    \slot{(b)}: \slot{one or two sentences on panel (b)}. \slot{one sentence
+    on what is held fixed across every compared arm}.}
+  \label{fig:overview}
+\end{acwidefigure}

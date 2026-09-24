@@ -1,0 +1,145 @@
+{
+  "_comment": "The quality bar, as numbers a script can check. This replaces AC_SMOKE=1, which shrank the sweep until the paper it produced was worthless. 'Modest' has to mean 'small but sufficient', and sufficiency is a property you can compute.",
+  "statistics": {
+    "min_n_per_cell": 30,
+    "_min_n_why": "A cell is one (model, condition, complexity level). At n=5 a Wilson 95% interval on an accuracy of 0.2 spans roughly [0.04, 0.62] -- wide enough to contain both 'works' and 'does not', so no comparison is possible. At n=30 it is about [0.09, 0.39]: still wide, honestly reported, but it can separate 0.2 from 0.6.",
+    "ci_method": "wilson",
+    "_ci_why": "The normal approximation is invalid near 0 and 1 and at small n, and every accuracy here sits near 0. Wilson stays inside [0,1] and does not collapse to a zero-width interval when the count is 0.",
+    "report_ci_in_paper": true,
+    "instance_seeds": 3,
+    "_seeds_why": "Decoding is greedy, so re-running with a different torch seed changes nothing. A seed here must redraw the INSTANCE SET, which is the only real source of variance in this design. Reporting 'three seeds' while holding instances fixed under greedy decoding would be a fabricated spread.",
+    "seed_varies": "instance_generation"
+  },
+  "models": {
+    "min_count": 2,
+    "required_pairing": "one reasoning-tuned and one non-reasoning model of the same size, so the comparison isolates the mechanism rather than model scale",
+    "cached": [
+      "Qwen/Qwen2.5-7B-Instruct",
+      "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
+    ],
+    "max_params_b": 7,
+    "_max_params_why": "A 7B in bf16 peaks host RSS at 7.23 GiB against an 8 GiB cgroup cap. Larger will not load. One resident at a time."
+  },
+  "token_budget": {
+    "rule": "size_from_task_not_from_habit",
+    "_rule_why": "The previous run capped generation at 512 tokens on a task whose answers needed more, truncating 9 of 15 generations. The primary measurement was destroyed by a configuration choice before any model behaviour was observed. A cap is a measurement instrument and has to be calibrated against the task.",
+    "procedure": [
+      "Run a tiny calibration pass at a generous cap (>=8192) on the hardest level.",
+      "Take the 95th percentile of completion length among generations that ended with EOS.",
+      "Set the sweep cap to 2x that p95, with a floor of 2048.",
+      "Reasoning models get a separate, larger cap: their traces are routinely 5-20k tokens."
+    ],
+    "floor": 2048,
+    "max_truncation_rate_per_cell": 0.2,
+    "_truncation_why": "Above 20% truncation in a cell, the number being reported is mostly a property of the cap, not of the model. The pre-flight refuses the sweep rather than producing a curve that measures the instrument."
+  },
+  "design": {
+    "min_complexity_levels": 4,
+    "_levels_why": "Three points cannot distinguish a threshold from a slope. Four is the minimum that shows a shape.",
+    "required_baselines": [
+      "a trivial non-model baseline that needs no reasoning at all, to establish the floor",
+      "the non-reasoning model at matched size and matched token budget"
+    ],
+    "_baseline_why": "Without a floor, an accuracy of 0.2 is uninterpretable. Without a matched non-reasoning model, any effect could be model capability rather than the mechanism under study.",
+    "min_task_families": 2,
+    "_families_why": "A single synthetic family cannot support a claim that a procedure generalises. Both families must be exactly verifiable on CPU.",
+    "require_exact_verifier": true,
+    "_verifier_why": "Correctness must be re-derived from raw output by a validator we wrote, never taken from the model's own claim about its answer."
+  },
+  "paper_shape": {
+    "min_display_equations": 3,
+    "_equations_why": "A paper proposing a procedure has to define it. The platform renders LaTeX server-side (it serves /katex/katex.min.css and the KaTeX web fonts but no client JS), so $$...$$ in body_md becomes real mathematics.",
+    "min_inline_math": 5,
+    "min_figures": 1,
+    "require_figure_referenced_in_text": true,
+    "min_citations": 8,
+    "_citations_why": "Three citations inherited from the seed paper's own response literature is not related work; it is a footnote.",
+    "require_ci_in_results": true,
+    "min_body_chars": 15000,
+    "forbidden_in_title": [
+      "smoke",
+      "demonstration",
+      "pilot",
+      "toy",
+      "proof of concept",
+      "preliminary"
+    ],
+    "forbidden_phrases_in_abstract": [
+      "too small to support",
+      "not powered",
+      "pipeline demonstration",
+      "smoke-scale",
+      "we make no claim",
+      "unusable"
+    ],
+    "_forbidden_why": "A paper that declares its own results unusable is a run report. Honesty about limits belongs in a limitations section with specifics, not in the title and not as a blanket disclaimer in the abstract. If the experiment genuinely cannot support a claim, the fix is the experiment, not a disclaimer.",
+    "required_sections": [
+      [
+        "introduction"
+      ],
+      [
+        "method",
+        "approach",
+        "our method"
+      ],
+      [
+        "experimental setup",
+        "experimental setting",
+        "setup",
+        "experimental details",
+        "implementation details",
+        "protocol",
+        "experiments"
+      ],
+      [
+        "results",
+        "main results",
+        "main evaluation",
+        "evaluation",
+        "findings",
+        "main comparison"
+      ],
+      [
+        "related work",
+        "background and related work",
+        "prior work"
+      ]
+    ],
+    "min_results_tables": 1,
+    "_tables_why": "GFM pipe tables are confirmed to render (3-for-3 on the platform's own /skill page, plus 6 across the legal documents) AND they stay legible in the raw JSON. That matters more than the rendering: the reviewers are agents that fetch GET /api/v1/submissions/:id and read body_md as source. A number that lives only in a figure is invisible to the people scoring the paper.",
+    "require_figure_redundant_with_text": true,
+    "_redundancy_why": "A reviewing agent almost certainly cannot see a PNG. Every figure's message -- the numbers, the direction of the effect, the intervals -- must also appear in prose and in a table. Figures are for the human record; tables are for the reviewer.",
+    "require_png_figure": true,
+    "_png_why": "SVG is on the attachment allowlist but whether it renders inline is unverified, with two plausible failure modes (wrong Content-Type under nosniff, or Content-Disposition: attachment). Ship PNG; SVG may accompany it, never replace it.",
+    "forbid_unescaped_dollar": true,
+    "_dollar_why": "The platform lifts math out of body_md BEFORE markdown runs and renders it server-side with KaTeX (src/lib/markdown.ts, read 2026-09-23). A stray $ pairs with the next $ on the same line, so a cost figure or a shell variable silently becomes a math node. Escape it as \\$. A code span does NOT currently protect it: the math pass does not skip code, so two $ on one line of code are rendered as math too (a platform bug, reported 2026-09-23).",
+    "forbid_anchor_links": true,
+    "_anchor_why": "Heading ids are not emitted, so [see Section 3](#results) renders as a dead link. Cross-reference by name.",
+    "max_body_chars_soft": 90000,
+    "_soft_cap_why": "The hard limit is 100000 CHARACTERS, not bytes. Non-ASCII math and em-dashes cost one character but several bytes, so a byte estimate misleads in both directions. Aim for 90000 to leave slack.",
+    "_required_sections_why": "Each entry is a ROLE, and any one of its names satisfies it. A single literal string was stricter than published practice and failed real papers for using a real paper's words: one batch of six had 'Experimental Setting' and 'Main Evaluation' marked missing. The check is meant to catch a thing that is not a paper, not to impose a house vocabulary on one that is. `limitations` moved out of this list entirely -- design-axes.md axis 12 draws four placements including `absent` (P1), so it is its own non-fatal check, `limitations_stated`."
+  },
+  "budget": {
+    "target_gpu_hours": 2.0,
+    "hard_max_gpu_hours": 5.0,
+    "_arithmetic": "2 models x 2 families x 4 levels x 30 instances x 3 instance-seeds = 1440 generations. The non-reasoning model at a 2048-token cap: 720 x 2048 / 3003.8 tok/s = 491 s. The reasoning model at an 8192-token cap: 720 x 8192 / 3003.8 = 1964 s. Plus four model loads at ~75 s. Total about 47 minutes of GPU, comfortably inside the 2-hour target with room to rerun after the pilot finds bugs."
+  },
+  "platform_facts": {
+    "_comment": "Established empirically against the live platform, not assumed. Re-checkable.",
+    "math_renders": true,
+    "math_delimiters": "$...$ inline, $$...$$ display. \\(...\\) and \\[...\\] render too, but the gates here count $$...$$ as display equations, so use the dollar forms.",
+    "math_evidence": "Read from the source, superseding an earlier inference from served assets: src/lib/markdown.ts extracts $$...$$, \\[...\\], \\(...\\) and $...$ (single $ never spanning a newline, \\$ left alone), renders each with katex.renderToString(throwOnError:false) and puts it back after sanitisation. No remark-math or rehype-katex is involved.",
+    "tables_render": true,
+    "tables_evidence": "skill.md's 3 GFM pipe tables come back as 3 <table>/<thead>/<tbody> inside div.md on /skill; the legal documents render 6 more.",
+    "figures": "attachment only: POST /api/v1/submissions/:id/attachments (multipart, field `file`), then reference inline as ![caption](/api/v1/attachments/<id>). The serving route is deliberately PUBLIC (it answers 404 not_found unauthenticated, where /submissions/:id answers 401 first). The id field name in the POST response is UNVERIFIED -- read the response, never hand-build the path.",
+    "reviewers_read_json": true,
+    "reviewers_read_json_implication": "Reviewers are agents calling GET /api/v1/submissions/:id. They see markdown source, not rendered output, and probably cannot see images at all. Math and figures are upside; prose and tables are load-bearing.",
+    "no_heading_anchors": true,
+    "unverified": [
+      "the attachment id field name",
+      "whether the markdown pipeline sanitises image src",
+      "whether SVG renders inline",
+      "whether raw inline HTML is escaped"
+    ]
+  }
+}

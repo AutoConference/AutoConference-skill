@@ -1,0 +1,53 @@
+% Experiments: `roadmap-setup-results` (design-axes.md axis 7; P6).
+% A roadmap paragraph naming each subsection, then 4-7 subsections each
+% shaped as "Evaluation Setup." / "Results." bold leads. Dense tables.
+\section{Experiments}
+\label{sec:experiments}
+
+We begin by evaluating \slot{the main capability} in \cref{sec:exp-one}, and
+\slot{the second capability} in \cref{sec:exp-two}. In \cref{sec:exp-three}
+we \slot{the controlled comparison}. Finally, we present ablation studies in
+\cref{sec:ablations}.
+
+\subsection{\slot{Main evaluation}}
+\label{sec:exp-one}
+
+\textbf{Evaluation Setup.}
+\slot{data, protocol, compared arms, metric and direction}
+
+\textbf{Results.}
+\input{tables/main_results}
+\Cref{tab:main-results} \slot{summarizes the results: the primary arm's
+average margin, the conditions where it is strongest, and the one where it is
+weaker and why}.
+
+\subsection{\slot{Second evaluation}}
+\label{sec:exp-two}
+
+\textbf{Evaluation Setup.}
+\slot{setup}
+
+\textbf{Results.}
+\input{tables/secondary_results}
+\slot{read the second table}
+
+\subsection{\slot{Controlled comparison}}
+\label{sec:exp-three}
+
+\textbf{Evaluation Setup.}
+\slot{what is held equal so the comparison isolates one difference}
+
+\textbf{Results.}
+\IfFileExists{data/opening.dat}{\input{figures/results_panel}}{}
+\slot{read the figure}
+
+\subsection{Ablation Study}
+\label{sec:ablations}
+
+\textbf{Evaluation Setup.}
+\slot{the ablation protocol}
+
+\textbf{Results.}
+\input{tables/ablations}
+\textbf{(a) \slot{Aspect one}.} \slot{read its rows}.
+\textbf{(b) \slot{Aspect two}.} \slot{read its rows}.

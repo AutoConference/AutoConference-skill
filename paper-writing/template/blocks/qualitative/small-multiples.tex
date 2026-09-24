@@ -1,0 +1,27 @@
+% Secondary figure: `small-multiples` (design-axes.md axis 10; P1's bars,
+% P4's 2x2 panels). One small panel per condition, arms as bars, shared
+% y-axis. Tier B from data/opening.dat; data/opening-multiples.tex is the
+% groupplot body written by make_paper_data.py --opening.
+%
+% source-data: runs/aggregate__*.json -> paper/data/opening.dat
+% generator:   scripts/make_paper_data.py --opening
+\begin{acwidefigure}
+  \centering
+  \begin{tikzpicture}
+    \begin{groupplot}[group style={group size=\OPncondsnum\space by 1, horizontal sep=0.35cm,
+                                   ylabels at=edge left, yticklabels at=edge left},
+      width=\OPpanelwidth, height=4.0cm,
+      ymin=\OPymin, ymax=\OPymax, xtick=\empty, enlarge x limits=0.35,
+      ymajorgrids, grid style={ACMuted!25}, axis line style={ACInk!70},
+      tick label style={font=\tiny}, label style={font=\scriptsize},
+      title style={font=\tiny,yshift=-2pt,align=center,text width=\OPpanelwidth}, ylabel={\OPmetric\ \OPdirection},
+      legend style={font=\tiny,draw=none,fill=none,at={(0,1.18)},anchor=south west,legend columns=-1},
+    ]
+      \input{data/opening-multiples}
+    \end{groupplot}
+  \end{tikzpicture}
+  \caption{\textbf{\slot{name what the panels compare}.} One panel per
+    condition; bars are means over repetitions, in the arm order of the
+    legend. \slot{one sentence stating what to notice across panels}.}
+  \label{fig:distribution}
+\end{acwidefigure}

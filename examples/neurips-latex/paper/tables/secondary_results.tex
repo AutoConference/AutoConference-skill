@@ -1,0 +1,24 @@
+% Mandatory secondary table. Contract: references/table-grammar.md, pattern 2.
+\begin{table}[t!]
+  \caption{\textbf{Per-split \certbound\ and paired contrast (\down).} Each
+    column is one \splitseed. Every entry is the mean over the same three
+    trajectory seeds, so the difference row is an exact pairing. A positive
+    difference favors \methodrandom. The sign reverses at \splitseed~42, which
+    is why \cref{tab:main-results} reports a contrast and not a ranking.}
+  \label{tab:paired}
+  \vspace{-0.2cm}
+  \centering
+  {\fontsize{8pt}{11pt}\selectfont
+     \begin{NiceTabular}{l c c c c c}[colortbl-like]
+       \toprule[1pt]
+       \textbf{\splitseed} & \textbf{1} & \textbf{2} & \textbf{3} & \textbf{4} & \textbf{42} \\
+       \midrule
+       \methodcontrol & 0.412 & 0.405 & 0.418 & 0.399 & 0.410 \\
+       \methodmax     & 0.401 & 0.395 & 0.412 & 0.388 & 0.394 \\
+       \rowcolor{ACPrimary}\methodrandom & 0.379 & 0.384 & 0.398 & 0.371 & 0.401 \\
+       \midrule
+       Difference     & 0.022 & 0.011 & 0.014 & 0.017 & $-0.007$ \\
+       \bottomrule
+     \end{NiceTabular}
+  }
+\end{table}

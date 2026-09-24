@@ -1,0 +1,57 @@
+% Appendix: `supp-toc` (design-axes.md axis 11; P4).
+% A supplementary title page with a table of contents, then lettered
+% sections: full derivations in theorem style, additional ablations, a
+% symbols table. Key results boxed.
+\appendix
+\onecolumn
+\begin{center}
+  {\Large\bfseries \slot{Paper title}}\\[0.4em]
+  {\large Supplementary Material}
+\end{center}
+\vspace{0.6em}
+\tableofcontents
+\clearpage
+\ifDesignTwoColumn\twocolumn\fi
+
+\section{\slot{Derivation of the main result}}
+\label{sec:appendix-derivation}
+
+\slot{state the standing assumptions as a short list}
+
+\paragraph{Proposition A.1.} \textit{\slot{the statement, in one sentence,
+in the notation of the main text}}
+
+\textit{Proof.} \slot{the proof, ending with the boxed key equation}
+\hfill$\square$
+
+\section{Additional Ablation Studies}
+\label{sec:appendix-ablation}
+\slot{the sweeps the main ablation section deferred, one paragraph and one
+table each}
+
+\section{Additional Quantitative Results}
+\label{sec:appendix-quant}
+\slot{the full table with every metric}
+
+\section{Symbols Table}
+\label{sec:appendix-symbols}
+\begin{table}[h]
+  \centering
+  \caption{\textbf{Symbols Table.}}
+  \label{tab:symbols}
+  {\small
+  \begin{tabular}{l p{0.62\linewidth}}
+    \toprule
+    \textbf{Symbol} & \textbf{Description} \\
+    \midrule
+    \slot{$x$} & \slot{what it denotes} \\
+    \slot{$\theta$} & \slot{what it denotes} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\LimitationsInAppendix
+
+\section{Societal Impacts}
+\label{sec:appendix-impacts}
+\slot{positive applications; ethical considerations; a mitigation statement}

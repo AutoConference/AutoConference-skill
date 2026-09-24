@@ -1,0 +1,79 @@
+% Overview: `wrap-compact` (design-axes.md axis 15; P3, P6).
+% A narrow architecture sketch the body text wraps around, rather than a
+% full-width float. P3 runs it at ~55% of the column; P6's is 4 cm wide with a
+% two-word caption. Single-column layouts only: a wrapfigure inside a CVPR
+% column leaves neither the figure nor the text enough width.
+%
+% The trained badge lives INSIDE its card here rather than beside it: a node
+% placed to the right of the stack is clipped by the wrapfigure's own
+% 0.46\linewidth box, and prints as a half-eaten word.
+%
+% This is the one grammar with NO legend box. At this width a legend would take
+% as much room as the diagram, so the two state badges are inline beside the
+% stages they describe and the caption carries the rest. The icons still do
+% their job: at 4 cm a glyph is read faster than a word.
+%
+% ------------------------------------------------------------ density pass
+% This is the deliberate exception to the family's density pass, and the
+% honest finding is a ceiling, not a technique: 0.46 of a NeurIPS/ICLR single
+% column is roughly 2.5in, narrower than the ~3.3in a merely narrow
+% two-column figure would have, so there is little room here for anything
+% resembling the worked-instance vocabulary the other four grammars gained.
+%
+% What was tried, on this grammar's own proof (paper-batch-v2/S21-offline-rl,
+% VACQ): splitting the single "mechanism" card into its two real stages (an
+% ensemble, then the penalty it calibrates -- two different equations, not
+% one box) is real structure and raised the object count modestly (6-7 to
+% 8). It only fit after the bottom note and the caption were both cut back:
+% with them left in, the added height pushed \Cref{sec:appendix-method}
+% wrapfig's own "stays stationary beside the text" mode past what the
+% surrounding paragraph could wrap around, and LaTeX's wrapfig package fell
+% back to floating the figure instead (a documented, safe fallback -- the
+% PDF still rendered clean and passed every gate -- but it means the figure
+% no longer sits tight against the paragraph that names it, which is the
+% one thing this grammar exists to do). Whether a fourth stage is safe
+% therefore depends on how much body text surrounds the \input at its
+% actual insertion point, not only on the figure's own content, so it is
+% left as a judgment call rather than built into the default shape below:
+% add a fourth `accard` (`below=0.42 of` the third) only when there are
+% genuinely two separable stages AND enough surrounding prose, and drop the
+% bottom note first if height gets tight. Do not add a fifth.
+%
+% source-data: none (Tier C structural diagram)
+% Reserve the figure's own height before opening the environment. Without
+% this the sketch lands wherever the method section happens to reach, and at
+% the foot of a page it prints straight over the venue footnote -- wrapfig
+% moves the text, never the figure. 15 lines is the three cards, the note and
+% the caption with a little slack.
+\needspace{15\baselineskip}
+\begin{wrapfigure}{r}{0.46\linewidth}
+  \vspace{-0.35cm}
+  \centering
+  % Shrink only -- see the note in template/figures/hero.tex. A wrapfigure
+  % column is narrow, so a three-box sketch that fits was being stretched to
+  % fill it and printed larger than the prose flowing around it.
+  \resizebox{\ifdim\width>0.95\linewidth 0.95\linewidth\else\width\fi}{!}{%
+  % `accard` defaults to a 1.15cm minimum height, which is right in a full-width
+  % float and wrong here: three of them plus a note ran past the bottom of the
+  % page and over the venue footnote. In the narrow grammar the cards are
+  % squatter and sit closer together.
+  \begin{tikzpicture}[x=1cm,y=1cm,
+      accard/.append style={minimum height=0.92cm,inner sep=3pt}]
+    \node[accard,text width=3.0cm] (a) at (0,0)
+      {\acicon{\acIconInput}\\[1pt]\textbf{\slot{Input}}\\\slot{what enters}};
+    \node[accard,below=0.42 of a,text width=3.0cm] (b)
+      {\acicon{\acIconMech}\\[1pt]\textbf{\slot{The mechanism}}~\acflame\\\slot{what it changes}};
+    \node[accard,below=0.42 of b,text width=3.0cm] (c)
+      {\acicon{\acIconOut}\\[1pt]\textbf{\slot{Output}}\\\slot{what is reported}};
+    \draw[acarrow] (a) -- (b); \draw[acarrow] (b) -- (c);
+    \begin{scope}[on background layer]
+      \node[acours,fit=(b),inner sep=6pt] (ours) {};
+    \end{scope}
+    \node[acnote,text width=3.4cm,anchor=north] at ($(c.south)+(0,-0.24)$)
+      {\slot{one line naming what differs across the compared arms}};
+  \end{tikzpicture}}
+  \caption{\textbf{\slot{name it}.} \slot{one sentence; this caption is short by
+    design}.}
+  \label{fig:overview}
+  \vspace{-0.3cm}
+\end{wrapfigure}

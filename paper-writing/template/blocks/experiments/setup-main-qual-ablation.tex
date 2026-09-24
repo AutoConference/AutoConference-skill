@@ -1,0 +1,53 @@
+% Experiments: `setup-main-qual-ablation` (design-axes.md axis 7; P3).
+% Setup -> Main results -> Qualitative/distributional analysis -> Ablations.
+% The main results table is the first float of the section.
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Experimental setup}
+\label{sec:setup}
+
+\textbf{Data and evaluation.}
+\slot{the dataset, the split sizes, and the fixed evaluation semantics}
+
+\textbf{Compared configurations.}
+\slot{name every arm and its family; introduce the row tints or markers the
+table uses}
+
+\textbf{Seeds and repetition.}
+\slot{conditions, repetitions per condition and arm, total preserved runs,
+the estimator, the reporting threshold}
+
+\textbf{Environment.}
+\slot{interpreter, framework, hardware, failure handling; point to the
+appendix if one exists}
+
+\subsection{Main results}
+\label{sec:main-results}
+
+\input{tables/main_results}
+
+\textbf{\slot{The first question the table answers}?}
+\slot{read the table: the primary arm's margin, its uncertainty, whether it
+clears the threshold}
+
+\textbf{\slot{The second question}?}
+\input{tables/secondary_results}
+\Cref{tab:paired} \slot{reads the second table: consistency across
+conditions, any reversal, and what it implies}
+
+\subsection{\slot{Qualitative or distributional analysis}}
+\label{sec:analysis}
+
+\IfFileExists{data/opening.dat}{%
+  \input{figures/results_panel}%
+  \slot{read the figure: what the spread implies}%
+}{}
+\slot{one paragraph of analysis that uses only numbers already in the tables}
+
+\subsection{Ablations}
+\label{sec:ablations}
+
+\input{tables/ablations}
+\slot{read the ablation table: what each removed or swept component changes,
+and where the mechanism breaks}

@@ -1,0 +1,65 @@
+% Executable paper template, layout `cvpr2`, full-width opening variant.
+% CVPR two columns with the opening figure spanning both columns above the
+% abstract (P4, P7's Figure 1). The \twocolumn[...] argument holds the title
+% block and the opening; the abstract begins in the left column below it.
+\documentclass[10pt,twocolumn,letterpaper]{article}
+\PassOptionsToPackage{table,dvipsnames}{xcolor}
+\PassOptionsToPackage{numbers,compress,sort}{natbib}
+\usepackage[pagenumbers]{cvpr}
+\input{preamble}
+\input{macros}
+\IfFileExists{data/teaser.tex}{\input{data/teaser}}{}
+\IfFileExists{data/opening.tex}{\input{data/opening}}{}
+\input{blocks/contributions}
+\input{blocks/limitations}
+\input{blocks/devices}
+
+\def\paperID{0000}
+\def\confName{CVPR}
+\def\confYear{2026}
+
+% cvpr.sty's \maketitle never flushes \thanks: a footnote placed there
+% compiles clean and silently disappears. Put the synthetic-evidence
+% disclosure (and any note) in the author block below instead.
+\title{\slot{Title: one or two lines}}
+
+\author{%
+  \slot{Author One}\textsuperscript{1}\quad
+  \slot{Author Two}\textsuperscript{1}\quad
+  \slot{Author Three}\textsuperscript{2}\\
+  \textsuperscript{1}\slot{Institution}\quad
+  \textsuperscript{2}\slot{Institution}\\
+  {\tt\small \slot{contact@institution}}
+}
+
+\begin{document}
+\twocolumn[{%
+  \maketitle
+  \vspace{-1.2em}
+  % figures/opening.tex (results-wide) draws itself with \captionof inside
+  % this slot; it must not open a floating environment here.
+  \begin{center}
+    \input{figures/opening}
+  \end{center}
+  \vspace{0.4em}
+}]
+
+\begin{abstract}
+\input{sections/00_abstract}
+\end{abstract}
+
+\input{sections/01_introduction}
+\input{sections/02_related_work}
+\input{sections/03_method}
+\input{sections/04_experiments}
+\IfFileExists{sections/04b_ablation.tex}{\input{sections/04b_ablation}}{}
+\input{sections/05_conclusion}
+\AfterConclusionBlocks
+
+{\small
+\bibliographystyle{ieeenat_fullname}
+\bibliography{references}
+}
+
+\ifDesignAppendix\clearpage\input{sections/06_appendix}\fi
+\end{document}

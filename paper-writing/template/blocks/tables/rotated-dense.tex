@@ -1,0 +1,55 @@
+% Main table: `rotated-dense` (design-axes.md axis 8; P6).
+% Many condition columns with ROTATED headers (\rothead), small type, an
+% Average column first, boolean property columns with \cmark/\xmark. In this
+% grammar \best renders as an UNDERLINE (design.tex maps it), and scores of
+% other arms that fall below this paper's arm are wrapped in \worse{} (red).
+% This paper's rows are tinted. Caption ABOVE.
+%
+% Reporting uncertainty (references/table-grammar.md, "Reporting
+% uncertainty" -- read that section before filling this in): every
+% per-condition cell, for every arm, carries `mean [lo, hi]`, lo/hi =
+% min/max of that arm's own per_split[condition]['values'] -- bracket, never
+% `mean $\pm$ std`, since the range is observed and generally asymmetric.
+% This is the tightest of the six grammars by font size (7pt) and column
+% count, yet the one real draw (S26, 8 columns: Arm, 2 property/summary
+% columns, 5 rotated condition columns) fit the full per-cell treatment on
+% EVERY row with room to spare after \acfit -- rotating the HEADERS reclaims
+% enough vertical room that the horizontal cell width, which is what an
+% interval actually costs, was never the binding constraint. Re-verify by
+% rendering rather than assuming this holds at a higher column count.
+% Average stays a point estimate: its `std` is spread ACROSS conditions
+% (heterogeneity), not repeated-run noise.
+\begin{acwidetable}
+  \caption{\textbf{\slot{Main comparison, named}.} Best performance in each
+    column is \underline{highlighted}; \slot{what the property columns
+    mean}. \textcolor{ACWorse}{Red} marks scores lower than ours; bracketed
+    values are $[\min,\max]$ over the repeated runs behind each mean.}
+  \label{tab:main-results}
+  \vspace{-0.2cm}
+  \centering
+  {\fontsize{7pt}{8.5pt}\selectfont
+   % \acfit, not \resizebox: shrink to the float width when the table is too
+   % wide, and leave it alone when it is not. A plain resizebox ENLARGES a
+   % narrow table to fill the measure, so a seven-column table at 8pt printed
+   % bigger than the body text -- the reader's words for it were "oddly large,
+   % out of proportion". Every grammar in this directory had it.
+   \acfit{%
+     \begin{tabular}{l c c c c c c c c}
+       \toprule
+       \textbf{Arm} & \rothead{\slot{Params}} & \rothead{\slot{Property}}
+         & \rothead{Average} & \rothead{\slot{cond.\ 1}} & \rothead{\slot{cond.\ 2}}
+         & \rothead{\slot{cond.\ 3}} & \rothead{\slot{cond.\ 4}} & \rothead{\slot{cond.\ 5}} \\
+       \midrule
+       \slot{baseline one} & \slot{v} & \xmark & \worse{\slot{v}}
+         & \worse{\slot{v} \slot{lo, hi}} & \worse{\slot{v} \slot{lo, hi}} & \slot{v} \slot{lo, hi}
+         & \worse{\slot{v} \slot{lo, hi}} & \worse{\slot{v} \slot{lo, hi}} \\
+       \slot{baseline two} & \slot{v} & \cmark & \worse{\slot{v}}
+         & \worse{\slot{v} \slot{lo, hi}} & \slot{v} \slot{lo, hi} & \worse{\slot{v} \slot{lo, hi}}
+         & \worse{\slot{v} \slot{lo, hi}} & \worse{\slot{v} \slot{lo, hi}} \\
+       \midrule
+       \rowcolor{ACPrimary}\textbf{\slot{primary arm}} & \slot{v} & \cmark & \best{\slot{v}}
+         & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}}
+         & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}} \\
+       \bottomrule
+     \end{tabular}}}
+\end{acwidetable}

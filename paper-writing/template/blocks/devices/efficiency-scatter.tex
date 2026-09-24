@@ -1,0 +1,28 @@
+% Device: `efficiency-scatter` (design-axes.md axis 13; P4).
+% A quality-versus-cost scatter as the second figure: one point per arm,
+% each labeled in place, the primary arm highlighted, a dashed reference
+% line at the primary arm's quality, log-scale cost. Tier B from
+% data/efficiency.dat with columns: arm quality cost. The writer supplies
+% that file from the aggregates (cost from the run manifests).
+%
+% source-data: runs/aggregate__*.json, run manifests -> paper/data/efficiency.dat
+% generator:   written by the writer from the aggregates (no generator step)
+\newcommand{\efficiencyscatter}{%
+\IfFileExists{data/efficiency.dat}{%
+  \begin{figure}[t]
+    \centering
+    \begin{tikzpicture}
+      \begin{axis}[acplot, width=0.95\linewidth, height=5.0cm, xmode=log,
+        xlabel={\slot{cost, with unit}}, ylabel={\slot{quality metric}},
+        nodes near coords, point meta=explicit symbolic,
+        nodes near coords style={font=\tiny,anchor=south west,xshift=1pt},
+      ]
+        \addplot[only marks,mark=*,ACBlue,mark size=2.2pt]
+          table[x=cost,y=quality,meta=arm] {data/efficiency.dat};
+      \end{axis}
+    \end{tikzpicture}
+    \caption{\textbf{\slot{name the trade-off this plots}.} Each point is one arm; further
+      up and further left is better. \slot{one sentence stating where the
+      primary arm sits and against whom}.}
+    \label{fig:efficiency}
+  \end{figure}}{}}

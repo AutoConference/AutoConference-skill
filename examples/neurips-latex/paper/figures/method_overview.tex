@@ -1,0 +1,31 @@
+% Tier C structural overview. First float of the Method section, placed before
+% the section's first equation. Carries no magnitudes: it states what is fixed,
+% what varies, and what the paper reports.
+\begin{figure*}[t]
+  \centering
+  \resizebox{0.99\textwidth}{!}{%
+  \begin{tikzpicture}[x=1cm,y=1cm]
+    \node[acbox,minimum width=3.5cm,minimum height=1.15cm,align=center] (a) at (1.9,1.1)
+      {\textbf{Frozen \evalsem}\\Same bound code\\Same evaluation precision};
+    \node[acbox,minimum width=3.5cm,minimum height=1.15cm,align=center] (b) at (6.7,1.1)
+      {\textbf{Independent factors}\\\splitseed\\\trajseed};
+    \node[acbox,minimum width=3.7cm,minimum height=1.15cm,align=center] (c) at (11.7,1.1)
+      {\textbf{Comparable outputs}\\Mean, standard deviation,\\range, paired contrasts};
+    \draw[acarrow] (a) -- (b);
+    \draw[acarrow] (b) -- (c);
+    % text width is a cap, not a floor: at this 4.1cm center spacing the two
+    % callouts can grow only downward (more lines), never sideways into each
+    % other, regardless of how long the caption text is.
+    \node[acsoft,text width=3.6cm,align=center] at (5.0,2.55)
+      {The selection method is the treatment, not a source of hidden protocol
+       drift};
+    \node[acsoft,text width=3.6cm,align=center] at (9.1,2.55)
+      {Every reported statistic traces to preserved primary runs};
+  \end{tikzpicture}}
+  \caption{\textbf{Study design.} The evaluation is fixed before any comparison
+    begins, the two sources of randomness are varied independently, and the
+    reported statistics are defined in advance. Fixing the left panel is what
+    makes the right panel a measurement of the method rather than of the
+    protocol.}
+  \label{fig:overview}
+\end{figure*}

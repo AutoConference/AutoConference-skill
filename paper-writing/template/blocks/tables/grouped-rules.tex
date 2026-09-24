@@ -1,0 +1,75 @@
+% Main table: `grouped-rules` (design-axes.md axis 8; P7).
+% Two-level header: metric groups over metrics, vertical rules BETWEEN
+% GROUPS ONLY, every metric column carrying its own \up/\down. A `Scenario`
+% multirow groups the method rows. \best bold, \second underline.
+% Caption BELOW the table (the one grammar that places it there).
+%
+% With ONE metric (P7 had several): the column groups are condition families
+% (benchmarks, datasets), the columns within a group are conditions, and the
+% `Scenario` multirow becomes the arm family (Baselines / Ours). Both S10 and
+% S21 arrived at this mapping independently; use it rather than inventing one.
+%
+% Reporting uncertainty (references/table-grammar.md, "Reporting
+% uncertainty" -- read that section before filling this in): every data
+% cell, for every arm, carries `mean [lo, hi]`, lo/hi = min/max of that arm's
+% own per_split[condition]['values'] -- bracket, never `mean $\pm$ std`,
+% since the range is observed and generally asymmetric. This is the
+% tightest-by-construction of the six grammars (a two-level header AND
+% vertical rules competing for the same width), yet both real draws (S10 at
+% 4 data columns, S21 at 6 with a vertical-rule-separated Navigation group)
+% fit the full per-cell treatment at this grammar's default 7.5pt with room
+% to spare after \acfit -- see the delivery report's render checks. Treat
+% that as validated headroom, not a promise: a group-rules table with MORE
+% groups or metrics than S21's should re-check the rendered page before
+% assuming it also fits, and drop a column (never shrink the whole table)
+% if it does not. If this grammar carries a genuine Average/Overall column
+% (S21's does), that one column stays a point estimate: its `std` is spread
+% ACROSS conditions, not repeated-run noise.
+\begin{acwidetable}
+  \centering
+  {\fontsize{7.5pt}{9.5pt}\selectfont
+   % \acfit, not \resizebox: shrink to the float width when the table is too
+   % wide, and leave it alone when it is not. A plain resizebox ENLARGES a
+   % narrow table to fill the measure, so a seven-column table at 8pt printed
+   % bigger than the body text -- the reader's words for it were "oddly large,
+   % out of proportion". Every grammar in this directory had it.
+   \acfit{%
+     \begin{tabular}{l l | c c | c c | c c}
+       \toprule
+       & & \multicolumn{2}{c|}{\textbf{\slot{Group one}}}
+         & \multicolumn{2}{c|}{\textbf{\slot{Group two}}}
+         & \multicolumn{2}{c}{\textbf{\slot{Group three}}} \\
+       \textbf{Scenario} & \textbf{Arm}
+         & \slot{m1}\up & \slot{m2}\down
+         & \slot{m3}\down & \slot{m4}\up
+         & \slot{m5}\down & \slot{m6}\up \\
+       \midrule
+       \multirow{3}{*}{\slot{Scenario A}}
+         & \slot{baseline one} & \second{\slot{v} \slot{lo, hi}} & \slot{v} \slot{lo, hi}
+           & \slot{v} \slot{lo, hi} & \second{\slot{v} \slot{lo, hi}}
+           & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi} \\
+         & \slot{baseline two} & \slot{v} \slot{lo, hi} & \second{\slot{v} \slot{lo, hi}}
+           & \second{\slot{v} \slot{lo, hi}} & \slot{v} \slot{lo, hi}
+           & \second{\slot{v} \slot{lo, hi}} & \second{\slot{v} \slot{lo, hi}} \\
+         & \slot{primary arm} (Ours) & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}}
+           & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}}
+           & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}} \\
+       \midrule
+       \multirow{3}{*}{\slot{Scenario B}}
+         & \slot{baseline one} & \second{\slot{v} \slot{lo, hi}} & \slot{v} \slot{lo, hi}
+           & \slot{v} \slot{lo, hi} & \second{\slot{v} \slot{lo, hi}}
+           & \slot{v} \slot{lo, hi} & \slot{v} \slot{lo, hi} \\
+         & \slot{baseline two} & \slot{v} \slot{lo, hi} & \second{\slot{v} \slot{lo, hi}}
+           & \second{\slot{v} \slot{lo, hi}} & \slot{v} \slot{lo, hi}
+           & \second{\slot{v} \slot{lo, hi}} & \second{\slot{v} \slot{lo, hi}} \\
+         & \slot{primary arm} (Ours) & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}}
+           & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}}
+           & \best{\slot{v} \slot{lo, hi}} & \best{\slot{v} \slot{lo, hi}} \\
+       \bottomrule
+     \end{tabular}}}
+  \caption{\textbf{\slot{Main comparison, named}.} \slot{one sentence on
+    what each metric group measures}; bracketed values are $[\min,\max]$
+    over the repeated runs behind each mean. \textbf{Best} results are in
+    bold and \underline{second-best} are underlined.}
+  \label{tab:main-results}
+\end{acwidetable}

@@ -1,0 +1,7 @@
+% Contribution list: `numbered` (design-axes.md axis 3; P3).
+% An itemize whose markers are bold parenthesized numerals.
+\newcounter{accontrib}
+\newenvironment{contributionlist}
+  {\setcounter{accontrib}{0}\begin{itemize}[leftmargin=2.0em,itemsep=0.5ex,parsep=0pt,topsep=2pt]}
+  {\end{itemize}}
+\newcommand{\contribution}[1]{\stepcounter{accontrib}\item[\textbf{(\arabic{accontrib})}] #1}

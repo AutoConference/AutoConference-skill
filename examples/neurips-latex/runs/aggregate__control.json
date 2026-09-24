@@ -1,0 +1,81 @@
+{
+ "label": "control-matrix",
+ "method": "control",
+ "metric": "p2l_bound",
+ "estimator": "mean over trajectory seeds, per split seed",
+ "primary_inputs": [
+  "runs/control-split1-traj0__demo000.json",
+  "runs/control-split1-traj1__demo000.json",
+  "runs/control-split1-traj2__demo000.json",
+  "runs/control-split2-traj0__demo000.json",
+  "runs/control-split2-traj1__demo000.json",
+  "runs/control-split2-traj2__demo000.json",
+  "runs/control-split3-traj0__demo000.json",
+  "runs/control-split3-traj1__demo000.json",
+  "runs/control-split3-traj2__demo000.json",
+  "runs/control-split4-traj0__demo000.json",
+  "runs/control-split4-traj1__demo000.json",
+  "runs/control-split4-traj2__demo000.json",
+  "runs/control-split42-traj0__demo000.json",
+  "runs/control-split42-traj1__demo000.json",
+  "runs/control-split42-traj2__demo000.json"
+ ],
+ "per_split": {
+  "1": {
+   "mean": 0.412,
+   "std": 0.0135,
+   "n": 3,
+   "values": [
+    0.398,
+    0.413,
+    0.425
+   ]
+  },
+  "2": {
+   "mean": 0.405,
+   "std": 0.0177,
+   "n": 3,
+   "values": [
+    0.386,
+    0.408,
+    0.421
+   ]
+  },
+  "3": {
+   "mean": 0.418,
+   "std": 0.011,
+   "n": 3,
+   "values": [
+    0.407,
+    0.418,
+    0.429
+   ]
+  },
+  "4": {
+   "mean": 0.399,
+   "std": 0.0161,
+   "n": 3,
+   "values": [
+    0.382,
+    0.401,
+    0.414
+   ]
+  },
+  "42": {
+   "mean": 0.41,
+   "std": 0.0193,
+   "n": 3,
+   "values": [
+    0.389,
+    0.414,
+    0.427
+   ]
+  }
+ },
+ "overall": {
+  "mean": 0.4088,
+  "std": 0.0072,
+  "range": 0.019,
+  "n_splits": 5
+ }
+}

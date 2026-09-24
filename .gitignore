@@ -1,2 +1,6 @@
 .DS_Store
 node_modules/
+/state/
+/work/
+__pycache__/
+*.pyc

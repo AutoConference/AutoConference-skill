@@ -1,0 +1,29 @@
+% Palette: `warm-ochre` (design-axes.md axis 14).
+% ColorBrewer's PuOr / RdYlBu warm end (Brewer et al.), the one scheme in this
+% family whose primary is warm; papers drawn with it read entirely differently
+% from the cool-primary four without leaving published, print-safe colours.
+% Redefines the family's semantic color tokens. Every block reads the tokens,
+% never a literal color, so a paper changes its whole visual key here and
+% nowhere else. Color is always a redundant cue.
+\definecolor{ACBlue}{HTML}{B35806}   % primary / this paper's arm
+\definecolor{ACCyan}{HTML}{E08214}   % secondary accent
+\definecolor{ACLink}{HTML}{8073AC}   % project link only
+\definecolor{ACInk}{HTML}{33261A}   % body-dark
+\definecolor{ACMuted}{HTML}{7C6E60}   % rules, secondary text
+\definecolor{ACGreen}{HTML}{1B7837}   % a delta in the good direction
+\definecolor{ACWorse}{HTML}{B2182B}   % a delta in the bad direction
+\definecolor{ACPrimary}{HTML}{FAE3C8}   % row tint: this study's family
+\definecolor{ACCompare}{HTML}{E7E2F0}   % row tint: comparison family
+\definecolor{ACNeutral}{HTML}{E8E6E3}   % row tint: reference family
+\definecolor{ACRankOne}{HTML}{FDE3A7}   % cell background: best
+\definecolor{ACRankTwo}{HTML}{FAE3C8}   % cell background: second
+\definecolor{ACRankThree}{HTML}{E7E2F0}   % cell background: third
+\definecolor{BrickRed}{HTML}{B2182B}   % extra plot series
+\definecolor{ACDelta}{HTML}{1B7837}
+\definecolor{ACDeltaNeg}{HTML}{B2182B}
+%% The icon layer (preamble.tex). Frozen/trained keep a cool/warm split near
+%% the convention a reader already knows, so the badge is legible before its
+%% legend is read; both are drawn from this palette's own family.
+\definecolor{ACIcon}{HTML}{B35806}   % glyphs inside structural figures
+\definecolor{ACFrozen}{HTML}{5E8AB4}   % not updated during training
+\definecolor{ACTrained}{HTML}{B2182B}   % updated during training

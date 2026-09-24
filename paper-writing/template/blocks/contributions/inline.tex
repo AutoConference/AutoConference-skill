@@ -1,0 +1,7 @@
+% Contribution list: `inline` (design-axes.md axis 3; P1).
+% One paragraph; each contribution runs in after a bold parenthesized numeral.
+\newcounter{accontrib}
+\newenvironment{contributionlist}
+  {\setcounter{accontrib}{0}\par\noindent\ignorespaces}
+  {\par}
+\newcommand{\contribution}[1]{\stepcounter{accontrib}\textbf{(\arabic{accontrib})} #1 }

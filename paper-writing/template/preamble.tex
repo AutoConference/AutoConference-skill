@@ -1,0 +1,404 @@
+% Executable visual system distilled from arXiv:2506.21656.
+% Keep the NeurIPS geometry unchanged. Replace content, not the page grammar.
+% Contract: ../references/paper-writing-template.md
+
+% ---------------------------------------------------------------- packages
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{bm}
+\usepackage{nicefrac}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage{ragged2e}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{makecell}
+\usepackage{pifont}
+\usepackage{xspace}
+\usepackage{adjustbox}
+\usepackage{wrapfig}
+% wrapfig does not handle page breaks: declared near the bottom of a page, a
+% wrapfigure runs off it and over the venue footnote rather than moving. The
+% `wrap-compact` overview grammar reserves its own height with \needspace
+% before opening the environment, which is the standard guard.
+\usepackage{needspace}
+\usepackage{tabularx}
+\usepackage{threeparttable}
+\usepackage{siunitx}
+% xcolor must be loaded with its options BEFORE colortbl and nicematrix,
+% otherwise nicematrix pulls in an option-free xcolor and the build dies with
+% "Option clash for package xcolor".
+\usepackage[table,dvipsnames]{xcolor}
+\usepackage{colortbl}
+\usepackage{nicematrix}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,backgrounds,calc,fit,positioning,shapes.geometric,shadows.blur,shapes.misc}
+\usepackage{pgfplots}
+\usepgfplotslibrary{fillbetween}
+\pgfplotsset{compat=1.18}
+\usepackage{subcaption}
+\usepackage[most]{tcolorbox}
+\usepackage[colorlinks=true,linkcolor=ACBlue,citecolor=ACBlue,urlcolor=ACBlue]{hyperref}
+\usepackage[nameinlink,capitalize,noabbrev]{cleveref}
+
+% ------------------------------------------------------------------ palette
+% Semantic families. Color is a redundant grouping cue, never the encoding.
+\definecolor{ACBlue}{HTML}{1A4E8A}      % primary
+\definecolor{ACCyan}{HTML}{56BBCC}      % secondary
+\definecolor{ACLink}{HTML}{9A36FF}      % project link only
+\definecolor{ACNeutral}{RGB}{230,230,230}   % neutral / reference family
+\definecolor{ACCompare}{RGB}{252,228,214}   % comparison family
+\definecolor{ACPrimary}{RGB}{207,234,242}   % this study's family
+\definecolor{ACInk}{HTML}{15243A}
+\definecolor{ACMuted}{HTML}{65758B}
+\definecolor{ACGreen}{HTML}{2E8B57}
+% The icon layer's three tokens. Every palette redefines them, exactly like
+% the rest. Frozen/trained keep a cool/warm split close to the convention a
+% reader already knows from the literature (a blue snowflake, a warm flame);
+% that recognition is worth more than perfect palette purity, because the
+% badge has to be legible without reading its legend.
+\definecolor{ACIcon}{HTML}{1A4E8A}     % glyphs inside structural figures
+\definecolor{ACFrozen}{HTML}{3A7CA5}   % not updated during training
+\definecolor{ACTrained}{HTML}{D9541E}  % updated during training
+
+% ------------------------------------------------------------------- icons
+% The system figure in all seven source papers is not boxes and arrows. It is
+% boxes and arrows WITH ICONS, and that is most of the difference between a
+% figure a reader calls designed and one they call a flowchart. P1 puts a robot
+% on the policy model, a snowflake on the frozen reference and a flame on the
+% trained one. P7 draws four snowflakes, a flame beside the adapter it tunes,
+% and keys both in a legend in the corner.
+%
+% FontAwesome 5 Free supplies them: vector glyphs that recolour with the
+% palette, embedded in the PDF, with no external asset and no raster anywhere.
+% The load is guarded, so a TeX tree without the package still builds a
+% complete paper -- every icon simply renders as nothing. A missing glyph is
+% worth less than a failed build.
+\newif\ifACIcons\ACIconsfalse
+\IfFileExists{fontawesome5.sty}{\usepackage{fontawesome5}\ACIconstrue}{}
+
+% \acicon{Database} -- the glyph a node leads with, at the figure's icon size.
+% An unknown name collapses to nothing rather than erroring, for the same
+% reason. NOTE: \ifcsname is necessary but NOT sufficient -- fontawesome5
+% defines deprecated aliases (\faExchange, \faShield) whose glyphs are not in
+% the Free set and which error at use. Only names in references/figure-icons.md
+% have been verified to render; check_paper_structure.py enforces that list.
+\newcommand{\acicon}[1]{%
+  \ifACIcons\ifcsname fa#1\endcsname{\large\color{ACIcon}\csname fa#1\endcsname}\fi\fi}
+% the same glyph inline, at the surrounding text size, in a colour of your
+% choosing: for legends, badges and anything sitting in a line of prose.
+\newcommand{\aciconat}[2]{%
+  \ifACIcons\ifcsname fa#2\endcsname{\color{#1}\csname fa#2\endcsname}\fi\fi}
+\newcommand{\acsnow}{\aciconat{ACFrozen}{Snowflake}}
+\newcommand{\acflame}{\aciconat{ACTrained}{Fire}}
+
+% The five roles a structural figure has a glyph for. A design draws each one
+% (design_paper.py, axis 17) and writes the choice into design.tex; a writer
+% whose domain wants a different glyph renames it in macros.tex with one line,
+% choosing from references/figure-icons.md. Defaults are deliberately generic,
+% so a paper assembled without a design still gets a coherent figure.
+\providecommand{\acIconInput}{Database}     % what enters the system
+\providecommand{\acIconModel}{ProjectDiagram} % the shared backbone
+\providecommand{\acIconMech}{Cogs}          % the mechanism this paper adds
+\providecommand{\acIconOut}{Crosshairs}     % what is produced and reported
+\providecommand{\acIconEvid}{ChartBar}      % the statistics the mechanism reads
+
+% -------------------------------------------- glyphs FontAwesome does not have
+% Two things the source figures draw that no icon font supplies. (A repeated
+% stage is the `acdeck` style above, not a macro: it has to be a node so an
+% arrow can land on it.) Each is a
+% Tier C drawing: structure only, never a magnitude, never an image that does
+% not exist (references/figure-ladder.md).
+% \actokens{6}  a representation, drawn as a strip of tokens instead of named
+% \acgrid{4}    an attention or score matrix, drawn as a small checkered grid
+\newcommand{\actokens}[1]{%
+  \begin{tikzpicture}[baseline=-0.55ex]
+    \foreach \acti in {1,...,#1}{\node[actok] at (0.135*\acti,0) {};}
+  \end{tikzpicture}}
+\newcommand{\acgrid}[1]{%
+  \begin{tikzpicture}[baseline=-0.55ex]
+    \foreach \acgr in {1,...,#1}{\foreach \acgc in {1,...,#1}{%
+      \pgfmathparse{mod(\acgr+\acgc,2) == 0 ? 30 : 8}%
+      \node[draw=ACIcon!45,fill=ACIcon!\pgfmathresult,line width=0.25pt,
+            minimum size=0.13cm,inner sep=0pt] at (0.13*\acgc,-0.13*\acgr) {};}}
+  \end{tikzpicture}}
+% A circled operator, the way P7 keys its two concatenations: (W) and (C).
+\newcommand{\acop}[1]{%
+  \tikz[baseline=-0.55ex]{\node[draw=ACIcon!75,fill=white,circle,line width=0.5pt,
+    inner sep=0.6pt,font=\tiny\bfseries,text=ACIcon] {#1};}}
+
+% -------------------------------------------------------- slot enforcement
+% \slot{...} marks a value that evidence must supply.
+%   draft build      -> grey bracketed marker, compiles
+%   --final build    -> hard LaTeX error, build fails
+% This is the mechanical guarantee that no placeholder reaches a submission.
+\newif\ifACfinal\ACfinalfalse
+\newcommand{\slot}[1]{%
+  \ifACfinal
+    \PackageError{acpaper}{Unfilled slot: #1}%
+      {Every \string\slot\space must be replaced with verified evidence before a
+       final build. See references/paper-writing-template.md section 9.}%
+  \else
+    \textcolor{ACMuted}{\textit{[#1]}}%
+  \fi
+}
+
+% ------------------------------------------------------------- text macros
+\providecommand{\ie}{\textit{i.e.},\xspace}
+\providecommand{\eg}{\textit{e.g.},\xspace}
+\newcommand{\wo}{\textit{w/o}\xspace}
+\newcommand{\cmark}{\textcolor{ACGreen}{\ding{51}}}
+\newcommand{\xmark}{\textcolor{BrickRed}{\ding{55}}}
+\newcommand{\best}[1]{\textbf{#1}}
+\newcommand{\second}[1]{\underline{#1}}
+\newcommand{\up}{$\uparrow$}
+\newcommand{\down}{$\downarrow$}
+
+% Inline swatch used to introduce a table's row-tint families in prose.
+\newcommand{\tightcolorbox}[2]{%
+  \begingroup\setlength{\fboxsep}{1pt}\colorbox{#1}{#2}\endgroup
+}
+% Caption-legend swatch, matching the exemplar's caption key.
+\newcommand{\swatch}[1]{\colorbox{#1}{\phantom{\rule{1ex}{1ex}}}}
+
+% ------------------------------------------------------- reference formats
+\crefname{equation}{Eq.}{Eqs.}
+\crefformat{section}{\S#2#1#3}
+\crefformat{subsection}{\S#2#1#3}
+\crefformat{subsubsection}{\S#2#1#3}
+\crefrangeformat{section}{\S\S#3#1#4 to~#5#2#6}
+\crefmultiformat{section}{\S\S#2#1#3}{ and~#2#1#3}{, #2#1#3}{ and~#2#1#3}
+
+% ----------------------------------------------------------- title system
+% Page-1 mark, drawn in TikZ so the front page needs no external asset.
+% Never reuse the exemplar's logo.
+\newcommand{\ProjectMark}{%
+  \begin{tikzpicture}[baseline=-0.75ex,scale=0.84]
+    \fill[ACBlue!12,rounded corners=2.5pt] (-0.52,-0.52) rectangle (0.52,0.52);
+    \draw[ACBlue,line width=0.9pt] (-0.28,-0.15) -- (-0.04,0.12) -- (0.26,-0.10);
+    \draw[ACCyan,line width=1.1pt] (-0.28,-0.15) -- (-0.28,-0.36);
+    \draw[ACCyan,line width=1.1pt] (-0.04,0.12) -- (-0.04,0.35);
+    \draw[ACCyan,line width=1.1pt] (0.26,-0.10) -- (0.26,-0.34);
+    \draw[ACBlue,line width=0.9pt] (-0.38,0.30) -- (-0.02,0.02);
+    \draw[ACBlue,line width=0.9pt] (0.04,0.02) -- (0.37,0.29);
+    \fill[white] (-0.28,-0.15) circle (0.09);
+    \fill[white] (-0.04,0.12) circle (0.09);
+    \fill[white] (0.26,-0.10) circle (0.09);
+    \fill[ACBlue] (-0.38,0.30) circle (0.06);
+    \fill[ACBlue] (0.37,0.29) circle (0.06);
+  \end{tikzpicture}%
+}
+
+% Whether a project mark sits left of the title is drawn (design-axes.md axis
+% 16): P1, P3 and P7 carry one, P2 and P5 carry none and start the title at the
+% margin. Every paper in this family used to carry the same mark.
+% Scale a diagram to the float width, NEVER above its natural size. A plain
+% \resizebox{\acfloatwidth}{!} enlarges a small diagram to full width, and a
+% three-box figure stretched across a two-column page prints its labels larger
+% than the body text -- which is what "the figure is suddenly huge and out of
+% proportion" looks like from the reader's side.
+\newcommand{\acfit}[1]{\resizebox{\ifdim\width>\acfloatwidth\acfloatwidth\else\width\fi}{!}{#1}}
+
+% papers generated before the tick font was emitted still input an opening.tex
+% without it; keep them compiling.
+\providecommand{\OPxfont}{\scriptsize}
+
+% the column-width sibling of \acfit, for figures that are not full width
+\newcommand{\acfitcol}[1]{\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{#1}}
+% A pgfplots option list cannot carry a TeX conditional, so the choice is a
+% style name the generator picks and the block simply names.
+\pgfplotsset{acpointlabels/.style={nodes near coords,
+  nodes near coords style={font=\OPxfont,text=ACMuted,anchor=west,xshift=2pt},
+  point meta=explicit symbolic}}
+\pgfplotsset{acnopointlabels/.style={}}
+\providecommand{\OPpointstyle}{acpointlabels}
+
+\newif\ifDesignMark\DesignMarktrue
+\newcommand{\TitleBlock}[1]{%
+  \vspace{-0.2cm}
+  \ifDesignMark
+    \begin{tabular}{@{}m{1.32cm}m{12.10cm}@{}}
+      \centering\ProjectMark &
+      \begin{tabular}[t]{@{}l@{}}
+        #1
+      \end{tabular}
+    \end{tabular}%
+  \else
+    \begin{tabular}{@{}m{13.42cm}@{}}
+      \begin{tabular}[t]{@{}l@{}}
+        #1
+      \end{tabular}
+    \end{tabular}%
+  \fi
+}
+
+% neurips_2025.sty renders \@author inside a plain `tabular[t]{c}` cell, whose
+% `c` column has no width constraint: it sizes to the content's natural width
+% and only centers it, so a normal-length affiliation line (institution name,
+% \qquad, second institution) overflows the text block symmetrically on both
+% sides. This is independent of the title, and independent of author-name
+% length. Fixing it means bounding the content's own width before the style
+% file ever sees it: wrap \author{...} in this, and the outer `c` column
+% takes on the minipage's fixed, safe width and wraps long lines instead.
+\newcommand{\AuthorBlock}[1]{%
+  \begin{minipage}{0.92\textwidth}
+    \centering
+    #1
+  \end{minipage}%
+}
+
+% ------------------------------------------------------------ tikz styles
+% Tier C structural diagrams (references/figure-ladder.md).
+\tikzset{
+  acbox/.style={rounded corners=2.5pt,draw=ACBlue!55,line width=0.7pt,fill=white,inner sep=4pt},
+  acsoft/.style={rounded corners=2.5pt,draw=ACCyan!65,line width=0.7pt,fill=ACPrimary!35,inner sep=4pt},
+  acarrow/.style={-{Latex[length=2.2mm]},line width=0.8pt,draw=ACBlue!80},
+  acnote/.style={font=\scriptsize,text=ACMuted,align=center},
+  % --- vocabulary the overview-figure grammars share (design-axes.md axis 15).
+  % A system figure in this family is Tier C: boxes, arrows, badges and labels.
+  % It never implies a magnitude and never stands in for an image that does not
+  % exist, so the same diagram is honest whether or not artwork was ever made.
+  acstage/.style={acbox,align=center,font=\small,inner sep=5pt},
+  acbadge/.style={rounded corners=1.5pt,inner sep=1.6pt,font=\tiny\bfseries,text=white},
+  acfrozen/.style={acbadge,fill=ACMuted},
+  actrained/.style={acbadge,fill=ACBlue},
+  acgroupbox/.style={draw=ACMuted!55,dashed,rounded corners=3pt,inner sep=6pt},
+  acpanel/.style={acbox,draw=ACMuted!45,align=left,font=\footnotesize,inner sep=5pt},
+  acflow/.style={acsoft,align=left,font=\footnotesize,inner sep=4pt},
+  % --- the richer vocabulary (design-axes.md axis 15) ---------------------
+  % Measured off P1, P5 and P7. What separates their system figures from a
+  % flowchart is not more boxes; it is an icon in each box, a legend that keys
+  % the badges, a tint saying which region the paper contributed, and more
+  % than one kind of shape and arrow. Each of those is a style here, so a
+  % grammar spends its lines on the argument rather than on drawing.
+  %
+  % accard  a stage: an icon, a bold name, a muted line of what it does
+  % acdeck  the same card as a deck, for a stage that repeats K times
+  % actrap  a trapezium, the conventional shape for an encoder or decoder
+  % acours  a tinted region: what this paper contributes
+  % acbase  a grey region: what every compared arm already had
+  % aclegend the key, bottom-left or bottom-right, never floating free
+  % actag   the small uppercase label that names a region or a state
+  % actok   one token of a representation, for \actokens
+  % acstat  the second arrow language: statistics, not representations
+  accard/.style={acbox,align=center,font=\scriptsize,inner sep=4pt,
+                 minimum height=1.15cm,text width=2.0cm},
+  acdeck/.style={accard,fill=white,
+                 blur shadow={shadow blur steps=4,shadow xshift=1pt,
+                              shadow yshift=-1pt,shadow opacity=22}},
+  actrap/.style={trapezium,trapezium angle=68,draw=ACCyan!65,fill=ACCyan!8,
+                 line width=0.7pt,align=center,font=\scriptsize,inner sep=3pt,
+                 minimum height=1.1cm},
+  acours/.style={rounded corners=4pt,draw=ACBlue!45,fill=ACPrimary!75,line width=0.6pt},
+  acbase/.style={rounded corners=4pt,draw=ACMuted!40,fill=ACNeutral!60,line width=0.6pt},
+  aclegend/.style={rounded corners=2.5pt,draw=ACMuted!50,fill=white,inner sep=5pt,
+                   font=\scriptsize,align=left},
+  actag/.style={font=\tiny\bfseries,text=ACMuted,inner sep=1pt},
+  actok/.style={draw=ACIcon!70,fill=ACIcon!18,line width=0.35pt,
+                minimum size=2.4pt,inner sep=0pt},
+  acstat/.style={-{Latex[length=1.8mm]},line width=0.7pt,draw=ACCyan!85,
+                 dash pattern=on 2.2pt off 1.6pt},
+  % --- worked-instance vocabulary (design-axes.md axis 15, density pass) ---
+  % What kept a denser figure from turning into noise, measured on the first
+  % paper rebuilt this way (paper-batch-v2/S03-speculative-decoding): ONE
+  % shared ruler of positions or items reused by every compared row, and a
+  % cell's STATUS drawn as the cell's own fill and glyph rather than as a
+  % neutral cell plus a badge beside it. These styles are that vocabulary, so
+  % an overview grammar spends its lines on which items and which rows, never
+  % on redeclaring what a cell looks like.
+  %
+  % acitem       a per-item cell at a ruler position; the four variants below
+  %              ARE its status -- never leave a cell in the bare `acitem`
+  %              style next to one that has a state, the way an unfilled
+  %              table cell would read
+  % acitemkeep   kept / correct / retained at this position
+  % acitemdrop   dropped / rejected / incorrect at this position
+  % acitemgate   the position where THIS PAPER's mechanism makes a call the
+  %              other row does not (tint matches acours)
+  % acitemna     not reached / excluded / not applicable at this position
+  % acruler      the shared position or item label above or below the rows
+  % acrowlabel   a row's own name, right-aligned against the ruler
+  % acfeat       a small labelled node for one summand, statistic or
+  %              sub-step: what a decision or a merge reads, drawn small
+  %              enough that four or five sit in the space of one accard
+  acitem/.style={draw=ACMuted!45,rounded corners=1pt,line width=0.5pt,
+                 minimum width=0.62cm,minimum height=0.56cm,inner sep=0pt,
+                 fill=white,align=center,font=\small},
+  acitemkeep/.style={acitem,draw=ACGreen!60,fill=ACGreen!10},
+  acitemdrop/.style={acitem,draw=BrickRed!60,fill=BrickRed!8},
+  acitemgate/.style={acitem,draw=ACBlue!65,fill=ACPrimary!65},
+  acitemna/.style={acitem,draw=ACMuted!35,fill=ACNeutral!30,densely dotted},
+  acruler/.style={font=\tiny,text=ACMuted},
+  acrowlabel/.style={font=\scriptsize,align=right,text width=1.9cm},
+  acfeat/.style={draw=ACIcon!55,rounded corners=1.5pt,line width=0.5pt,
+                 fill=ACPrimary!18,minimum width=1.4cm,minimum height=0.5cm,
+                 align=center,font=\tiny,inner sep=1pt}
+}
+
+% Tier B plot defaults, so every pgfplots figure shares one visual key.
+\pgfplotsset{
+  acplot/.style={
+    width=0.92\linewidth, height=5.0cm,
+    ymajorgrids, grid style={ACMuted!25,line width=0.4pt},
+    axis line style={ACInk!70},
+    tick label style={font=\scriptsize,text=ACInk},
+    label style={font=\small,text=ACInk},
+    legend style={font=\scriptsize,draw=ACMuted!40,fill=white,
+                  at={(0.5,1.03)},anchor=south,legend columns=-1},
+    every axis plot/.append style={line width=0.9pt,mark size=1.7pt},
+  }
+}
+
+\newtcolorbox{protocolbox}[1]{
+  enhanced, breakable,
+  colback=white, colframe=ACCyan!80, coltitle=ACBlue,
+  fonttitle=\bfseries\sffamily, title=#1,
+  titlerule=0.7pt, boxrule=0.9pt,
+  left=1mm,right=1mm,top=1mm,bottom=1mm, boxsep=1mm
+}
+
+% ------------------------------------------------------- float and spacing
+\captionsetup[figure]{font=small}
+\captionsetup[table]{font=small,skip=6pt}
+\setlist[itemize]{leftmargin=1.5em,itemsep=2pt,topsep=3pt}
+\setlist[enumerate]{leftmargin=1.7em,itemsep=2pt,topsep=3pt}
+\setlength{\belowcaptionskip}{-2pt}
+\setlength{\textfloatsep}{12pt plus 2pt minus 2pt}
+\setlength{\intextsep}{10pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{5pt}
+\sisetup{detect-all,table-number-alignment=center,table-format=1.3}
+
+% ------------------------------------------------- family additions (design-axes.md)
+% Colors the alternative table grammars draw with. Defined here so a design's
+% design.tex can map the semantic markers onto them without touching prose.
+\definecolor{ACRankOne}{HTML}{FFF2A8}     % P4: best        (yellow)
+\definecolor{ACRankTwo}{HTML}{FFD9A8}     % P4: second      (orange)
+\definecolor{ACRankThree}{HTML}{CFE3F5}   % P4: third       (blue)
+\definecolor{ACWorse}{HTML}{C0392B}       % P6: worse than ours
+\definecolor{ACDelta}{HTML}{2E8B57}       % P6: signed delta annotation
+\definecolor{ACDeltaNeg}{HTML}{C0392B}
+\usepgfplotslibrary{groupplots,polar}
+\usepackage{caption}
+\usepackage{capt-of}
+% \best and \second are (re)defined by paper/design.tex according to the drawn
+% table grammar; these are the legacy defaults for papers without a design.
+\providecommand{\rankone}[1]{#1}
+\providecommand{\ranktwo}[1]{#1}
+\providecommand{\rankthree}[1]{#1}
+\providecommand{\worse}[1]{#1}
+\providecommand{\deltarow}[1]{\textcolor{ACGreen}{\textbf{#1}}}
+\providecommand{\deltacell}[1]{{\tiny\ \textcolor{ACDelta}{(#1)}}}
+\providecommand{\rothead}[1]{\rotatebox{90}{\textbf{#1}}}
+% Hooks the design blocks fill: what renders after the conclusion (an
+% unnumbered Limitations or LLM Usage section) and inside it.
+\providecommand{\AfterConclusionBlocks}{}
+\providecommand{\LimitationsInConclusion}{}
+\providecommand{\LimitationsInAppendix}{}
+% Layout-specific packages and settings come last so they can override.
+% The drawn palette redefines every semantic color token; it is input after
+% the defaults above so it wins, and its absence leaves the house scheme.
+\IfFileExists{palette.tex}{\input{palette}}{}
+\IfFileExists{preamble-layout.tex}{\input{preamble-layout}}{}
+\IfFileExists{design.tex}{\input{design}}{}

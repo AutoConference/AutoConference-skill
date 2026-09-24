@@ -1,0 +1,29 @@
+%% Palette: `ac-house` (design-axes.md axis 14).
+%% The exemplar's own scheme (arXiv:2506.21656), kept as the house default.
+%% Redefines the family's semantic color tokens. Every block reads the tokens,
+%% never a literal color, so a paper changes its whole visual key here and
+%% nowhere else. Color is always a redundant cue: the tables still mark best
+%% with \best and direction with \up/\down, so a greyscale print loses
+%% nothing that carries meaning.
+\definecolor{ACBlue}{HTML}{1A4E8A}   % primary / this paper's arm
+\definecolor{ACCyan}{HTML}{56BBCC}   % secondary accent
+\definecolor{ACLink}{HTML}{9A36FF}   % project link only
+\definecolor{ACInk}{HTML}{15243A}   % body-dark
+\definecolor{ACMuted}{HTML}{65758B}   % rules, secondary text
+\definecolor{ACGreen}{HTML}{2E8B57}   % a delta in the good direction
+\definecolor{ACWorse}{HTML}{C0392B}   % a delta in the bad direction
+\definecolor{ACPrimary}{HTML}{CFEAF2}   % row tint: this study's family
+\definecolor{ACCompare}{HTML}{FCE4D6}   % row tint: comparison family
+\definecolor{ACNeutral}{HTML}{E6E6E6}   % row tint: reference family
+\definecolor{ACRankOne}{HTML}{FFF2A8}   % cell background: best
+\definecolor{ACRankTwo}{HTML}{FFD9A8}   % cell background: second
+\definecolor{ACRankThree}{HTML}{CFE3F5}   % cell background: third
+\definecolor{BrickRed}{HTML}{B22222}   % extra plot series
+\definecolor{ACDelta}{HTML}{2E8B57}
+\definecolor{ACDeltaNeg}{HTML}{C0392B}
+%% The icon layer (preamble.tex). Frozen/trained keep a cool/warm split near
+%% the convention a reader already knows, so the badge is legible before its
+%% legend is read; both are drawn from this palette's own family.
+\definecolor{ACIcon}{HTML}{1A4E8A}   % glyphs inside structural figures
+\definecolor{ACFrozen}{HTML}{3A7CA5}   % not updated during training
+\definecolor{ACTrained}{HTML}{D9541E}   % updated during training

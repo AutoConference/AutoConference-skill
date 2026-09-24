@@ -1,0 +1,187 @@
+% Method. Contract: ../references/section-playbook.md and equation-grammar.md
+% 1300-2100 words, 3-4 subsections, at least 4 numbered equations.
+% The overview figure is the first thing in the section, before any equation.
+\section{Method}
+\label{sec:method}
+\input{figures/method_overview}
+
+\subsection{Setting and notation}
+\label{sec:setting}
+
+A disagreement-based certificate bounds the risk of a target model through a
+simpler \surrogate\ that admits a computable guarantee.
+\Cref{fig:overview} summarizes the design: the evaluation is fixed first, the
+two sources of randomness are varied independently, and the reported statistics
+are defined before any comparison is run. We write one evaluation instance as a
+tuple $(\mathcal{S}, m, \tau) \rightarrow \bnd$, where $\mathcal{S}$ is the data
+split, $m$ the selection method that determines which examples the \surrogate\
+is built from, $\tau$ the \trajseed\ that fixes the optimization path, and
+$\bnd$ the resulting \certbound. Lower $\bnd$ is better.
+
+The certificate has two parts that move in opposite directions when the
+selection method changes, which is the reason a selection effect is not
+self-evident:
+\begin{equation}\label{eq:certificate}
+  \bnd \;=\; \underbrace{\mathcal{C}(\hypclass)}_{\text{\surrogate\ guarantee}}
+  \;+\;
+  \underbrace{\widehat{d}(\dataset_u)}_{\text{\disagreement}},
+\end{equation}
+where $\mathcal{C}(\hypclass)$ is the \surrogate's own guarantee, which depends
+on its complexity relative to its prior, and $\widehat{d}(\dataset_u)$ is the
+estimated disagreement between target and \surrogate\ measured on an unlabeled
+set $\dataset_u$. \Cref{eq:certificate} is what makes the comparison in this
+paper non-trivial: a selection method that reduces the second term by fitting
+$\dataset_u$ more aggressively can enlarge the first by more than it gains, and
+the observed $\bnd$ reports only the sum. Neither term is separately reported by
+the pipeline, so a method comparison at the level of $\bnd$ cannot attribute a
+difference to one term or the other without additional instrumentation.
+
+Three things are fixed for every run reported in this paper: the bound
+computation itself, the evaluation precision, and the split boundaries between
+training, validation, disagreement, and test data. Changing any of them makes
+numbers on either side of the change incomparable, so they are frozen before the
+matrix is registered and are never treated as tunable. Concretely, the
+confidence parameter is $\delta = 0.05$, the bound-inversion grid holds 1000
+points, the Monte Carlo estimate of the \disagreement uses 10{,}000 samples,
+and the four-way split is drawn once per \splitseed\ and reused by every method
+at that split. The training and disagreement partitions never overlap.
+
+\subsection{The compared selection methods}
+\label{sec:methods}
+
+The two selection methods differ in exactly one respect: the criterion used to
+choose the examples the \surrogate\ is fitted on. \methodrandom\ draws them
+uniformly without replacement from the training partition. \methodmax\ ranks
+candidates by the target model's loss and takes the highest-loss examples, which
+is the strategy with the most direct control over the region where target and
+\surrogate\ are most likely to disagree. Both draw the same number of examples,
+run for the same number of epochs, use the same optimizer and schedule, and are
+evaluated by the same frozen code path. The \methodcontrol\ is the unmodified
+upstream pipeline, re-run and recorded in this environment rather than quoted
+from a prior publication, because published numbers came from different
+hardware, a different epoch budget, and full-precision evaluation.
+
+Holding the budget equal needs saying precisely, because the two criteria
+consume it differently. Both arms select the same number of examples and train
+for the same number of epochs on them, so the \surrogate\ sees the same number
+of gradient steps in both. \methodmax\ additionally requires a forward pass over
+the training partition to rank candidates by target loss, which is a one-time
+cost outside the training loop and is not charged against the epoch budget. That
+asymmetry favours \methodmax\ in wall-clock terms and is irrelevant to the
+certificate, which depends on the fitted \surrogate\ and not on how its training
+set was chosen. We report it because a budget claim that is only true of one
+resource is the kind of detail that makes two studies incomparable later.
+
+This is a deliberately narrow contrast. Richer strategies exist, including
+disagreement-aware and hybrid criteria, and they are not evaluated here. The
+narrow contrast is what makes the identification argument in the next subsection
+possible: two arms that differ in one criterion, run over the same splits with
+the same budget, admit an exact pairing that a broader sweep would not.
+
+\subsection{Separating the factors}
+\label{sec:factors}
+
+A comparison between two selection methods is identifiable only if the remaining
+sources of variation are either held fixed or averaged over. We therefore treat
+each observed bound as the sum of a split effect and a trajectory residual under
+that split:
+\begin{equation}\label{eq:decomposition}
+  \bnd_{\splitidx\trajidx}^{(m)}
+  \;=\;
+  \mu^{(m)} + \alpha_{\splitidx} + \varepsilon_{\splitidx\trajidx}^{(m)},
+  \qquad
+  \textstyle\sum_{\splitidx} \alpha_{\splitidx} = 0,
+\end{equation}
+where $\bnd_{\splitidx\trajidx}^{(m)}$ is the bound obtained by method $m$ at
+\splitseed\ $\splitidx$ and \trajseed\ $\trajidx$, $\mu^{(m)}$ is the method's
+grand mean, $\alpha_{\splitidx}$ is the effect of the split itself, shared by all
+methods, and $\varepsilon_{\splitidx\trajidx}^{(m)}$ is the trajectory residual.
+\Cref{eq:decomposition} states the identification problem directly: a difference
+between methods measured at different splits confounds $\mu^{(m)}$ with
+$\alpha_{\splitidx}$, so it is not evidence about the method.
+
+\textbf{Design rule}: \textit{a method contrast is reported only when it is
+measured within a split, and a method ranking is reported only when it is
+consistent across splits.}
+
+Both halves of that rule matter. The first removes $\alpha_{\splitidx}$ from the
+contrast by construction rather than by assumption. The second prevents a
+ranking that holds at one split and reverses at another from being reported as a
+property of the method, which is the failure mode that a single-split comparison
+cannot detect. The rule is restrictive on purpose: it can leave a study with a
+measured contrast and no ranking to report, and that outcome is a result rather
+than a shortfall.
+
+\subsection{Estimators and uncertainty}
+\label{sec:estimators}
+
+For each method $m$ and \splitseed\ $\splitidx$ we run $T$ trajectory seeds and
+summarize them by their mean and their spread:
+\begin{equation}\label{eq:persplit}
+  \bar{\bnd}^{(m)}_{\splitidx} = \frac{1}{T}\sum_{\trajidx=1}^{T}
+    \bnd^{(m)}_{\splitidx\trajidx},
+  \qquad
+  s^{(m)}_{\splitidx} = \sqrt{\frac{1}{T-1}\sum_{\trajidx=1}^{T}
+    \bigl(\bnd^{(m)}_{\splitidx\trajidx} - \bar{\bnd}^{(m)}_{\splitidx}\bigr)^2},
+\end{equation}
+where $T$ is the number of trajectory seeds per split,
+$\bar{\bnd}^{(m)}_{\splitidx}$ the per-split mean, and $s^{(m)}_{\splitidx}$ the
+trajectory standard deviation under a fixed split. \Cref{eq:persplit} is the
+unit of evidence in this paper: a single trajectory is an observation, and only
+$\bar{\bnd}^{(m)}_{\splitidx}$ with its spread is quoted as a result. The spread
+is reported alongside the mean everywhere the mean appears, including in the
+abstract, because the two numbers answer different questions and the first is
+uninterpretable without the second.
+
+The headline comparison is the paired contrast between two methods, taken within
+split and trajectory index so that both $\alpha_{\splitidx}$ and any shared
+trajectory effect cancel:
+\begin{equation}\label{eq:contrast}
+  \Delta_{\splitidx} = \bar{\bnd}^{(m_1)}_{\splitidx} - \bar{\bnd}^{(m_2)}_{\splitidx},
+  \qquad
+  \bar{\Delta} = \frac{1}{S}\sum_{\splitidx=1}^{S} \Delta_{\splitidx},
+\end{equation}
+where $S$ is the number of \splitseed{}s, $\Delta_{\splitidx}$ the within-split
+contrast, and $\bar{\Delta}$ its mean across splits. \Cref{eq:contrast} is the
+quantity reported in the main results table; the per-split $\Delta_{\splitidx}$
+are reported alongside it so that a mean contrast cannot hide a reversal.
+
+Finally, a contrast is only reported as a finding when it exceeds the noise it is
+measured against:
+\begin{equation}\label{eq:decision}
+  \bigl|\bar{\Delta}\bigr| \;>\; \kappa \cdot
+  \max_{m,\splitidx}\, s^{(m)}_{\splitidx},
+  \qquad \kappa = 1.0,
+\end{equation}
+where $\kappa$ is a threshold fixed before the matrix was run and
+$\max_{m,\splitidx} s^{(m)}_{\splitidx}$ is the largest within-split trajectory
+spread observed anywhere in the matrix. The threshold is expressed against an observed spread rather than against a
+distributional assumption because the quantity in question, the movement of a
+certificate under a change of \trajseed, has no established parametric form here
+and only three observations per cell from which to estimate one.
+\Cref{eq:decision} is a stopping rule rather than a significance test: when it fails, the finding this paper reports is
+that the methods are indistinguishable at this scale, and that statement is
+recorded rather than replaced by a smaller comparison that happens to pass. The
+comparison against the largest observed spread, rather than against the spread of
+the winning arm, is the conservative choice; \cref{sec:appendix-statistics}
+reports what the verdict would have been under the alternatives.
+
+\subsection{Provenance}
+\label{sec:provenance}
+
+Every run writes a raw result together with a manifest recording its method,
+source script and revision, exact command, dataset, \splitseed, \trajseed, full
+configuration, timestamps, and environment. Aggregates enumerate the primary run
+paths they were computed from. A quantity whose primary record is missing,
+overwritten, or method-ambiguous is excluded from the main paper rather than
+reported with a caveat. This matters in practice because the upstream pipeline
+names its output files from hyperparameters alone, so two different methods run
+at the same hyperparameters write to the same filename and the second silently
+overwrites the first. The aggregation step reads only manifests and raw results. It refuses to write
+an aggregate when a listed primary input is absent from disk, so a broken
+evidence chain surfaces as a failure at aggregation time rather than as a
+plausible number in a table. Each aggregate stores the estimator it applied, the
+per-seed values it combined, and the paths it combined them from, which is what
+makes a reported statistic checkable rather than merely reproducible in
+principle. \Cref{sec:appendix-provenance} gives the manifest schema and the
+aggregation procedure in full.

@@ -1,0 +1,41 @@
+% Introduction. Contract: ../references/section-playbook.md
+% Four paragraphs, then the contribution list in the drawn style
+% (blocks/contributions.tex defines \begin{contributionlist} / \contribution).
+%   P1  the scientific problem and why it matters
+%   P2  the specific unresolved observation; hinge on "However, ..."
+%   P3  what this paper separates, controls, or introduces
+%   P4  the supported result and its scope; the headline number appears here
+% If the design drew the `rhetorical-hook` device, P1 opens with a question
+% to the reader. If it drew `prior-limitations`, P2 names numbered bold
+% limitations of prior work. If contributions = none, replace the list with
+% one sentence: "Our key contribution is ...".
+% Instructions stay in comments. Nothing in this file may render as guidance.
+\section{Introduction}
+\label{sec:introduction}
+
+% P1 - problem. Cite the field, not this paper. No agent-process narration.
+\slot{two to four sentences on the scientific problem, what it enables, and
+why it matters now, with verified citations of the field}
+
+% P2 - gap. State the observation, then why existing evidence cannot settle it.
+\slot{the specific unresolved observation, stated precisely}. However,
+\slot{why existing approaches or evidence do not settle it: the confound,
+the missing control, or the unmet requirement}.
+
+% P3 - what this paper does. Name the mechanism, not just the method name.
+\slot{what this paper introduces or separates, naming the mechanism and its
+components in the order the method section presents them}
+
+% P4 - result and scope. The headline number belongs here, not only later.
+\slot{the strongest supported claim with its uncertainty, the data, the
+scale, the number of conditions and repetitions}. \slot{one sentence stating
+what this does and does not establish}
+
+Our contributions are summarized as follows:
+\begin{contributionlist}
+  \contribution{\slot{contribution one: one falsifiable sentence naming what
+    is introduced and the evidence class that supports it}}
+  \contribution{\slot{contribution two}}
+  \contribution{\slot{contribution three, or delete this item rather than
+    weakening it}}
+\end{contributionlist}

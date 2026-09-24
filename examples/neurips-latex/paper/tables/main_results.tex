@@ -1,0 +1,39 @@
+% Mandatory main results table. Contract: references/table-grammar.md, pattern 1.
+% Every cell is filled from runs/aggregate__<method>.json.
+\begin{table}[t!]
+  \caption{\textbf{\certbound\ (\down) under the frozen protocol.}
+    \swatch{ACCompare} is the \methodcontrol,
+    \swatch{ACPrimary} are the compared selection methods.
+    Mean is over 5 \splitseed{}s, each aggregating 3 trajectory seeds under
+    identical \evalsem. Std.\ is the standard deviation of the per-split means
+    and Range is their max\,$-$\,min; both describe variation \emph{between}
+    splits, not within one. The paired contrast is computed against the
+    \methodcontrol\ within split and trajectory index, following
+    \cref{eq:contrast}; ``--'' marks the row a contrast is taken against.}
+  \label{tab:main-results}
+  \vspace{-0.2cm}
+  \centering
+  {\fontsize{8pt}{11pt}\selectfont
+   \resizebox{\linewidth}{!}{%
+     \begin{NiceTabular}{l c c c c c c c}[colortbl-like]
+       \toprule[1.2pt]
+         & \begin{tabular}{c}\textbf{Split}\\\textbf{seeds}\end{tabular}
+         & \begin{tabular}{c}\textbf{Traj.}\\\textbf{per split}\end{tabular}
+         & \textbf{Mean}
+         & \textbf{Std.}
+         & \textbf{Range}
+         & \begin{tabular}{c}\textbf{Max traj.}\\\textbf{std.}\end{tabular}
+         & \begin{tabular}{c}\textbf{Paired}\\\textbf{contrast}\end{tabular} \\
+       \midrule[1.2pt]\midrule
+       \rowcolor{ACCompare}\methodcontrol
+         & 5 & 3 & 0.409 & 0.007 & 0.019 & 0.019 & -- \\
+       \midrule
+       \rowcolor{ACPrimary}\methodmax
+         & 5 & 3 & 0.398 & 0.009 & 0.024 & 0.023 & $-0.011$ \\
+       \rowcolor{ACPrimary}\methodrandom
+         & 5 & 3 & 0.387 & 0.013 & 0.030 & 0.032 & $-0.022$ \\
+       \bottomrule
+     \end{NiceTabular}
+   }
+  }
+\end{table}

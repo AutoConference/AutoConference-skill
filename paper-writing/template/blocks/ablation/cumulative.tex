@@ -1,0 +1,26 @@
+% Ablation: `cumulative` (design-axes.md axis 9; P2).
+% One build-up: Baseline, then each row adds one component to the previous
+% ("+ A", "+ A&B", ...), ending in the full method in bold. Same metric
+% columns as the main table, direction in the header. Caption ABOVE.
+\begin{acwidetable}
+  \caption{\textbf{\slot{name this build-up in your own words, e.g. what each
+    added component buys}.} \slot{one sentence naming each added component and the
+    abbreviation used for it}.}
+  \label{tab:ablation}
+  \vspace{-0.2cm}
+  \centering
+  {\fontsize{8pt}{10pt}\selectfont
+   \begin{tabular}{l c c c c}
+     \toprule
+     & \textbf{\slot{metric 1}} (\up) & \textbf{\slot{metric 2}} (\up)
+     & \textbf{\slot{metric 3}} (\down) & \textbf{\slot{metric 4}} (\down) \\
+     \midrule
+     Baseline                       & \slot{v} & \slot{v} & \slot{v} & \slot{v} \\
+     + \slot{A}                     & \slot{v} & \slot{v} & \slot{v} & \slot{v} \\
+     + \slot{A}\&\slot{B}           & \slot{v} & \slot{v} & \slot{v} & \slot{v} \\
+     + \slot{A}\&\slot{B}\&\slot{C} & \slot{v} & \slot{v} & \slot{v} & \slot{v} \\
+     \midrule
+     \slot{method name} (ours)      & \best{\slot{v}} & \best{\slot{v}} & \best{\slot{v}} & \best{\slot{v}} \\
+     \bottomrule
+   \end{tabular}}
+\end{acwidetable}

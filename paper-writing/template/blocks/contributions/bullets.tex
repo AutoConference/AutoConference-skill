@@ -1,0 +1,7 @@
+% Contribution list: `bullets` (design-axes.md axis 3; P2, P5, P6, P7).
+% Plain bullets, one falsifiable sentence each. The introduction writes
+%   \begin{contributionlist} \contribution{...} \contribution{...} \end{contributionlist}
+\newenvironment{contributionlist}
+  {\begin{itemize}[leftmargin=1.4em,itemsep=0.5ex,parsep=0pt,topsep=2pt]}
+  {\end{itemize}}
+\newcommand{\contribution}[1]{\item #1}

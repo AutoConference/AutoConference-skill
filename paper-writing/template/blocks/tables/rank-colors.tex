@@ -1,0 +1,59 @@
+% Main table: `rank-colors` (design-axes.md axis 8; P4).
+% The best / second / third value in every numeric column carries a
+% yellow / orange / blue cell background (\rankone \ranktwo \rankthree),
+% stated in the caption. A `Type` multirow groups rows; boolean property
+% columns use \cmark / \xmark; vertical rules separate column groups.
+% Caption ABOVE.
+%
+% Reporting uncertainty (references/table-grammar.md, "Reporting
+% uncertainty" -- read that section before filling this in): every numeric
+% metric or cost cell (never the \cmark/\xmark property columns, which are
+% categorical, not measured) carries `mean [lo, hi]`, lo/hi = min/max of
+% that arm's own per_split[condition]['values'] -- bracket, never
+% `mean $\pm$ std`, since the range is observed and generally asymmetric.
+% Not drawn by any of the six papers proven so far, so treat this grammar's
+% width margin as unverified: it shares rotated-dense's column pressure
+% (three column groups behind vertical rules, mixed metric/property/cost
+% types) without that grammar's rotated headers to reclaim vertical space,
+% so build and LOOK at the actual rendered table before trusting the full
+% per-cell treatment sketched below -- drop a column or the least-informative
+% metric first if \acfit shrinks past legibility, rather than shrinking the
+% whole table (references/table-grammar.md, "Width handling").
+\begin{acwidetable}
+  \caption{\textbf{\slot{Main comparison, named}.} The best / second / third
+    results in each numeric column are highlighted with
+    \colorbox{ACRankOne}{yellow} / \colorbox{ACRankTwo}{orange} /
+    \colorbox{ACRankThree}{blue} backgrounds. \slot{what the property
+    columns mean}; bracketed values are $[\min,\max]$ over the repeated
+    runs behind each mean.}
+  \label{tab:main-results}
+  \vspace{-0.2cm}
+  \centering
+  {\fontsize{7.5pt}{9.5pt}\selectfont
+   % \acfit, not \resizebox: shrink to the float width when the table is too
+   % wide, and leave it alone when it is not. A plain resizebox ENLARGES a
+   % narrow table to fill the measure, so a seven-column table at 8pt printed
+   % bigger than the body text -- the reader's words for it were "oddly large,
+   % out of proportion". Every grammar in this directory had it.
+   \acfit{%
+     \begin{tabular}{l l | c c c | c c | c}
+       \toprule
+       \textbf{Type} & \textbf{Arm}
+         & \textbf{\slot{metric 1}\up} & \textbf{\slot{metric 2}\down} & \textbf{\slot{metric 3}\up}
+         & \textbf{\slot{prop.\ 1}} & \textbf{\slot{prop.\ 2}}
+         & \textbf{\slot{cost}\down} \\
+       \midrule
+       \multirow{2}{*}{\slot{Type A}}
+         & \slot{baseline one} & \rankthree{\slot{v} \slot{lo, hi}} & \slot{v} \slot{lo, hi}
+           & \slot{v} \slot{lo, hi} & \cmark & \xmark & \slot{v} \slot{lo, hi} \\
+         & \slot{baseline two} & \slot{v} \slot{lo, hi} & \ranktwo{\slot{v} \slot{lo, hi}}
+           & \rankthree{\slot{v} \slot{lo, hi}} & \cmark & \cmark & \slot{v} \slot{lo, hi} \\
+       \midrule
+       \multirow{2}{*}{\slot{Type B}}
+         & \slot{baseline three} & \ranktwo{\slot{v} \slot{lo, hi}} & \rankthree{\slot{v} \slot{lo, hi}}
+           & \ranktwo{\slot{v} \slot{lo, hi}} & \xmark & \cmark & \slot{v} \slot{lo, hi} \\
+         & \textbf{\slot{primary arm}} & \rankone{\slot{v} \slot{lo, hi}} & \rankone{\slot{v} \slot{lo, hi}}
+           & \rankone{\slot{v} \slot{lo, hi}} & \cmark & \cmark & \rankone{\slot{v} \slot{lo, hi}} \\
+       \bottomrule
+     \end{tabular}}}
+\end{acwidetable}

@@ -1,0 +1,29 @@
+%% Palette: `okabe-ito` (design-axes.md axis 14).
+%% Okabe & Ito's colour-blind-safe qualitative set, as popularised by Wong, 'Points of View: Color blindness', Nature Methods 8:441 (2011).
+%% Redefines the family's semantic color tokens. Every block reads the tokens,
+%% never a literal color, so a paper changes its whole visual key here and
+%% nowhere else. Color is always a redundant cue: the tables still mark best
+%% with \best and direction with \up/\down, so a greyscale print loses
+%% nothing that carries meaning.
+\definecolor{ACBlue}{HTML}{0072B2}   % primary / this paper's arm
+\definecolor{ACCyan}{HTML}{56B4E9}   % secondary accent
+\definecolor{ACLink}{HTML}{CC79A7}   % project link only
+\definecolor{ACInk}{HTML}{102A43}   % body-dark
+\definecolor{ACMuted}{HTML}{6B7C8C}   % rules, secondary text
+\definecolor{ACGreen}{HTML}{009E73}   % a delta in the good direction
+\definecolor{ACWorse}{HTML}{D55E00}   % a delta in the bad direction
+\definecolor{ACPrimary}{HTML}{D7EBF8}   % row tint: this study's family
+\definecolor{ACCompare}{HTML}{FBE6CC}   % row tint: comparison family
+\definecolor{ACNeutral}{HTML}{E8E8E8}   % row tint: reference family
+\definecolor{ACRankOne}{HTML}{FBF3C4}   % cell background: best
+\definecolor{ACRankTwo}{HTML}{FAD9B8}   % cell background: second
+\definecolor{ACRankThree}{HTML}{D7EBF8}   % cell background: third
+\definecolor{BrickRed}{HTML}{D55E00}   % extra plot series
+\definecolor{ACDelta}{HTML}{009E73}
+\definecolor{ACDeltaNeg}{HTML}{D55E00}
+%% The icon layer (preamble.tex). Frozen/trained keep a cool/warm split near
+%% the convention a reader already knows, so the badge is legible before its
+%% legend is read; both are drawn from this palette's own family.
+\definecolor{ACIcon}{HTML}{0072B2}   % glyphs inside structural figures
+\definecolor{ACFrozen}{HTML}{56B4E9}   % not updated during training
+\definecolor{ACTrained}{HTML}{E69F00}   % updated during training

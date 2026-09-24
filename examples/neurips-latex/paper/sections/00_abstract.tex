@@ -1,0 +1,16 @@
+% Abstract. One paragraph, 140-190 words, no citations, no display math.
+% Drafted last. Every number here also appears in tables/main_results.tex.
+Disagreement-based generalization bounds certify a target model through a
+simpler \surrogate, paying for the substitution with a term that measures how
+often the two disagree on unlabeled data. Which examples the \surrogate\ is
+built from is left open by the theory, and published comparisons between
+selection strategies mix the effect of the method with the effect of the data
+split and the optimization path that produced each run. We freeze the \evalsem\
+that give the bound its meaning, register a comparison matrix before running it,
+and vary the \splitseed\ and the \trajseed\ independently across \methodrandom\
+and \methodmax. Over 5 \splitseed{}s and 3 trajectory seeds per split and
+method, \methodrandom\ attains a lower mean \certbound\ by $0.011 \pm 0.005$.
+That contrast is smaller than the largest within-split trajectory spread of
+$0.032$, and its sign reverses at one split, so the two strategies are
+indistinguishable at this scale. On this dataset and at this scale, the
+optimization path dominates the selection criterion.

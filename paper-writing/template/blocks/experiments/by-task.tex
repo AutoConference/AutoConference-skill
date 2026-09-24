@@ -1,0 +1,42 @@
+% Experiments: `by-task` (design-axes.md axis 7; P1).
+% Setup, then ONE SUBSECTION PER TASK or condition family, each with its own
+% table and the prose that reads it. There is no ablation section in this
+% organization (ablation = none); the per-task tables carry the evidence.
+% The main results table is the first table; further tables follow per task.
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Experimental Setup}
+\label{sec:setup}
+
+\textbf{Implementation Details.}
+\slot{data, fixed evaluation semantics, scale, seeds and repetitions,
+uncertainty estimator, hardware, failure handling; point detail to the
+appendix if one exists}
+
+\textbf{Compared configurations.}
+\slot{name every arm and what it differs in from the baseline; introduce the
+primary arm}
+
+\subsection{\slot{Task or condition family one}}
+\label{sec:task-one}
+
+\slot{one sentence on why this family matters}. \slot{setup specific to it}.
+\input{tables/main_results}
+As shown in \cref{tab:main-results}, \slot{read the table: the primary arm's
+margin, its consistency across conditions, and the one caveat the numbers
+carry}.
+
+\subsection{\slot{Task or condition family two}}
+\label{sec:task-two}
+
+\slot{one sentence on why this family matters}. \slot{setup specific to it}.
+\input{tables/secondary_results}
+As shown in \cref{tab:paired}, \slot{read the second table the same way}.
+
+\IfFileExists{data/opening.dat}{%
+\subsection{\slot{Task or condition family three}}
+\label{sec:task-three}
+\input{figures/results_panel}%
+\slot{read the figure: what holds across conditions and where it does not}%
+}{}

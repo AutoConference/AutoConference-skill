@@ -1,0 +1,26 @@
+% Top-level Ablation Study section (P4), installed only when the design draws
+% experiments = separate-ablation-section. Three or four subsections, each
+% answering one question.
+\section{Ablation Study}
+\label{sec:ablation-section}
+
+We conduct ablation studies to validate \slot{method name}'s core components.
+This section analyzes: \slot{list the three or four questions, in order}.
+
+\subsection{Analysis of \slot{the core component}}
+\label{sec:ablation-core}
+
+\input{tables/ablations}
+\slot{read the naive-vs-ours columns: what the component changes and by how
+much}
+
+\subsection{Analysis of \slot{the second component}}
+\label{sec:ablation-second}
+
+\IfFileExists{data/opening.dat}{\input{figures/results_panel}}{}
+\slot{read the figure or the remaining table rows}
+
+\subsection{Analysis of \slot{the third question}}
+\label{sec:ablation-third}
+
+\slot{one paragraph, numbers only from the tables}

@@ -1,0 +1,40 @@
+% Ablation: `paired-minipage` (design-axes.md axis 9; P3).
+% Two numbered tables side by side in one float, metrics as rows and the
+% swept setting as columns, each with its own caption and label, identical
+% precision on both sides. Captions ABOVE, centered.
+\begin{table}[t!]
+  \centering
+  \begin{minipage}{0.48\linewidth}
+    \centering
+    \captionsetup{justification=centering,singlelinecheck=false}
+    \caption{\textbf{Effect of \slot{setting one} (\slot{\up\ or \down}).}}
+    \vspace{-0.1cm}
+    \label{tab:ablation}
+    {\fontsize{8pt}{11pt}\selectfont
+     \begin{tabular}{l cccc}
+       \toprule[1.2pt]
+       \textbf{Metric} & \textbf{\slot{a}} & \textbf{\slot{b}} & \textbf{\slot{c}} & \textbf{\slot{d}} \\
+       \midrule[1.2pt]
+       \slot{metric 1} & \slot{v} & \slot{v} & \best{\slot{v}} & \slot{v} \\
+       \slot{metric 2} & \slot{v} & \slot{v} & \best{\slot{v}} & \slot{v} \\
+       \bottomrule[1.2pt]
+     \end{tabular}}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.44\linewidth}
+    \centering
+    \captionsetup{justification=centering,singlelinecheck=false}
+    \caption{\textbf{Effect of \slot{setting two} (\slot{\up\ or \down}).}}
+    \vspace{-0.1cm}
+    \label{tab:ablation-two}
+    {\fontsize{8pt}{11pt}\selectfont
+     \begin{tabular}{l ccc}
+       \toprule[1.2pt]
+       \textbf{Metric} & \textbf{\slot{a}} & \textbf{\slot{b}} & \textbf{\slot{c}} \\
+       \midrule[1.2pt]
+       \slot{metric 1} & \slot{v} & \best{\slot{v}} & \slot{v} \\
+       \slot{metric 2} & \slot{v} & \best{\slot{v}} & \slot{v} \\
+       \bottomrule[1.2pt]
+     \end{tabular}}
+  \end{minipage}
+\end{table}

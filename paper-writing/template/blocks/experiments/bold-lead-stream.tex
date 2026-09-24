@@ -1,0 +1,42 @@
+% Experiments: `bold-lead-stream` (design-axes.md axis 7; P5).
+% Setup, then ONE long Results subsection made of bold-lead paragraphs, some
+% of whose leads end in a colon, reading the tables in order. Tables carry
+% the evidence; figures are few.
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Experimental Setup}
+\label{sec:setup}
+
+\textbf{Benchmarks.}
+\slot{the evaluation regimes and what each isolates}
+
+\textbf{Baselines.}
+\slot{every compared arm and what it removes or replaces}
+
+\textbf{Protocol.}
+\slot{conditions, repetitions, estimator, precision stated once}
+
+\subsection{Experiment Results}
+\label{sec:results}
+
+\textbf{Quantitative Comparison:}
+\input{tables/main_results}
+\Cref{tab:main-results} \slot{reports the main comparison; read it arm by
+arm and end with the bold sentence stating what the primary arm surpasses}
+
+\textbf{\slot{Second comparison}:}
+\input{tables/secondary_results}
+\slot{read the second table}
+
+\textbf{Ablation baselines:}
+\slot{one sentence naming the two aspects ablated}
+
+\textbf{Ablation on \slot{aspect one}:}
+\input{tables/ablations}
+\slot{read the ablation table}
+
+\textbf{\slot{Further analysis}.}
+\IfFileExists{data/opening.dat}{\input{figures/results_panel}}{}
+\slot{read the figure, or the remaining rows, and close with one bounded
+sentence}

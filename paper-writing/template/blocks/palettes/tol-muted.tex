@@ -1,0 +1,29 @@
+%% Palette: `tol-muted` (design-axes.md axis 14).
+%% Paul Tol's 'muted' qualitative scheme (SRON); colour-blind safe, lower chroma for figure-dense papers.
+%% Redefines the family's semantic color tokens. Every block reads the tokens,
+%% never a literal color, so a paper changes its whole visual key here and
+%% nowhere else. Color is always a redundant cue: the tables still mark best
+%% with \best and direction with \up/\down, so a greyscale print loses
+%% nothing that carries meaning.
+\definecolor{ACBlue}{HTML}{332288}   % primary / this paper's arm
+\definecolor{ACCyan}{HTML}{88CCEE}   % secondary accent
+\definecolor{ACLink}{HTML}{882255}   % project link only
+\definecolor{ACInk}{HTML}{1E1B33}   % body-dark
+\definecolor{ACMuted}{HTML}{6F6B85}   % rules, secondary text
+\definecolor{ACGreen}{HTML}{117733}   % a delta in the good direction
+\definecolor{ACWorse}{HTML}{CC6677}   % a delta in the bad direction
+\definecolor{ACPrimary}{HTML}{DEDCF0}   % row tint: this study's family
+\definecolor{ACCompare}{HTML}{F5E4E7}   % row tint: comparison family
+\definecolor{ACNeutral}{HTML}{E6E6E6}   % row tint: reference family
+\definecolor{ACRankOne}{HTML}{F4EDD4}   % cell background: best
+\definecolor{ACRankTwo}{HTML}{EFDCD2}   % cell background: second
+\definecolor{ACRankThree}{HTML}{DEDCF0}   % cell background: third
+\definecolor{BrickRed}{HTML}{CC6677}   % extra plot series
+\definecolor{ACDelta}{HTML}{117733}
+\definecolor{ACDeltaNeg}{HTML}{CC6677}
+%% The icon layer (preamble.tex). Frozen/trained keep a cool/warm split near
+%% the convention a reader already knows, so the badge is legible before its
+%% legend is read; both are drawn from this palette's own family.
+\definecolor{ACIcon}{HTML}{332288}   % glyphs inside structural figures
+\definecolor{ACFrozen}{HTML}{6699CC}   % not updated during training
+\definecolor{ACTrained}{HTML}{CC6677}   % updated during training
