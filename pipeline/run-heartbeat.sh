@@ -63,7 +63,10 @@ export AC_BACKEND="$BACKEND"
 [ "$BACKEND" = custom ] && unset AC_BACKEND
 
 # run_turn <prompt> [duties|research]
-run_turn() { pipeline/agent-turn.sh --mode "${2:-duties}" --dir "$ROOT" "$1"; }
+# 9>&- here and on every long-lived child: fd 9 holds the loop's lock, and a
+# child that inherits it keeps the lock after a loop killed with -9 -- which
+# then refuses its own restart for as long as that child lives.
+run_turn() { pipeline/agent-turn.sh --mode "${2:-duties}" --dir "$ROOT" "$1" 9>&-; }
 
 # ── The instruction, one task per wake ─────────────────────────────────────
 #
@@ -185,6 +188,15 @@ upload_turn() {
   AC_TURN_PHASE="$PHASE" python3 - <<'UPLOAD' >>"$LOG" 2>&1 || true
 import json, os, sys
 sys.path.insert(0, os.path.join(os.getcwd(), "submission", "scripts"))
+def clip(text, cap=400000):
+    # The platform takes 400k characters. A research step can produce more, and
+    # its end -- the result, the failure -- matters as much as its start, so a
+    # long turn keeps both ends rather than only the first 400k.
+    if len(text) <= cap:
+        return text
+    half = cap // 2 - 100
+    return text[:half] + f"\n\n[... {len(text) - 2 * half} characters omitted ...]\n\n" + text[-half:]
+
 try:
     import client  # the same module the rest of the loop speaks through
     phase = {}
@@ -195,8 +207,8 @@ try:
     body = {
         "backend": os.environ["AC_TURN_BACKEND"],
         "model": os.environ.get("AC_TURN_MODEL") or None,
-        "prompt": os.environ.get("AC_TURN_PROMPT", ""),
-        "output": open(os.environ["AC_TURN_FILE"], errors="replace").read()[:400000],
+        "prompt": clip(os.environ.get("AC_TURN_PROMPT", "")),
+        "output": clip(open(os.environ["AC_TURN_FILE"], errors="replace").read()),
         "exit_code": int(os.environ.get("AC_TURN_EXIT") or 0),
         "duration_ms": int(os.environ.get("AC_TURN_MS") or 0),
         "started_at": os.environ["AC_TURN_START"],
@@ -218,11 +230,18 @@ pipeline_steps() {
   case "$n" in ''|*[!0-9]*) n=1 ;; esac
   while [ "$n" -le 15 ]; do
     out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
+    : > "$ws/.step-prompts"          # run-pipeline.sh appends what it asks the model
     log "paper $cyc: pipeline step $n/15"
     env AC_WORKSPACE="$ws" ${MODEL:+AC_MODEL="$MODEL"} \
       "$ROOT/pipeline/run-pipeline.sh" "$seed" "$dir" --step "$n" </dev/null 2>&1 | tee "$out"
     rc=${PIPESTATUS[0]}
-    upload_turn "$BACKEND" "${MODEL:-}" "run-pipeline.sh step $n/15 (seed ${seed:-none})" \
+    # The record carries what the model was actually asked (every model call in
+    # the step, in order), not a label: the prompt is the half of a turn the
+    # platform cannot see for itself. A step with no model call says so.
+    local asked
+    asked=$(cat "$ws/.step-prompts" 2>/dev/null)
+    upload_turn "$BACKEND" "${MODEL:-}" \
+      "${asked:-run-pipeline.sh step $n/15: a deterministic check, no model call}" \
       writing "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))"
     if [ "$rc" -ne 0 ]; then
       echo "$n" > "$ws/PIPELINE_STOPPED"
@@ -242,7 +261,9 @@ pipeline_steps() {
     fi
     if [ "$n" -eq 15 ]; then
       if grep -q 'submitted: ' "$out"; then
-        touch "$ws/SUBMITTED"; log "paper $cyc: submitted"
+        # Also under state/, which a reinstall keeps and work/ is not.
+        touch "$ws/SUBMITTED"; mkdir -p state/submitted; touch "state/submitted/$cyc"
+        log "paper $cyc: submitted"
       else
         # Step 15 exits 0 without submitting when no cycle is open. Leave it
         # to run again on the next wake rather than calling it done.
@@ -280,6 +301,7 @@ write_paper() {
   if [ -f "$ws/pipeline.pid" ] && pid=$(cat "$ws/pipeline.pid") && kill -0 "$pid" 2>/dev/null; then
     log "paper $cyc: pipeline running (step $(cat "$ws/pipeline.next" 2>/dev/null || echo 1)/15)"; return
   fi
+  rm -f "$ws/pipeline.pid"          # a leftover from a pipeline that is gone
   # A step left running by a loop that was killed: wait for it, never start a
   # second copy beside it. Matched on this install's own path: an owner may
   # run several agents on one machine, and another install's pipeline is not
@@ -336,9 +358,32 @@ print(d.get("research_direction") or ", ".join(d.get("research_interests") or []
     log "paper $cyc: writing is on but there is no direction and no seed paper (AC_DIRECTION or AC_SEED_PAPER in state/runner.env)"; return
   fi
   log "paper $cyc: starting the pipeline (seed ${seed:-none}; direction: ${dir:-from the seed}) in the background; output in $ws/pipeline.out"
-  pipeline_steps "$cyc" "$seed" "$dir" >>"$ws/pipeline.out" 2>&1 &
+  # Its own process group (set -m), so stopping the loop can stop every process
+  # a step started -- the agent CLI, the experiment -- and not only this shell.
+  # 9>&- keeps the loop's lock out of it: a step can run for hours, and a
+  # restarted loop must not find the lock held by its own pipeline.
+  # The pid file goes when it ends, so a later stop never signals a group
+  # number the system has since given to something else.
+  set -m
+  ( pipeline_steps "$cyc" "$seed" "$dir"; rm -f "$ws/pipeline.pid" ) >>"$ws/pipeline.out" 2>&1 9>&- &
   echo $! > "$ws/pipeline.pid"
+  set +m
 }
+
+# Stopping the loop stops the paper too: `pkill -f run-heartbeat.sh` sends TERM
+# here, and each running pipeline's process group goes with it. The step it
+# was on is not recorded as done, so the next start resumes there.
+stop_pipelines() {
+  local f pg
+  for f in work/*/pipeline.pid; do
+    [ -f "$f" ] || continue
+    pg=$(cat "$f" 2>/dev/null)
+    case "$pg" in ''|*[!0-9]*) continue ;; esac
+    kill -TERM -- "-$pg" 2>/dev/null && log "stopped the pipeline (process group $pg)"
+    rm -f "$f"
+  done
+}
+trap 'stop_pipelines; exit 143' TERM INT HUP
 
 while true; do
   # Gate 1: no open cycle -> spend zero tokens.
@@ -382,7 +427,7 @@ except Exception: c=""
 print(c if re.fullmatch(r"[a-z0-9-]+", c) else "")' 2>/dev/null)
 
   if [ "$AUTHOR" = 1 ] && [ "$PH_NAME" = SUBMISSION ] && [ -n "$PH_CYCLE" ] \
-     && [ ! -f "work/$PH_CYCLE/SUBMITTED" ]; then
+     && [ ! -f "work/$PH_CYCLE/SUBMITTED" ] && [ ! -f "state/submitted/$PH_CYCLE" ]; then
     write_paper "$PH_CYCLE"
   fi
   if [ "$N" -gt 0 ]; then
@@ -392,5 +437,7 @@ print(c if re.fullmatch(r"[a-z0-9-]+", c) else "")' 2>/dev/null)
     log "inbox empty; sleeping"
   fi
   [ -n "${AC_ONCE:-}" ] && exit 0
-  sleep "$INTERVAL"
+  # In the background and waited on, so a stop takes effect now rather than
+  # when a thirty-minute sleep ends.
+  sleep "$INTERVAL" 9>&- & wait $!
 done

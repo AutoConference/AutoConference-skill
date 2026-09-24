@@ -84,13 +84,15 @@ def result_numbers(runs: str) -> list:
             except (OSError, ValueError):
                 continue
     # A paper legitimately states hardware facts and configuration constants that
-    # are not experimental results. They live in config/, so treat those as sources
-    # too rather than reporting them as unsupported claims.
-    cfg = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))), "config")
-    for name in ("machine.json", "quality.json"):
+    # are not experimental results: the machine description (AC_MACHINE, default
+    # state/machine.json) and the quality bar. Treat those as sources too rather
+    # than reporting them as unsupported claims. (These were looked for under a
+    # config/ directory that the reorganised kit no longer has.)
+    kit = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for path in (os.environ.get("AC_MACHINE") or os.path.join(kit, "state", "machine.json"),
+                 os.path.join(kit, "interfaces", "quality.example.json")):
         try:
-            with open(os.path.join(cfg, name), encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 nums.extend(flatten(json.load(f)).values())
         except (OSError, ValueError):
             pass

@@ -8,11 +8,13 @@
 #
 # The paper is an INSPIRATION SOURCE, not a reproduction target.
 #
-# Every research step is an existing skill from vendor/ARIS or vendor/CCFA-Skills.
-# We own four things, because nothing upstream provides them:
+# Every research step is an existing skill from skills/aris (ARIS) or, for plot
+# recipes, skills/ccfa (CCFA-Skills). We own these, because nothing upstream
+# provides them:
 #
-#   step  3  research/scripts/plan_feasibility.py       ARIS assumes a normal GPU box; this is a 2-core,
-#                               8 GiB container. Rejects a plan before code exists.
+#   step  3  research/scripts/plan_feasibility.py       ARIS assumes a normal GPU box; this pipeline
+#                               was built in a 2-core, 8 GiB container. Scores the
+#                               plan against the measured machine before code exists.
 #   step  4  the calibration    A generation cap is a measurement instrument. The
 #            preflight          first version of this pipeline capped at 512 tokens
 #                               on a task needing more, truncated 9 of 15 samples,
@@ -73,7 +75,7 @@ command -v jq >/dev/null 2>&1 || jq() { python3 "$ROOT/pipeline/mini_jq.py" "$@"
 # a step runs unbounded rather than not at all.
 if ! command -v timeout >/dev/null 2>&1; then
   if command -v gtimeout >/dev/null 2>&1; then timeout() { gtimeout "$@"; }
-  else timeout() { shift; "$@"; }; fi
+  else timeout() { [ "$1" = --foreground ] && shift; shift; "$@"; }; fi
 fi
 # Flags may appear anywhere. Positionals are, in order, the paper and the
 # direction. Getting this wrong once cost two wasted claude invocations, because
@@ -129,11 +131,14 @@ fi
 SLUG=$(printf '%s' "$PAPER" | grep -oE '[0-9]{4}\.[0-9]{4,5}' || echo local)
 W=${AC_WORKSPACE:-$ROOT/runs/seed-$SLUG}
 mkdir -p "$W/figures" "$W/runs"
-# Claude Code looks for skills in .claude/skills of the project root. That tree is
-# generated, not committed: pipeline/fetch-skills.sh builds it from skills/{ours,aris,ccfa}.
-# The workspace links are absolute: AC_WORKSPACE may sit at any depth.
-[ -d "$ROOT/.claude/skills" ] || bash "$ROOT/pipeline/fetch-skills.sh" >/dev/null
-[ -e "$W/.claude" ] || ln -s "$ROOT/.claude" "$W/.claude"
+# Claude Code looks for skills in .claude/skills of its working directory. That
+# tree is generated, not committed: pipeline/fetch-skills.sh builds it from
+# skills/{aris,ccfa} under state/skill-mount, outside the kit root so the inbox
+# duties never see it, and each workspace links to it. The links are absolute:
+# AC_WORKSPACE may sit at any depth.
+MOUNT="$ROOT/state/skill-mount/.claude"
+[ -e "$MOUNT/skills/idea-discovery/SKILL.md" ] || bash "$ROOT/pipeline/fetch-skills.sh" >/dev/null
+[ -e "$W/.claude" ] || ln -s "$MOUNT" "$W/.claude"
 [ -e "$W/.aris" ]   || ln -s "$ROOT/.aris"   "$W/.aris"
 LOG="$W/pipeline.log"
 
@@ -179,6 +184,9 @@ citations do not depend on sample size, and they are what is being tested here.
 === END REDUCED RUN ==="
 fi
 
+# Every model call a step makes is appended here, for the heartbeat's turn
+# record; the feasibility gate (a Python script) appends its own.
+export AC_STEP_PROMPTS="$W/.step-prompts"
 say()  { printf '\n\033[1m[%s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG"; }
 run()  { if [ -n "$DRY" ]; then printf '\n\033[1m===== %s =====\033[0m\n  $ %s\n' "$1" "${*:2}"; return 0; fi
          say "$1"; shift; "$@" 2>&1 | tee -a "$LOG"; return "${PIPESTATUS[0]}"; }
@@ -189,10 +197,29 @@ skill(){ local label=$1 prompt=$2 tmo=${3:-7200}
            return 0
          fi
          say "$label"
-         timeout "$tmo" "$ROOT/pipeline/agent-turn.sh" --mode research --dir "$W" \
+         # What the model was asked, kept for the heartbeat's turn record.
+         printf '=== %s ===\n%s\n\n' "$label" "$prompt" >> "$W/.step-prompts"
+         # --foreground: GNU timeout otherwise moves the command into a process
+         # group of its own, where stopping the loop (which signals the
+         # pipeline's group) cannot reach the agent CLI or what it started.
+         timeout --foreground "$tmo" "$ROOT/pipeline/agent-turn.sh" --mode research --dir "$W" \
              "$prompt" 2>&1 | tee -a "$LOG"
          local rc=${PIPESTATUS[0]}
          [ "$rc" -eq 0 ] || { echo "research: step failed (exit $rc)" >&2; return "$rc"; }; }
+# The research side's hand-off to the writer: every aggregate and the verdict.
+evidence_digest() {
+  ( cd "$W" && for f in readiness.json runs/aggregate__*.json; do
+      [ -f "$f" ] && printf '%s  %s\n' "$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$f")" "$f"
+    done )
+}
+verify_evidence() {
+  [ -f "$W/.evidence.sha" ] || return 0
+  if [ "$(evidence_digest)" != "$(cat "$W/.evidence.sha")" ]; then
+    echo "research: the evidence changed $1 -- readiness.json or an aggregate was edited" >&2
+    echo "  by the writing side, which evidence-interface.md forbids. Re-run step 11." >&2
+    return 1
+  fi
+}
 want() { if [ -n "$STEP" ]; then [ "$STEP" = "$1" ]; else
            [ "$1" -ge "$FROM" ] && [ "$1" -le "$TO" ]; fi; }
 # In a reduced run the gates still RUN — that is the point of a reduced run: you
@@ -618,6 +645,11 @@ missing or failed, or no cell with a measured interval. Then fill blocked_on.
 You may not write LaTeX, touch the paper, or phrase a result for it. Do not run
 new experiments and do not edit anything under runs/results/." 3600 || exit 1
 
+  # The hand-off is frozen here. The writer runs with its approvals off in the
+  # same workspace, so the interface's rule that the writing side may not edit
+  # an aggregate or relax a verdict is checked, not trusted.
+  [ -n "$DRY" ] || evidence_digest > "$W/.evidence.sha"
+
   skill "11b/15 write the paper (paper-writing)" \
 "Write this study's paper with the paper-writing skill at $ROOT/paper-writing.
 Read $ROOT/paper-writing/SKILL.md and follow its workflow from step 1. This
@@ -653,6 +685,12 @@ Three more files, for the steps after you:
     anchor against the .py files and fails the paper if one is missing. Do not
     describe software that does not exist.
 
+The venue is double-blind until publication. Nothing in the paper,
+REPRODUCIBILITY.md or keywords may identify the authors or this machine: no
+names, affiliations, acknowledgments or funding (delete the template's
+Acknowledgments block rather than filling it), no usernames, hostnames or
+absolute paths (write ~/.cache/huggingface, not the full path).
+
 Steps 12-14 then check it against $QUALITY: do not put
 $(jq -r '.paper_shape.forbidden_in_title[]' "$QUALITY" | paste -sd, - | sed 's/,/, /g')
 in the title, and do not open the abstract with a blanket disclaimer. State what
@@ -667,6 +705,7 @@ missing." 14400 || exit 1
   gated "11b/15 paper-writing gates (ours)" \
         bash "$ROOT/paper-writing/scripts/gate.sh" --project "$W" || {
     echo "research: the paper does not pass paper-writing's gates. Re-run step 11." >&2; exit 5; }
+  [ -n "$DRY" ] || verify_evidence "after the writer" || exit 5
   gated "11b/15 readiness verdict (ours)" python3 -c '
 import json, sys
 v = json.load(open(sys.argv[1])).get("verdict")
@@ -683,10 +722,12 @@ sys.exit(0 if v == "READY" else 1)' "$W/readiness.json" || {
     # figures/ must hold exactly the paper's figures: step 15 attaches every PNG
     # in it and insert_figures appends any the text does not place. Step 7's
     # plots are kept beside it, not deleted.
-    if [ -d "$W/figures" ] && [ -n "$(ls -A "$W/figures" 2>/dev/null)" ]; then
-      rm -rf "$W/figures-step7" && mv "$W/figures" "$W/figures-step7"
+    # Only the first time: on a re-run, figures/ holds the previous render and
+    # step 7's plots are already set aside.
+    if [ ! -d "$W/figures-step7" ] && [ -n "$(ls -A "$W/figures" 2>/dev/null)" ]; then
+      mv "$W/figures" "$W/figures-step7"
     fi
-    mkdir -p "$W/figures"
+    rm -rf "$W/figures"; mkdir -p "$W/figures"
     cp "$W/.submission-build/figures/"* "$W/figures/" 2>/dev/null || true
     cp "$W/.submission-build/submission.json" "$W/submission.json"
     say "submission.json and $(ls "$W/figures" | wc -l | tr -d ' ') figure(s) ready"
@@ -725,6 +766,7 @@ limitations section stated precisely — not as a blanket disclaimer.
 
 Write KILL_ARGUMENT.json in the 6-state verdict schema from
 skills/shared-references/assurance-contract.md." || exit 1
+  [ -n "$DRY" ] || verify_evidence "after the kill-argument fixes" || exit 5
   gated "13b/15 re-check shape after the fixes" python3 "$ROOT/submission/scripts/check_submission_shape.py" "$W" || exit 5
 fi
 
@@ -781,6 +823,7 @@ are ready; re-run with --step 15 when a cycle opens, or point AC_BASE at submiss
   if [ "$RC" -eq 2 ]; then
     Q=$(printf '%s' "$OUT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["challenge"])')
     say "verification challenge: $Q"
+    printf '=== 15/15 verification challenge ===\nSolve this. Reply with ONLY the number.\n\n%s\n\n' "$Q" >> "$W/.step-prompts"
     A=$("$ROOT/pipeline/agent-turn.sh" --mode duties --dir "$W" "Solve this. Reply with ONLY the number.
 
 $Q" | grep -oE '\-?[0-9]+' | tail -1)

@@ -80,7 +80,7 @@
       "pdftotext"
     ],
     "consequences": [
-      "No Codex CLI, so ARIS's cross-model reviewer is unavailable; bin/repro-gate.py stands in for it.",
+      "No Codex CLI, so ARIS's cross-model reviewer is unavailable; research/scripts/check_reproduction.py stands in for it.",
       "No cron/systemd: the unattended loop is flock + nohup.",
       "vLLM is NOT installed and is risky here: its CPU-side work and RAM appetite do not fit 2 cores / 8 GiB comfortably. Use transformers with batching."
     ]

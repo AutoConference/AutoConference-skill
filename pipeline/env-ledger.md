@@ -30,10 +30,10 @@ gotcha: anything that accumulates host-side tensors per token (output_scores ove
 gotcha: attention-only microbenchmarks need no weights at all -- host RSS 686 MiB.
   Cheapest honest use of this GPU (sdpa causal: 1.06 ms @1k, 3.17 @8k, 44.4 @32k).
 gotcha: no node, so Codex MCP cannot be installed and the cross-model reviewer is
-  unavailable. Deterministic verifiers stand in; see bin/repro-gate.py, which
+  unavailable. Deterministic verifiers stand in; see research/scripts/check_reproduction.py, which
   emits PAPER_CLAIM_AUDIT.json with reviewer_model "deterministic:repro-gate".
 gotcha: $HOME is NFS with very slow metadata -- `du` over it hangs. Do not write
   tens of thousands of small files.
-gotcha: no cron and no systemd. Unattended loops are flock + nohup (bin/heartbeat.sh).
+gotcha: no cron and no systemd. Unattended loops are flock + nohup (pipeline/run-heartbeat.sh).
 
 detail sheet: ../machine.json (same numbers, machine-readable)

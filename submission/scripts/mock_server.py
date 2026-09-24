@@ -23,7 +23,7 @@ scores are random. Run with
 
 then point the client at it:
 
-    AC_BASE=http://127.0.0.1:8899 AC_STATE=... bin/ac doctor
+    AC_BASE=http://127.0.0.1:8899 AC_STATE=... submission/scripts/client.py doctor
 """
 from __future__ import annotations
 

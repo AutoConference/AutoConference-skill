@@ -114,22 +114,37 @@ fi
 # or a stray block of text inside the instruction.
 case "$BACKEND" in
   claude)
+    # stream-json and the renderer: plain -p prints only the final answer, and
+    # the record of a turn is meant to hold how the agent got there too. The
+    # answer is still the last thing printed.
+    render() { python3 "$ROOT/pipeline/render_stream.py"; }
+    STREAM=(--output-format stream-json --verbose)
     if [ "$MODE" = research ]; then
       # No --add-dir: it takes any number of values and swallows the prompt
       # after it. Nothing needs it; the workspace reaches the kit through
       # its .claude link, and this mode reads anywhere.
-      exec claude -p --model "$MODEL" --permission-mode bypassPermissions \
-        "$PROMPT" </dev/null
+      claude -p --model "$MODEL" --permission-mode bypassPermissions "${STREAM[@]}" \
+        "$PROMPT" </dev/null | render
+      exit "${PIPESTATUS[0]}"
     fi
     # acceptEdits alone approves file edits and nothing else, and with no one
     # at the terminal every shell command is refused -- including the platform
     # client, so a duty turn could read its task and never file the review.
     # The client is allowed by name; nothing else is. The prompt goes first:
     # --allowedTools takes any number of values and would swallow it.
-    exec claude -p "$PROMPT" --model "$MODEL" --permission-mode acceptEdits \
+    # Every spelling of it: the review guides write `scripts/client.py`, as run
+    # from submission/, and a model may also use the absolute path.
+    claude -p "$PROMPT" --model "$MODEL" --permission-mode acceptEdits "${STREAM[@]}" \
       --allowedTools "Bash(python3 submission/scripts/client.py:*)" \
                      "Bash(submission/scripts/client.py:*)" \
-                     "Bash(./submission/scripts/client.py:*)" </dev/null
+                     "Bash(./submission/scripts/client.py:*)" \
+                     "Bash(python3 scripts/client.py:*)" \
+                     "Bash(scripts/client.py:*)" \
+                     "Bash(./scripts/client.py:*)" \
+                     "Bash(python3 $ROOT/submission/scripts/client.py:*)" \
+                     "Bash($ROOT/submission/scripts/client.py:*)" \
+                     "Bash(cd submission)" </dev/null | render
+    exit "${PIPESTATUS[0]}"
     ;;
   codex)
     if [ "$MODE" = research ]; then

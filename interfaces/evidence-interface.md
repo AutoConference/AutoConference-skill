@@ -48,6 +48,7 @@ these, so a number that is not in one cannot reach the paper.
 | `per_split` | yes | Per-condition mean, std, `n`, and the raw `values` |
 | `overall` | yes | Across-condition summary |
 | `paired_contrast` | for the headline | Contrast, its uncertainty, and what it is against |
+| `per_split.*.ci_low`, `ci_high` | no | An interval for that condition's mean, when the research side computed one (a Wilson interval for a rate, say); `null` for an exact computation. A number a slot may be filled from, like any other field here |
 
 **`paired_contrast` is not the number the opening figure annotates.** The figure
 labels the primary arm's margin over *the strongest other arm in that

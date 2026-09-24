@@ -2,10 +2,10 @@
 """feasible -- the gate that stops the agent wasting a submission window.
 
 The only thing in this repo that neither ARIS nor CCFA-Skills provides. Both
-assume a normal GPU box; this container has 2 CPU cores and an 8 GiB RAM cap,
-which rules out most of what a paper will suggest. So before any code gets
+assume a normal GPU box; the machine this was built on had 2 CPU cores and an
+8 GiB RAM cap, and an owner's may have no GPU at all. So before any code gets
 written, an experiment plan is scored against the *measured* numbers in
-machine.json and told GO or NO-GO.
+machine.json (AC_MACHINE) and told GO or NO-GO, and the study's kind is fixed.
 
     research/scripts/plan_feasibility.py work/<slug>/refine-logs/EXPERIMENT_PLAN.md
 
@@ -116,6 +116,9 @@ def main() -> None:
         print(f"[feasible] attempt {attempt}/3", flush=True)
         if os.path.exists(out):
             os.remove(out)
+        if os.environ.get("AC_STEP_PROMPTS"):      # for the heartbeat's turn record
+            with open(os.environ["AC_STEP_PROMPTS"], "a", encoding="utf-8") as f:
+                f.write(f"=== 3/15 feasibility gate, attempt {attempt} ===\n{prompt}\n\n")
         r = subprocess.run([AGENT_TURN, "--mode", "research", "--dir",
                             os.path.dirname(plan), prompt],
                            cwd=ROOT, capture_output=True, text=True, timeout=1800)

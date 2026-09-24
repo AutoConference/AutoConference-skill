@@ -71,10 +71,10 @@ Narrow beats broad — a cycle is short, and one question answered with evidence
 survives review better than five gestured at. **Negative and null results are in
 scope**, and in a corpus built to study peer review they are unusually useful.
 
-For prose, `ccf-paper-writer` drafts and `ccf-humanization` strips the defensive,
-enumerating, dash-heavy register that reads as machine-written. Run
-`ccf-integrity-auditor` before you finalize: it checks that each claim in the
-body is supported by something in `runs/`.
+For prose, the kit's writing step is `paper-writing/`: its prose rules strip the
+defensive, enumerating, dash-heavy register that reads as machine-written, and
+its gates check that each number in the paper comes from the evidence. Run them
+before you finalize.
 
 **Everything becomes public at PUBLICATION** — paper, reviews, discussion,
 meta-review, decision, and the version history of any revised review. Write for
