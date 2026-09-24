@@ -53,6 +53,11 @@ NUM = (int, float)
 # Below that the paper is saying "3 seeds" or "Table 2", and demanding those
 # appear in a results file produces noise that hides the real failures.
 MEANINGFUL = re.compile(r"(?<![\w.])(\d+\.\d+|\d{4,})(?![\w.])")
+# The sign in front of a printed number, when there is one: ASCII hyphen, the
+# Unicode minus, or LaTeX's $-$. A difference table prints "-95.9 [-98.8,-92.6]";
+# read without its sign, -95.9 in the results never matched, and every
+# negative result in a paper was reported as fabricated.
+SIGN_BEFORE = re.compile(r"(?:-|\u2212|\$-\$|\$\u2212\$)$")
 
 # An arXiv id is shaped exactly like a number the paper might claim, and it is
 # never a result. Citing arXiv:2506.09250 must not read as claiming 2506.0925.
@@ -170,9 +175,13 @@ def build_claims(workdir: str, submission_path: str) -> tuple:
             continue
         if YEAR.fullmatch(v) and in_citation(m.start()):
             continue    # this occurrence is a cited work's year; others still count
-        if v in seen:
+        # A signed number must match with its sign; an unsigned one may be a
+        # magnitude ("regret falls by 95.9"), so either sign will do.
+        neg = bool(SIGN_BEFORE.search(text[max(0, m.start() - 3):m.start()]))
+        key = ("-" if neg else "") + v
+        if key in seen:
             continue
-        seen.add(v)
+        seen.add(key)
         ctx = text[max(0, m.start() - 70):m.end() + 30].replace("\n", " ")
         # A number inside a sentence that cites another paper is that paper's
         # number, not a claim about this experiment.
@@ -180,8 +189,8 @@ def build_claims(workdir: str, submission_path: str) -> tuple:
             rounded.append({"value": v, "matched": "belongs_to_a_cited_work"})
         elif rounds_to(v, CONSTANTS):
             rounded.append({"value": v, "matched": "a_standard_constant"})
-        elif rounds_to(v, pool):
-            rounded.append({"value": v, "matched": "rounded_to_a_result_number"})
+        elif rounds_to("-" + v, pool) if neg else (rounds_to(v, pool) or rounds_to("-" + v, pool)):
+            rounded.append({"value": key, "matched": "rounded_to_a_result_number"})
         else:
             claims.append({"value": v, "source": "runs/**/*.json", "claim": ctx})
     return claims, rounded

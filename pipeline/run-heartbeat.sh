@@ -270,6 +270,45 @@ NOGO
         rm -f "$out"; n=1; echo 1 > "$ws/pipeline.next"; continue
       fi
     fi
+    # Step 14 (exit 4) finds numbers the paper prints that no results file
+    # carries. That is the writing loop's to fix, not a person's: twice, the
+    # loop lists them where steps 11a and 11b read them and goes back to
+    # step 11, withdrawing the finished-paper mark so the paper is rewritten.
+    if [ "$rc" -eq 4 ] && [ "$n" -eq 14 ]; then
+      local ctries
+      ctries=$(cat "$ws/.untraceable-count" 2>/dev/null || echo 0)
+      case "$ctries" in ''|*[!0-9]*) ctries=0 ;; esac
+      if [ "$ctries" -lt 2 ]; then
+        echo $((ctries + 1)) > "$ws/.untraceable-count"
+        mkdir -p "$ws/refine-logs"
+        python3 - "$ws" $((ctries + 1)) > "$ws/refine-logs/UNTRACEABLE.md" <<'UNTRACE'
+import json, os, sys
+ws, attempt = sys.argv[1], sys.argv[2]
+try:
+    gate = json.load(open(os.path.join(ws, "runs", "REPRO_GATE.json")))
+except (OSError, ValueError):
+    gate = {}
+def walk(o):
+    if isinstance(o, dict):
+        if o.get("kind") == "unsupported_claim":
+            yield o
+        for v in o.values():
+            yield from walk(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from walk(v)
+items = list(walk(gate))
+print(f"# Numbers the paper printed that no file under runs/ carries (check {attempt})\n")
+for it in items:
+    print(f"- `{it.get('value')}` in: ...{it.get('claim', '').strip()}...")
+if not items:
+    print("(step 14 failed without a list; see runs/REPRO_GATE.json)")
+UNTRACE
+        rm -f "$ws/.paper-ready"
+        log "paper $cyc: the paper prints numbers no result carries; back to step 11 with the list (try $((ctries + 1)) of 2)"
+        rm -f "$out"; n=11; echo 11 > "$ws/pipeline.next"; continue
+      fi
+    fi
     if [ "$rc" -ne 0 ]; then
       echo "$n" > "$ws/PIPELINE_STOPPED"
       {

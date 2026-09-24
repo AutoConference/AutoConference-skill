@@ -109,8 +109,19 @@ def evidence_check(root: str, claims: list) -> dict:
     os.makedirs(os.path.dirname(batch), exist_ok=True)
     with open(batch, "w", encoding="utf-8") as f:
         json.dump(claims, f)
-    r = subprocess.run([sys.executable, tool, root, "--batch", batch],
-                       capture_output=True, text=True, timeout=600)
+    # ARIS's checker rereads the results for every claim -- about 90 s per claim
+    # on a 4 MB results tree -- so a fixed ten minutes failed a paper with sixteen
+    # numbers to check by crashing. The budget scales with the claims, and running
+    # out of it is a verdict ("could not check"), not a traceback.
+    budget = max(600, 150 * len(claims))
+    try:
+        r = subprocess.run([sys.executable, tool, root, "--batch", batch],
+                           capture_output=True, text=True, timeout=budget)
+    except subprocess.TimeoutExpired:
+        return {"available": True, "exit": None,
+                "results": [dict(c, status="value_not_found",
+                                 detail=f"evidence_check.py did not finish in {budget}s")
+                            for c in claims]}
     try:
         rep = json.loads(r.stdout)
     except ValueError:

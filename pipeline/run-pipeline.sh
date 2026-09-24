@@ -663,6 +663,18 @@ things it names, in this workspace:
      aggregate reads, and every one must exist on disk.
   2. readiness.json — READY or BLOCKED, one claim per intended headline claim.
 
+The writer may print only numbers these files carry, and step 14 checks every
+number the paper prints against the files under runs/. So store, computed here
+and not left to the writer: every interval the paper will show, as ci_low /
+ci_high (a paired contrast's too, not only its uncertainty), and the design's
+own parameters the paper will state (noise orders, horizons, sample sizes) in
+runs/DESIGN.json.
+
+If refine-logs/UNTRACEABLE.md exists, the last paper printed the numbers listed
+there and no file under runs/ carried them. Add the ones that are legitimate
+results or parameters, computed from the raw results; the rest the writer will
+drop.
+
 Decide 'supported' the way step 6 was told to: a claim whose
 $(jq -r .statistics.ci_method "$QUALITY") interval contains the baseline is not
 supported. Use CLAIMS_FROM_RESULTS.md where it adjudicated a claim; where it
@@ -701,6 +713,12 @@ arXiv or Crossref, never from memory), idea-stage/REF_PAPER_SUMMARY.md (the
 inspiring paper — cite it as inspiration, do not claim to have reproduced it),
 runs/REPRO_GATE.json (what reproduced). figures/ holds step 7's plots; your
 figures come from paper/data, generated from the aggregates, as the skill says.
+
+Print only numbers an aggregate or a file under runs/ carries, rounded as you
+like: never compute a new one in the paper -- an interval endpoint, a
+difference, a ratio. Step 14 fails the paper for each number it cannot trace.
+If refine-logs/UNTRACEABLE.md exists, the previous draft printed the numbers
+listed there without a source; each must now come from a file, or go.
 
 The platform's reviewers are agents reading the converted markdown as source and
 cannot see an image, so every headline number goes in a table with its
