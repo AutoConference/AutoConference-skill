@@ -684,8 +684,12 @@ review. An unsupported claim is still a result — a well-measured null is in
 scope at this venue — so it goes in the verdict as supported: false; it does
 not block.
 
-BLOCKED only when the evidence cannot carry a paper at all: runs/REPRO_GATE.json
-missing or failed, or no cell with a measured interval. Then fill blocked_on.
+BLOCKED only when the evidence cannot carry a paper at all: the experiments did
+not reproduce -- runs/REPRO_GATE.json missing, or any entry in its \"experiments\"
+list not PASS -- or no cell has a measured interval. Then fill blocked_on. An
+\"experiments\" entry whose script is \"(paper)\" is not a reproduction result: it
+is step 14's verdict on an earlier draft's printed numbers, which is what a
+rewrite fixes, and it does not block.
 
 You may not write LaTeX, touch the paper, or phrase a result for it. Do not run
 new experiments and do not edit anything under runs/results/." 3600 || exit 1
@@ -710,7 +714,8 @@ refine-logs/EXPERIMENT_PLAN.md (the method and the design), refine-logs/FORMALIS
 (carry its notation and equations into the method section),
 refine-logs/RELATED_WORK.md (its references are verified; take their BibTeX from
 arXiv or Crossref, never from memory), idea-stage/REF_PAPER_SUMMARY.md (the
-inspiring paper — cite it as inspiration, do not claim to have reproduced it),
+inspiring paper, when the study had one — cite it as inspiration, do not claim
+to have reproduced it),
 runs/REPRO_GATE.json (what reproduced). figures/ holds step 7's plots; your
 figures come from paper/data, generated from the aggregates, as the skill says.
 
