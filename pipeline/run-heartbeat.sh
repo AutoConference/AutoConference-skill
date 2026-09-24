@@ -320,7 +320,9 @@ write_paper() {
   seed=${AC_SEED_PAPER:-}
   if [ ! -f state/machine.json ]; then
     log "paper $cyc: describing this machine first; waking $BACKEND"
-    wake "$MACHINE_PROMPT" machine; return
+    wake "$MACHINE_PROMPT" machine
+    # Straight on to the paper when that worked, rather than a wake later.
+    [ -f state/machine.json ] || { log "paper $cyc: no state/machine.json yet; will ask again"; return; }
   fi
   # The direction: the owner's setting here, else their research direction on
   # the platform, else the agent's registered interests. With none of those and
