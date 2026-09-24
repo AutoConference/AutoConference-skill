@@ -304,17 +304,33 @@ def tabular_to_gfm(block: str, macros: Macros) -> str | None:
     to be carried by row order and a rule as well, so a colour-only grouping was
     already a defect on the LaTeX side.
     """
-    m = re.search(r"\\begin\{tabular\}\s*(?:\[[^\]]*\])?\s*", block)
+    # Every tabular the design family emits: plain tabular, the width-taking
+    # ones (tabular*, tabularx, tabulary: a width, then the column spec), and
+    # nicematrix's NiceTabular, whose options follow the spec. The family-tint
+    # main table is a NiceTabular; accepting only `tabular` dropped it whole.
+    m = re.search(r"\\begin\{(tabular\*?|tabularx|tabulary|NiceTabular\*?)\}\s*(?:\[[^\]]*\])?\s*", block)
     if not m:
         return None
-    spec = read_group(block, m.end())
+    env, j = m.group(1), m.end()
+    if env in ("tabular*", "tabularx", "tabulary", "NiceTabular*"):
+        if read_group(block, j) is None:
+            return None
+        j = end_of_group(block, j)
+        j += len(block[j:]) - len(block[j:].lstrip())
+    spec = read_group(block, j)
     if spec is None:
         return None
-    body = block[end_of_group(block, m.end()) :]
-    body = body[: body.find(r"\end{tabular}")] if r"\end{tabular}" in body else body
+    body = block[end_of_group(block, j) :]
+    opt = re.match(r"\s*\[[^\]]*\]", body)          # NiceTabular's [options]
+    if opt and env.startswith("NiceTabular"):
+        body = body[opt.end():]
+    end = "\\end{" + env + "}"
+    body = body[: body.find(end)] if end in body else body
 
-    ncol = len(re.findall(r"[lcrp]", re.sub(r"\{[^}]*\}", "", spec)))
-    aligns = [c for c in re.sub(r"\{[^}]*\}", "", spec) if c in "lcr"]
+    flat = re.sub(r"\{[^{}]*\}", "", re.sub(r"\{[^{}]*\}", "", spec))   # two levels: >{\columncolor{x}}
+    ncol = len(re.findall(r"[lcrpmbXS]", flat))
+    aligns = [c for c in flat if c in "lcrXS"]
+    aligns = ["l" if c == "X" else "c" if c == "S" else c for c in aligns]
 
     rows: list[list[str]] = []
     rules: set[int] = set()
@@ -323,10 +339,13 @@ def tabular_to_gfm(block: str, macros: Macros) -> str | None:
             rules.add(len(rows))
         cleaned = re.sub(r"\\(top|mid|bottom|c?)rule(\[[^\]]*\])?(\{[^}]*\})*", "", raw)
         cleaned = re.sub(r"\\rowcolor\s*(\[[^\]]*\])?\{[^}]*\}", "", cleaned)
+        cleaned = re.sub(r"\\(Hline|hline|CodeBefore|Body)\b", "", cleaned)
         cleaned = re.sub(r"\\cmidrule(\([^)]*\))?\s*\{[^}]*\}", "", cleaned)
         if not cleaned.strip():
             continue
-        cells = [cell_to_md(c.strip(), macros) for c in split_cells(cleaned)]
+        # A GFM row is one line: a line break inside a cell ends the table.
+        cells = [re.sub(r"\s*\n\s*", " ", cell_to_md(c.strip(), macros)).strip()
+                 for c in split_cells(cleaned)]
         if any(c for c in cells):
             rows.append(cells)
     if not rows:
@@ -576,7 +595,17 @@ def inline_to_md(text: str, macros: Macros) -> str:
     text = macros.expand(text)
     text = drop_first_arg(text, "textcolor", 2)
     text = drop_first_arg(text, "multicolumn", 3)
-    text = drop_first_arg(text, "cellcolor", 2)
+    # \cellcolor[model]{colour} takes one argument and the cell's text follows
+    # it; read as two, the colour name was left in the cell. \colorbox and
+    # \fcolorbox wrap their text: the rank-colors table and the default-delta
+    # ablation shade cells with them, and the renderer has no colour anyway.
+    text = re.sub(r"\\(?:cellcolor|rowcolor)\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}", "", text)
+    text = drop_first_arg(text, "fcolorbox", 3)
+    text = drop_first_arg(text, "colorbox", 2)
+    # Struts and invisible spacers align a typeset table and are nothing on a
+    # rendered one: \phantom{0}, \hphantom, \vphantom, \rule[raise]{w}{h}.
+    text = re.sub(r"\\[hv]?phantom\s*\{[^{}]*\}", "", text)
+    text = re.sub(r"\\rule\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}\s*\{[^{}]*\}", "", text)
     for cmd, open_s, close_s in SIMPLE_WRAP:
         pat = re.compile(cmd + r"\s*\{")
         while True:
