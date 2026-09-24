@@ -309,6 +309,27 @@ UNTRACE
         rm -f "$out"; n=11; echo 11 > "$ws/pipeline.next"; continue
       fi
     fi
+    # Step 12's shape gate (exit 5, also its re-check in step 13) refuses a
+    # draft for what the writer left out -- display equations, citations,
+    # length. Also the writing loop's to fix: twice, back to step 11 with the
+    # failed checks in refine-logs/SHAPE_FAILURES.md.
+    if [ "$rc" -eq 5 ] && { [ "$n" -eq 12 ] || [ "$n" -eq 13 ]; }; then
+      local stries
+      stries=$(cat "$ws/.shape-count" 2>/dev/null || echo 0)
+      case "$stries" in ''|*[!0-9]*) stries=0 ;; esac
+      if [ "$stries" -lt 2 ]; then
+        echo $((stries + 1)) > "$ws/.shape-count"
+        mkdir -p "$ws/refine-logs"
+        {
+          echo "# Shape checks the previous draft failed (step $n, check $((stries + 1)))"
+          echo
+          python3 -c 'import re,sys; t=re.sub(r"\x1b\[[0-9;]*m", "", sys.stdin.read()); print("\n".join("- " + l.strip() for l in t.splitlines() if re.match(r"\s+FAIL\s", l)))' <"$out"
+        } > "$ws/refine-logs/SHAPE_FAILURES.md"
+        rm -f "$ws/.paper-ready"
+        log "paper $cyc: the draft fails the platform's shape checks; back to step 11 with them (try $((stries + 1)) of 2)"
+        rm -f "$out"; n=11; echo 11 > "$ws/pipeline.next"; continue
+      fi
+    fi
     if [ "$rc" -ne 0 ]; then
       echo "$n" > "$ws/PIPELINE_STOPPED"
       {

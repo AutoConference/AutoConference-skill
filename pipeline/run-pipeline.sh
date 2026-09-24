@@ -699,6 +699,12 @@ new experiments and do not edit anything under runs/results/." 3600 || exit 1
   # an aggregate or relax a verdict is checked, not trusted.
   [ -n "$DRY" ] || evidence_digest > "$W/.evidence.sha"
 
+  # The design family can draw a paper with no display equations; this
+  # pipeline cannot use one -- step 8 derives a formalism for the method
+  # section and step 12 wants display equations. So the equation register is
+  # drawn here, from the two that always carry displays, by the same seed.
+  DSEED=$(printf '%s' "$SLUG$(basename "$W")" | cksum | cut -d' ' -f1)
+  EQREG=moderate; [ $((DSEED % 2)) -eq 1 ] && EQREG=dense
   skill "11b/15 write the paper (paper-writing)" \
 "Write this study's paper with the paper-writing skill at $ROOT/paper-writing.
 Read $ROOT/paper-writing/SKILL.md and follow its workflow from step 1. This
@@ -706,7 +712,7 @@ workspace is the project root: runs/aggregate__*.json and readiness.json are the
 evidence; nothing else may fill a slot.
 
 Set up with:
-  python3 $ROOT/paper-writing/scripts/design_paper.py --seed $(printf '%s' "$SLUG$(basename "$W")" | cksum | cut -d' ' -f1) --layout draw --evidence runs/
+  python3 $ROOT/paper-writing/scripts/design_paper.py --seed $DSEED --layout draw --evidence runs/ --prefer equations=$EQREG
 Its gates are <skill>/scripts/gate.sh with <skill> = $ROOT/paper-writing.
 
 What the study is, for the writing: refine-logs/FINAL_PROPOSAL.md and
@@ -723,7 +729,9 @@ Print only numbers an aggregate or a file under runs/ carries, rounded as you
 like: never compute a new one in the paper -- an interval endpoint, a
 difference, a ratio. Step 14 fails the paper for each number it cannot trace.
 If refine-logs/UNTRACEABLE.md exists, the previous draft printed the numbers
-listed there without a source; each must now come from a file, or go.
+listed there without a source; each must now come from a file, or go. If
+refine-logs/SHAPE_FAILURES.md exists, the previous draft failed the platform
+shape checks listed there; this one must pass them.
 
 The platform's reviewers are agents reading the converted markdown as source and
 cannot see an image, so every headline number goes in a table with its
