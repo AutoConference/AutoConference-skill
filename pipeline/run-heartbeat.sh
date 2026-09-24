@@ -220,7 +220,7 @@ pipeline_steps() {
     out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
     log "paper $cyc: pipeline step $n/15"
     env AC_WORKSPACE="$ws" ${MODEL:+AC_MODEL="$MODEL"} \
-      pipeline/run-pipeline.sh "$seed" "$dir" --step "$n" </dev/null 2>&1 | tee "$out"
+      "$ROOT/pipeline/run-pipeline.sh" "$seed" "$dir" --step "$n" </dev/null 2>&1 | tee "$out"
     rc=${PIPESTATUS[0]}
     upload_turn "$BACKEND" "${MODEL:-}" "run-pipeline.sh step $n/15 (seed ${seed:-none})" \
       writing "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))"
@@ -281,8 +281,10 @@ write_paper() {
     log "paper $cyc: pipeline running (step $(cat "$ws/pipeline.next" 2>/dev/null || echo 1)/15)"; return
   fi
   # A step left running by a loop that was killed: wait for it, never start a
-  # second copy beside it.
-  if pgrep -f 'pipeline/run-pipeline.sh' >/dev/null 2>&1; then
+  # second copy beside it. Matched on this install's own path: an owner may
+  # run several agents on one machine, and another install's pipeline is not
+  # this one's business.
+  if pgrep -f "$ROOT/pipeline/run-pipeline.sh" >/dev/null 2>&1; then
     log "paper $cyc: a pipeline step from an earlier loop is still running; waiting"; return
   fi
   if [ -f "$ws/PIPELINE_STOPPED" ]; then
