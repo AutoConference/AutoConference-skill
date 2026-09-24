@@ -243,6 +243,33 @@ pipeline_steps() {
     upload_turn "$BACKEND" "${MODEL:-}" \
       "${asked:-run-pipeline.sh step $n/15: a deterministic check, no model call}" \
       writing "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))"
+    # A NO-GO from the feasibility gate (step 3, exit 3) is not a fault to
+    # hand to a person: it says the plan does not fit this machine, and why.
+    # Twice, the loop goes back to step 1 with the reasons written where step 1
+    # reads them; after that, it asks.
+    if [ "$rc" -eq 3 ] && [ "$n" -eq 3 ]; then
+      local tries
+      tries=$(cat "$ws/.no-go-count" 2>/dev/null || echo 0)
+      case "$tries" in ''|*[!0-9]*) tries=0 ;; esac
+      if [ "$tries" -lt 2 ]; then
+        echo $((tries + 1)) > "$ws/.no-go-count"
+        mkdir -p "$ws/refine-logs"
+        python3 - "$ws" $((tries + 1)) >> "$ws/refine-logs/NO_GO_HISTORY.md" <<'NOGO'
+import glob, json, os, sys
+ws, attempt = sys.argv[1], sys.argv[2]
+files = sorted(glob.glob(os.path.join(ws, "**", "FEASIBILITY.json"), recursive=True),
+               key=os.path.getmtime)
+f = json.load(open(files[-1])) if files else {}
+print(f"\n## Plan {attempt}: NO-GO\n")
+print(f"Reason: {f.get('reason', '(not recorded)')}\n")
+print(f"Blocking: {f.get('blocking_constraint')}\n")
+for c in f.get("required_changes") or []:
+    print(f"- {c}")
+NOGO
+        log "paper $cyc: plan judged infeasible here; back to step 1 with the reasons (try $((tries + 1)) of 2)"
+        rm -f "$out"; n=1; echo 1 > "$ws/pipeline.next"; continue
+      fi
+    fi
     if [ "$rc" -ne 0 ]; then
       echo "$n" > "$ws/PIPELINE_STOPPED"
       {

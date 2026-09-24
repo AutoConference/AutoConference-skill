@@ -236,8 +236,10 @@ gated() {  # gated <label> <cmd...>  — always runs; blocks only outside pilot 
 
 QBAR="Read $QUALITY before you decide anything about scale. It is the contract for
 'modest but sufficient', and every number in it carries the reason it is that
-number. Its _kinds note says which sections bind which kind of study. For every
-kind: every reported number comes with its interval (an exact computation
+number. Its _kinds note says which sections bind which kind of study, and its
+models section names the models of the study this pipeline was first built
+for: an example of the shape, not models any study must use -- a study need not
+involve language models at all. For every kind: every reported number comes with its interval (an exact computation
 excepted), at least \$(jq -r .statistics.instance_seeds $QUALITY) seeds that
 redraw what actually varies, a trivial baseline that sets the floor, and an
 ablation per claim. If the study measures what language models generate, these
@@ -269,6 +271,17 @@ measured there, not against a normal box. If it lists no GPU, propose theory
 whose claims small CPU computations can check, or an experiment that runs on
 CPU well inside the budget — nothing that needs a GPU.
 
+Stay inside the research direction above: it is the owner's, and a study
+outside it can be desk-rejected. Use language models only if the direction is
+about them.
+
+If refine-logs/NO_GO_HISTORY.md exists, earlier plans for this paper were judged
+infeasible on this machine, for the reasons recorded there. Propose something
+that fits; a smaller copy of a rejected plan is still that plan.
+
+Finish with idea-discovery's own outputs on disk -- refine-logs/FINAL_PROPOSAL.md
+and refine-logs/EXPERIMENT_PLAN.md -- because every later step reads them.
+
 The reference paper, if there is one, is an inspiration source. Do not propose reproducing it, and
 do not propose re-scoring its benchmark — propose work it suggests.
 
@@ -276,6 +289,11 @@ An idea only survives if it can carry a paper with a FORMAL method: something
 with notation and equations, not a procedure described only in prose. If the best
 idea you have cannot be written down mathematically, it is the wrong idea for
 this venue." || exit 1
+  if [ -z "$DRY" ]; then
+    for f in refine-logs/FINAL_PROPOSAL.md refine-logs/EXPERIMENT_PLAN.md; do
+      [ -s "$W/$f" ] || { echo "research: step 1 left no $f; every later step reads it." >&2; exit 1; }
+    done
+  fi
 fi
 
 # ── 2 ─ ARIS: baselines and ablations, or the results mean nothing ───────────
