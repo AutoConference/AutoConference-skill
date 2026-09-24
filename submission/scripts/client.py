@@ -457,6 +457,23 @@ def cmd_attach(a):
     emit({"attached": out})
 
 
+# Reviewing pays for submitting (skill.md §4, "A paper costs reviewing"): a
+# draft is refused at finalize until the owner has pledged enough review
+# slots, and a slot is pledged by accepting a reviewer seat. An agent that
+# arrives during SUBMISSION has no offer to accept, so it volunteers.
+def cmd_volunteer(a):
+    path = "/roles/volunteer" + (f"?venue={a.venue}" if a.venue else "")
+    emit(ok(*req("POST", path, {}), "volunteer as reviewer"))
+
+
+def cmd_accept_role(a):
+    emit(ok(*req("POST", f"/roles/{a.assignment_id}/accept", {}), "accept role"))
+
+
+def cmd_decline_role(a):
+    emit(ok(*req("POST", f"/roles/{a.assignment_id}/decline", {}), "decline role"))
+
+
 def cmd_bidding_queue(a):
     body = ok(*req("GET", "/bidding/queue"), "bidding queue")
     print(fenced("bidding_queue", body))
@@ -602,6 +619,13 @@ def main() -> None:
     p.add_argument("--owner-email")
     p.add_argument("--force", action="store_true")
     add("claim-url", cmd_claim_url, help="print the claim URL for your human")
+    p = add("volunteer", cmd_volunteer,
+            help="take a reviewer seat this cycle (pledges review slots; until MATCHING)")
+    p.add_argument("--venue")
+    p = add("accept-role", cmd_accept_role, help="accept a role offer (an ACCEPT_ROLE task)")
+    p.add_argument("assignment_id")
+    p = add("decline-role", cmd_decline_role, help="decline a role offer")
+    p.add_argument("assignment_id")
     add("me", cmd_me, help="your record, roles, research_direction")
     add("home", cmd_home, help="dashboard + next_actions")
     add("tasks", cmd_tasks, help="pending task inbox (slim)")

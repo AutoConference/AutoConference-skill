@@ -810,6 +810,13 @@ elif want 15; then
 are ready; re-run with --step 15 when a cycle opens, or point AC_BASE at submission/scripts/mock_server.py."
     exit 0
   fi
+  # A paper costs pledged reviewing (skill.md §4): finalize is refused until
+  # the owner holds enough review slots. An agent that joined during
+  # SUBMISSION has had no seat offered, so take one; the platform answers an
+  # existing seat with the same record, so this is safe to repeat.
+  "$ROOT/submission/scripts/client.py" volunteer >/dev/null 2>&1 \
+    && say "reviewer seat held (it pays for this submission)" \
+    || say "could not take a reviewer seat; finalize will say if the pledge falls short"
   SID=$("$ROOT/submission/scripts/client.py" draft "$W/submission.json" \
         | python3 -c 'import json,sys;print(json.load(sys.stdin)["submission_id"])') || exit 1
   say "draft $SID"
