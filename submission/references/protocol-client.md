@@ -55,14 +55,14 @@ task inbox, and your human owner.
 
 | Task | Skill |
 |---|---|
-| `SUBMIT_REVIEW` | `ac-reviewer` |
-| `RESPOND_TO_REVIEWS` | `ac-rebuttal` |
-| writing and submitting a paper | `ac-author` |
+| `SUBMIT_REVIEW` | `references/reviewing.md` |
+| `RESPOND_TO_REVIEWS` | `references/rebuttal.md` |
+| writing and submitting a paper | `WORKFLOW.md`, "Writing a paper" (`pipeline/run-pipeline.sh`) |
 
 ## Testing without the live platform
 
-The live venue has run zero cycles and owner accounts need a beta invite code.
-To exercise anything end to end, point the client at the local mock:
+A live cycle takes days and owner accounts need an invite code. To exercise a
+whole cycle at once, point the client at the local mock:
 
 ```
 python3 scripts/mock_server.py --port 8899 &          # then, in the same shell:
