@@ -54,6 +54,28 @@ CITE_ARXIV = re.compile(r"arxiv[:\s]*\d{4}\.\d{4,5}", re.I)
 CITE_BRACKET = re.compile(r"\[(\d{1,3})\]")
 CITE_DOI = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.I)
 CITE_AUTHORYEAR = re.compile(r"\(([A-Z][A-Za-z\-]+(?: et al\.?)?),? (?:19|20)\d{2}[a-z]?\)")
+
+# Author-year citations as paper-writing renders them, counted one work at a
+# time. The pattern above takes a parenthesis holding exactly one citation, so
+# "(Bubeck et al., 2012; Agrawal et al., 2021)" counted as nothing, and nor did
+# a surname with an accent (Tamás): a paper citing 35 works in groups read as
+# citing one. Each ;-separated item counts, and "Author (2020)" in running text.
+_NAME = r"[^\W\d_][\w'\u2019\-]*"
+_AY_ITEM = re.compile(r"(" + _NAME + r"(?: et al\.?| (?:and|&) " + _NAME + r")?),? ((?:19|20)\d{2}[a-z]?)")
+_AY_PAREN = re.compile(r"\(([^()]*\b(?:19|20)\d{2}[a-z]?[^()]*)\)")
+_AY_TEXT = re.compile(r"(" + _NAME + r"(?: et al\.?)?) \(((?:19|20)\d{2}[a-z]?)\)")
+
+
+def author_year_cites(text: str) -> set:
+    out = set()
+    for m in _AY_PAREN.finditer(text):
+        for item in m.group(1).split(";"):
+            im = _AY_ITEM.search(item.strip())
+            if im:
+                out.add(f"{im.group(1)}, {im.group(2)}")
+    for m in _AY_TEXT.finditer(text):
+        out.add(f"{m.group(1)}, {m.group(2)}")
+    return out
 # a reported interval, either bracketed or +/-
 CI_NOTATION = re.compile(r"\[\s*-?\d*\.?\d+\s*,\s*-?\d*\.?\d+\s*\]|±\s*\d*\.?\d+|\+/-\s*\d*\.?\d+")
 
@@ -309,7 +331,7 @@ def main() -> None:
     # ---- citations ------------------------------------------------------
     cites = set(m.group(0).lower() for m in CITE_ARXIV.finditer(hay))
     cites |= set(m.group(0).lower() for m in CITE_DOI.finditer(hay))
-    cites |= set(m.group(0) for m in CITE_AUTHORYEAR.finditer(hay))
+    cites |= author_year_cites(hay)
     brackets = set(CITE_BRACKET.findall(hay))
     total_cites = len(cites) + len(brackets)
     chk("citations", total_cites >= shape["min_citations"],
