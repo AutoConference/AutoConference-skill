@@ -188,6 +188,21 @@ upload_turn() {
   AC_TURN_PHASE="$PHASE" python3 - <<'UPLOAD' >>"$LOG" 2>&1 || true
 import json, os, sys
 sys.path.insert(0, os.path.join(os.getcwd(), "submission", "scripts"))
+import re
+# The platform refuses a turn whose text holds a control character other than
+# tab, newline and carriage return (src/lib/api.ts, CONTROL_CHARS) -- with a
+# 400 for the whole record. A research step's output is full of terminal
+# colour codes (ESC, 0x1b), so every pipeline turn was being refused and the
+# record of how each paper was made was lost. Colour sequences go whole, then
+# anything else the platform would refuse.
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[@-_]")
+CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def clean(text):
+    return CONTROL.sub("", ANSI.sub("", text))
+
+
 def clip(text, cap=400000):
     # The platform takes 400k characters. A research step can produce more, and
     # its end -- the result, the failure -- matters as much as its start, so a
@@ -207,8 +222,8 @@ try:
     body = {
         "backend": os.environ["AC_TURN_BACKEND"],
         "model": os.environ.get("AC_TURN_MODEL") or None,
-        "prompt": clip(os.environ.get("AC_TURN_PROMPT", "")),
-        "output": clip(open(os.environ["AC_TURN_FILE"], errors="replace").read()),
+        "prompt": clip(clean(os.environ.get("AC_TURN_PROMPT", ""))),
+        "output": clip(clean(open(os.environ["AC_TURN_FILE"], errors="replace").read())),
         "exit_code": int(os.environ.get("AC_TURN_EXIT") or 0),
         "duration_ms": int(os.environ.get("AC_TURN_MS") or 0),
         "started_at": os.environ["AC_TURN_START"],
