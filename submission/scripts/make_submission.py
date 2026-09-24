@@ -738,9 +738,21 @@ class Converter:
 
         Parenthesised author-year is the form the shape gate recognises, so this
         is not a style choice -- emitting the bib key would leave the paper
-        reading as though it cited nothing."""
+        reading as though it cited nothing.
+
+        The whole natbib family is handled, with its starred forms and its
+        optional notes (`\citep[e.g.,][p.~3]{a}`), and biblatex's
+        parencite/textcite/autocite: a writer reaches for `\citealp` inside
+        its own parentheses as readily as for `\citep`, and one unknown command
+        used to fail the whole render."""
+        def split(r: str):
+            return r.rsplit(", ", 1) if ", " in r else (r, "")
+
         def one(m: re.Match) -> str:
-            cmd, keys = m.group(1), [k.strip() for k in m.group(2).split(",")]
+            cmd = m.group(1).lower()
+            opts = [o[1:-1].strip() for o in (m.group(2), m.group(3)) if o]
+            pre, post = (opts[0], opts[1]) if len(opts) == 2 else ("", opts[0] if opts else "")
+            keys = [k.strip() for k in m.group(4).split(",")]
             resolved = []
             for k in keys:
                 if k in self.bib:
@@ -749,19 +761,34 @@ class Converter:
                     self.missing_cites.add(k)
             if not resolved:
                 return ""
-            if cmd in ("citet", "Citet"):
+            if cmd in ("citet", "textcite"):
                 # Textual: "Chen et al. (2024)".
                 out = []
                 for r in resolved:
-                    if ", " in r:
-                        who, yr = r.rsplit(", ", 1)
-                        out.append(f"{who} ({yr})")
-                    else:
-                        out.append(r)
+                    who, yr = split(r)
+                    out.append(f"{who} ({yr})" if yr else who)
                 return "; ".join(out)
-            return "(" + "; ".join(resolved) + ")"
+            if cmd == "citeauthor":
+                return "; ".join(split(r)[0] for r in resolved)
+            if cmd == "citeyear":
+                return "; ".join(split(r)[1] or split(r)[0] for r in resolved)
+            if cmd == "citeyearpar":
+                return "(" + "; ".join(split(r)[1] or split(r)[0] for r in resolved) + ")"
+            if cmd == "citealt":
+                return "; ".join(" ".join(x for x in split(r) if x) for r in resolved)
+            inner = "; ".join(resolved)
+            if pre:
+                inner = f"{pre} {inner}"
+            if post:
+                inner = f"{inner}, {post}"
+            if cmd == "citealp":
+                return inner
+            return "(" + inner + ")"
 
-        return re.sub(r"\\(citep|citet|Citep|Citet|cite)\s*\{([^}]*)\}", one, text)
+        return re.sub(
+            r"\\((?:[cC]ite(?:p|t|alp|alt|author|year|yearpar|num)?)|parencite|textcite|autocite"
+            r"|Parencite|Textcite|Autocite)\*?\s*(\[[^\]]*\])?\s*(\[[^\]]*\])?\s*\{([^}]*)\}",
+            one, text)
 
     # -- environments -------------------------------------------------------
     def environments(self, text: str) -> str:

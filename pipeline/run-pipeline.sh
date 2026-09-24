@@ -222,6 +222,11 @@ verify_evidence() {
 }
 want() { if [ -n "$STEP" ]; then [ "$STEP" = "$1" ]; else
            [ "$1" -ge "$FROM" ] && [ "$1" -le "$TO" ]; fi; }
+# Re-running anything the paper was written from invalidates the finished
+# paper (step 11 reads the mark).
+if [ -z "$DRY" ]; then
+  for n in 1 2 3 4 5 6 7 8 9 10; do want "$n" && { rm -f "$W/.paper-ready"; break; }; done
+fi
 # In a reduced run the gates still RUN — that is the point of a reduced run: you
 # want to see what they say about the configuration. They just do not block.
 BLOCKING=1; [ "${AC_PILOT:-0}" = "1" ] && BLOCKING=0
@@ -632,6 +637,16 @@ fi
 #        exactly what steps 12-15 have always read
 if want 11; then
   need_kind
+  # A re-run of step 11 after the paper already passed its gates -- say the
+  # render failed on a construct it did not know -- goes straight to the
+  # render. Rewriting a finished paper is an hour of model time for nothing,
+  # and a different paper. Only while the evidence is the one it was written
+  # from; any step up to 10 withdraws the mark.
+  if [ -z "$DRY" ] && [ -f "$W/.paper-ready" ] && [ -f "$W/.evidence.sha" ] \
+     && [ "$(evidence_digest)" = "$(cat "$W/.evidence.sha")" ]; then
+    say "11a-b/15 the paper passed its gates on this evidence already; rendering it again"
+  else
+  rm -f "$W/.paper-ready"
   skill "11a/15 hand the evidence to the writer (research side)" \
 "Hand this study's evidence to the writing skill. You are the research side of
 $ROOT/interfaces/evidence-interface.md; read it, then the section \"Handing off
@@ -730,6 +745,8 @@ v = json.load(open(sys.argv[1])).get("verdict")
 print("readiness:", v)
 sys.exit(0 if v == "READY" else 1)' "$W/readiness.json" || {
     echo "research: readiness.json is not READY; see its blocked_on (steps 4-6)." >&2; exit 5; }
+  [ -n "$DRY" ] || touch "$W/.paper-ready"
+  fi
 
   if [ -n "$DRY" ]; then
     printf '\n\033[1m===== %s =====\033[0m\n  $ %s\n' "11c/15 render for the platform (ours)" \

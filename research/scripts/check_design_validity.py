@@ -123,6 +123,18 @@ def load_cells(workdir: str) -> list:
                 recs = _load_any(os.path.join(dirpath, name))
             except (OSError, ValueError):
                 continue
+            # A results file may name its model once, at the top, rather than
+            # on every record. (This read `doc`, a name never defined here, and
+            # crashed the gate on any record without its own model field --
+            # that is, on every study that is not about language models.)
+            file_model = None
+            if name.endswith(".json"):
+                try:
+                    top = json.load(open(os.path.join(dirpath, name), encoding="utf-8"))
+                    if isinstance(top, dict):
+                        file_model = top.get("model")
+                except (OSError, ValueError):
+                    pass
             for rec in recs:
                 if not isinstance(rec, dict):
                     continue
@@ -134,7 +146,7 @@ def load_cells(workdir: str) -> list:
                 # by the scorer), and treating the scorer's copy as a second
                 # nameless "model" both doubles n and fakes a second model. That
                 # is exactly the way an under-powered run would sneak past.
-                model = rec.get("model") or doc.get("model")
+                model = rec.get("model") or file_model
                 if not model:
                     unattributed += 1
                     continue
