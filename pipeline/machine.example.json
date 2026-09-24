@@ -1,0 +1,105 @@
+{
+  "_comment": "Measured on this box, not assumed. Every number here was produced by a run whose command is named. The feasibility stage scores candidate experiments against this.",
+  "container": {
+    "cpu_cores": 2,
+    "ram_gib": 8,
+    "note": "cgroup limits (memory.max=8589934592, cpu.max=200000/100000). The HOST has 24 cores and 226 GiB and none of it is reachable. Kubernetes pod.",
+    "measured_by": "cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max"
+  },
+  "gpu": {
+    "name": "NVIDIA A100-SXM4-80GB",
+    "count": 1,
+    "vram_gib": 80,
+    "cuda": "12.8",
+    "idle": true
+  },
+  "measured": {
+    "load_7b_bf16": {
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "host_rss_peak_gib": 7.23,
+      "cgroup_peak_gib": 8.0,
+      "gpu_alloc_gib": 14.19,
+      "load_seconds": 163,
+      "verdict": "works, but AT the ceiling. Load one model at a time and free it before the next."
+    },
+    "generation": {
+      "batch_1_tok_per_s": 45.6,
+      "batch_16_tok_per_s": 751.6,
+      "batch_64_tok_per_s": 3003.8,
+      "gpu_gib_at_batch_64": 16.3,
+      "note": "Budget SHORT generations from the batched tok/s figure. Budget LONG generations from long_generation_cost_model instead: it is step-bound, not throughput-bound.",
+      "long_generation_cost_model": {
+        "_why_this_matters": "The 3003.8 tok/s figure was measured on 512-token generations and does NOT transfer to long ones. Greedy decoding to a cap of N is N SEQUENTIAL forward passes; wall-clock is (number_of_batches x max_new_tokens x per_step_latency), and token throughput is a derived quantity, not the driver.",
+        "formula": "wall_seconds ~= ceil(n_sequences / batch_size) * max_new_tokens * per_step_latency",
+        "consequence": "Increasing batch_size is nearly FREE for long generations: the step count is fixed by max_new_tokens, so a bigger batch amortises the same steps over more sequences. Batch 8 at an 8192 cap wastes most of the GPU.",
+        "observed": "A calibration pass of 32 sequences at an 8192 cap, run as 4 batches of 8, took about 16 minutes wall-clock including two model loads -- consistent with ~25-30 ms per step at batch 8. The same 32 sequences as one batch of 32 would have been roughly a quarter of that.",
+        "second_consequence": "HF generate stops only when EVERY sequence in the batch has emitted EOS, so one long trace holds the whole batch at the cap. Give a reasoning model and an instruct model separate caps and separate batches rather than mixing them, and prefer larger batches of similar-length work.",
+        "status": "inferred from a live calibration run, not from a dedicated sweep -- the per-step latency vs batch curve has not been measured directly"
+      }
+    },
+    "attention_microbench": {
+      "host_rss_peak_mib": 686,
+      "sdpa_causal_ms": {
+        "L1024": 1.06,
+        "L8192": 3.17,
+        "L32768": 44.4
+      },
+      "note": "No model weights needed. The cheapest way to use this GPU."
+    },
+    "hf_download_mib_per_s": 145,
+    "pip_install_transformers_seconds": 49
+  },
+  "installed": {
+    "python": "3.13.14",
+    "torch": "2.11.0+cu128",
+    "transformers": "5.15.1",
+    "also": [
+      "accelerate",
+      "numpy",
+      "pandas",
+      "scipy",
+      "matplotlib",
+      "pypdf",
+      "jq",
+      "pdflatex",
+      "xelatex",
+      "pandoc"
+    ]
+  },
+  "absent": {
+    "tools": [
+      "node",
+      "npm",
+      "docker",
+      "cron",
+      "crontab",
+      "tmux",
+      "screen",
+      "uv",
+      "gh",
+      "pdftotext"
+    ],
+    "consequences": [
+      "No Codex CLI, so ARIS's cross-model reviewer is unavailable; bin/repro-gate.py stands in for it.",
+      "No cron/systemd: the unattended loop is flock + nohup.",
+      "vLLM is NOT installed and is risky here: its CPU-side work and RAM appetite do not fit 2 cores / 8 GiB comfortably. Use transformers with batching."
+    ]
+  },
+  "filesystem": {
+    "home": "1.8 PB NFS",
+    "sequential_io": "fast",
+    "metadata_io": "very slow -- `du` over $HOME hangs. Do not create tens of thousands of small files."
+  },
+  "hard_limits": [
+    "A 14B model in bf16 will NOT load: 7B already peaks the 8 GiB cgroup.",
+    "No training, no fine-tuning of anything above ~1B, no multi-GPU.",
+    "No CPU-heavy data processing: 2 cores. Corpus-scale preprocessing is out.",
+    "No concurrency for speed: parallel processes on 2 cores make things slower.",
+    "Network egress works (github, arxiv, huggingface, pypi all reachable)."
+  ],
+  "budget": {
+    "window_hours": 120,
+    "single_experiment_target_hours": 6,
+    "note": "A submission window is ~7 days. Aim each experiment at under 6 hours so the sweep can be repeated after the pilot finds bugs."
+  }
+}

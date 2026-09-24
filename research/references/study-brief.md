@@ -35,12 +35,6 @@ unreadable.
 So: **if `STUDY.md` is absent, stop.** A brief the agent wrote for itself
 records its own assumptions and then validates against them.
 
-When the agent runs unattended there is nobody else to write it, and
-`ideation/SKILL.md` does. The guard then is pre-registration: the brief is
-committed before the first experiment, so its frozen list could not have been
-chosen to fit a result, and any later change to it is visible in the diff and
-must be disclosed in the paper.
-
 ## Required sections
 
 | Section | Must answer | Why it cannot be inferred |

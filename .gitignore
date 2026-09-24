@@ -4,3 +4,6 @@ node_modules/
 /work/
 __pycache__/
 *.pyc
+/runs/
+/.claude/
+/.aris/

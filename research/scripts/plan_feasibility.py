@@ -22,8 +22,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import verdict as aris_audit  # noqa: E402
 MODEL = os.environ.get("AC_MODEL", "claude-sonnet-5")
+# The measured box. The pipeline sets AC_MACHINE (default state/machine.json);
+# pipeline/machine.example.json is the one this gate was written against, kept
+# as the worked example of the shape and of what "measured" means.
+MACHINE = os.environ.get("AC_MACHINE") or os.path.join(ROOT, "state", "machine.json")
+EXAMPLE = os.path.join(ROOT, "pipeline", "machine.example.json")
 
-PROMPT = """Read {plan}, then read {bot}/pipeline/env-ledger.md and {bot}/pipeline/machine.example.json.
+PROMPT = """Read {plan}, then read {machine}, the measured description of THIS machine.
+{example} is the machine this gate was first written for; read it only as an
+example of the shape and of the traps below, never as this machine's numbers.
 
 You are the feasibility gate for a research agent. It is about to spend a whole
 submission window on this plan. Your job is to say whether the plan can actually
@@ -40,22 +47,26 @@ Write {out} and nothing else:
   "risks": ["things likely to bite even though the verdict is GO"]}}
 
 The numbers that decide most cases:
-  * A 7B model in bf16 peaks host RSS at 7.23 GiB against an 8 GiB cgroup cap.
-    Anything larger is NO-GO. Two models resident at once is NO-GO.
+  * Memory. A model whose load does not fit the host RAM and GPU memory in
+    machine.json with headroom is NO-GO; so are two resident at once unless both
+    fit. (On the example box a 7B bf16 load peaked host RSS at 7.23 GiB against
+    an 8 GiB cap: it fit, with none to spare.)
   * Any training or fine-tuning above roughly 1B is NO-GO.
-  * 2 CPU cores: corpus-scale preprocessing is NO-GO. So is anything that wants
-    a process pool for speed.
-  * Batched generation is 3003.8 tok/s at batch 64; single-stream is 45.6.
-    Derive the hours from the batched figure and show the division in `reason`.
+  * CPU cores. With few, corpus-scale preprocessing is NO-GO, and so is anything
+    that wants a process pool for speed.
+  * Throughput. Derive the hours from the batched generation rate machine.json
+    measured and show the division in `reason`. If it measured none, estimate
+    conservatively and say that the figure is an estimate.
+  * No NVIDIA GPU in machine.json: anything that runs a model locally is NO-GO.
   * Target under 6 hours, so there is room to rerun the sweep after the pilot
     finds bugs. A plan with no slack is a plan that ships whatever the first
     buggy run produced.
-  * vLLM is not installed and does not fit comfortably here; assume transformers.
+  * Assume transformers unless machine.json lists vLLM.
 
 Watch for the failure that is easy to miss: something that fits in GPU memory
 but accumulates host-side tensors. Logging per-token logits over a 150k vocab
-is the usual example -- the model alone leaves under 1 GiB of headroom, so that
-forces batch=1, which costs a 66x slowdown and blows the budget.
+is the usual example -- on a box where the model alone leaves little headroom,
+that forces batch=1, which costs a 66x slowdown and blows the budget.
 
 If it is NO-GO, `required_changes` is the useful part: say what smaller version
 of the same question WOULD run here. A gate that only rejects is half a gate."""
@@ -86,7 +97,7 @@ def main() -> None:
 
     err = None
     for attempt in range(1, 4):
-        prompt = PROMPT.format(plan=plan, out=out, bot=ROOT)
+        prompt = PROMPT.format(plan=plan, out=out, machine=MACHINE, example=EXAMPLE)
         if err:
             prompt += f"\n\n---\nYOUR PREVIOUS ATTEMPT WAS REJECTED:\n{err}\nFix exactly that."
         print(f"[feasible] attempt {attempt}/3 (model={MODEL})", flush=True)
@@ -94,7 +105,7 @@ def main() -> None:
             os.remove(out)
         r = subprocess.run(["claude", "-p", "--model", MODEL,
                             "--permission-mode", "bypassPermissions", prompt],
-                           cwd=BOT, capture_output=True, text=True, timeout=1800)
+                           cwd=ROOT, capture_output=True, text=True, timeout=1800)
         try:
             with open(out, encoding="utf-8") as f:
                 obj = json.load(f)
@@ -117,11 +128,9 @@ def main() -> None:
             "PASS" if go else "FAIL",
             "fits_resource_tier" if go else "exceeds_resource_tier",
             f"{obj['verdict']}: {obj['reason'][:400]}",
-            inputs=[plan, os.path.join(ROOT, "pipeline", "machine.example.json"),
-                    os.path.join(ROOT, "pipeline", "env-ledger.md")],
+            inputs=[plan, MACHINE],
             reasoning=("Deterministic in its inputs: the plan is scored against the "
-                       "measured tier in .aris/env-ledger.md (cpus 2, mem_gib 8, "
-                       "gpus 1) rather than an assumed GPU box."),
+                       "measured machine description rather than an assumed GPU box."),
             extra=obj, verifier="feasible")
 
         if go:

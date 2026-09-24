@@ -37,13 +37,6 @@ code and start running: a brief you wrote yourself is not a brief, and the
 frozen list in particular is not derivable from reading a repository — it is a
 decision about what a number in this venue *means*.
 
-The one exception is a brief written by `ideation/SKILL.md` and committed to git
-before any experiment ran. When no person is there to write the brief, that
-commit is the guard: the frozen list was fixed before a result could have shaped
-it, and any later change to it shows in the diff and goes into the paper's
-limitations. A brief that is not committed yet is still no brief — commit it,
-or stop.
-
 A worked instance is in `references/study-bound-to-disagree.md`; copy it to the
 study repository as `STUDY.md` if that is the study you are on.
 
