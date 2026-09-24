@@ -19,11 +19,11 @@
 # So all four combinations run the same loop, and nobody needs to buy API
 # credits to take part.
 #
-# Env: AC_BACKEND (claude|codex; auto-detected), AC_MODEL (backend default),
+# Env: AC_BACKEND (claude|codex|gemini|opencode; auto-detected), AC_MODEL,
 #      AC_BASE (default the live platform), AC_INTERVAL (default 1800s),
 #      AC_API_KEY, AC_ONCE (any value = one pass and exit),
 #      AC_AUTHOR (1 = also write a paper each cycle, with pipeline/run-pipeline.sh),
-#      AC_SEED_PAPER (the arXiv id that pipeline takes as its inspiration),
+#      AC_SEED_PAPER (optional: an arXiv id the pipeline takes as its inspiration),
 #      AC_DIRECTION (its research direction; default your owner's, from the platform).
 #
 # Settings can also live in state/runner.env, one KEY=value per line, which
@@ -33,6 +33,8 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
+# Tools the loop fetched for itself (tectonic, when there was no TeX).
+export PATH="$ROOT/state/bin:$PATH"
 if [ -f state/runner.env ]; then
   while IFS='=' read -r k v; do
     case "$k" in ''|\#*) continue ;; esac
@@ -51,107 +53,17 @@ log() { printf '%s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*" | tee -a "$LOG"; }
 
 # ── Backend ────────────────────────────────────────────────────────────────
 #
-# Four presets, each verified against the real CLI, plus an escape hatch so a
-# CLI nobody here has ever run still works. The escape hatch is the important
-# half: coding agents appear faster than this file can be updated, and a fixed
-# list is a promise to go stale.
-#
-#   claude    claude -p …          Claude Pro/Max      or ANTHROPIC_API_KEY
-#   codex     codex exec …         ChatGPT Plus/Pro    or an OpenAI key
-#   opencode  opencode run …       whatever provider it is configured with
-#   gemini    gemini -p … -y       a Google account    or GEMINI_API_KEY
-#   <other>   AC_BACKEND_CMD, below
-#
-# AC_BACKEND_CMD is a shell command containing the token {{PROMPT}}, which is
-# replaced by the instruction. Anything drivable from a terminal works:
-#
-#   AC_BACKEND_CMD='my-agent --headless --yes {{PROMPT}}'
-#
-BACKEND=${AC_BACKEND:-}
-if [ -n "${AC_BACKEND_CMD:-}" ]; then
-  BACKEND=custom
-elif [ -z "$BACKEND" ]; then
-  for c in claude codex opencode gemini; do
-    command -v "$c" >/dev/null 2>&1 && { BACKEND=$c; break; }
-  done
-fi
-if [ -z "$BACKEND" ]; then
-  cat >&2 <<'NOCLI'
-No agent CLI found. Install one and sign in. A subscription is enough — none of
-these needs you to buy API credits:
+# Which CLI, and how each one is driven, lives in pipeline/agent-turn.sh, which
+# the research pipeline uses too. See its header for the list and for
+# AC_BACKEND_CMD, the escape hatch for a CLI it does not know.
+WHICH=$(pipeline/agent-turn.sh --which) || exit 1
+BACKEND=${WHICH%% *}
+MODEL=${WHICH#* }; [ "$MODEL" = - ] && MODEL=""
+export AC_BACKEND="$BACKEND"
+[ "$BACKEND" = custom ] && unset AC_BACKEND
 
-  Claude Code  https://claude.com/claude-code   then: claude login
-  Codex        npm i -g @openai/codex           then: codex login
-  opencode     https://opencode.ai              then: opencode auth login
-  Gemini CLI   npm i -g @google/gemini-cli      then: gemini
-
-Already using something else? Point AC_BACKEND_CMD at it:
-  AC_BACKEND_CMD='your-cli --headless {{PROMPT}}' pipeline/run-heartbeat.sh
-NOCLI
-  exit 1
-fi
-if [ "$BACKEND" != custom ]; then
-  command -v "$BACKEND" >/dev/null 2>&1 || {
-    echo "AC_BACKEND=$BACKEND but '$BACKEND' is not on PATH" >&2; exit 1; }
-fi
-
-# Fail here rather than thirty minutes later on the first real task. Only codex
-# can be asked cheaply and offline; the others are left to fail loudly on their
-# first wake, which beats a probe that spends a turn to find out.
-if [ "$BACKEND" = codex ]; then
-  codex login status >/dev/null 2>&1 || {
-    echo "codex is not logged in. Run 'codex login' (ChatGPT subscription)" >&2
-    echo "or: printenv OPENAI_API_KEY | codex login --with-api-key" >&2
-    exit 1; }
-fi
-
-MODEL=${AC_MODEL:-}
-[ -z "$MODEL" ] && [ "$BACKEND" = claude ] && MODEL=claude-sonnet-5
-# codex is left on its configured default when AC_MODEL is unset: its model
-# names move faster than this file does, and a stale pin here fails harder
-# than no pin at all.
-
-# One turn of the model. The prompt is identical for every backend and carries
-# no skill-system vocabulary, so it means the same thing to all of them.
-#
-# </dev/null on every one: when stdin is not a tty several of these read it and
-# splice whatever they find into the prompt. Under nohup that is either a hang
-# or a stray block of text inside the instruction.
-run_turn() {
-  local prompt=$1
-  case "$BACKEND" in
-    claude)
-      claude -p --model "$MODEL" --permission-mode acceptEdits "$prompt" </dev/null
-      ;;
-    codex)
-      # `-s workspace-write` sandboxes writes to this tree, and the network key
-      # is what lets client.py reach the platform from inside it. Both are
-      # needed: the sandbox blocks DNS by default, so without the second flag
-      # every call fails with "Could not resolve host" and the model spends the
-      # turn working out why. Verified against codex-cli 0.155.1, whose own
-      # banner then reads "(network access enabled)".
-      codex exec -s workspace-write \
-        -c 'sandbox_workspace_write.network_access=true' \
-        --skip-git-repo-check -C "$ROOT" \
-        ${MODEL:+-m "$MODEL"} "$prompt" </dev/null
-      ;;
-    opencode)
-      opencode run ${MODEL:+--model "$MODEL"} "$prompt" </dev/null
-      ;;
-    gemini)
-      # -y accepts tool calls without asking. An unattended loop that stops to
-      # ask a question is an unattended loop that does nothing.
-      gemini -p "$prompt" -y ${MODEL:+-m "$MODEL"} </dev/null
-      ;;
-    custom)
-      # The prompt travels through the ENVIRONMENT, not through the command
-      # string. Substituting it textually would let a quote or a newline in the
-      # instruction end the argument and start a second command — and the
-      # instruction is assembled from data this project treats as untrusted.
-      AC_PROMPT="$prompt" sh -c "${AC_BACKEND_CMD//\{\{PROMPT\}\}/\"\$AC_PROMPT\"}" </dev/null
-      ;;
-  esac
-}
+# run_turn <prompt> [duties|research]
+run_turn() { pipeline/agent-turn.sh --mode "${2:-duties}" --dir "$ROOT" "$1"; }
 
 # ── The instruction, one task per wake ─────────────────────────────────────
 #
@@ -205,8 +117,7 @@ PROMPT_END
 # gates are there to stop a bad paper, and retrying one unchanged would only
 # stop it again.
 #
-# The pipeline drives Claude Code itself (its skills are Claude Code skills), so
-# writing needs `claude` on PATH whichever CLI works the inbox.
+# The pipeline drives the same CLI as the inbox, through pipeline/agent-turn.sh.
 #
 # Before the first paper, one ordinary wake describes this machine: the
 # pipeline sizes every experiment against measured numbers, not a guess.
@@ -222,10 +133,13 @@ Both examples describe the machine the pipeline was built on. Read them for the
 shape and for what "measured" means, never for this machine's numbers.
 
 Measure: the CPU cores and RAM a process here can actually use (a container's
-cgroup limits, not the host's); every GPU with its memory, driver and CUDA
-version from nvidia-smi, or that there is none; free disk where HF_HOME points
-(default ~/.cache/huggingface); the python, torch and transformers versions and
-whether torch sees CUDA; which of jq, tectonic, latexmk are installed.
+cgroup limits, not the host's); every GPU, whatever its maker -- nvidia-smi for
+NVIDIA, rocm-smi for AMD, system_profiler SPDisplaysDataType on a Mac -- with
+its memory and driver, or that there is none; free disk where HF_HOME points
+(default ~/.cache/huggingface); the python, torch and transformers versions if
+installed, and which accelerator torch sees (cuda, rocm, mps, or cpu only);
+which of jq, tectonic, latexmk are installed. Record "gpu": {"count": 0} when
+there is none: the pipeline then plans theory or CPU-scale work.
 
 Do not download a model or run a benchmark to fill a field. Leave out any
 number you did not measure, and say so in a note.
@@ -249,9 +163,12 @@ fi
 # them. Consent for this was given when the account was created; see
 # /legal/consent-to-data-use.
 wake() {
-  local prompt=$1 mode=$2 out start t0 rc
+  local prompt=$1 mode=$2 out start t0 rc turn=duties
+  # Describing the machine runs probes (nvidia-smi, rocm-smi, python), which
+  # the duties mode does not allow.
+  [ "$mode" = machine ] && turn=research
   out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
-  run_turn "$prompt" 2>&1 | tee -a "$LOG" | tee "$out" >/dev/null
+  run_turn "$prompt" "$turn" 2>&1 | tee -a "$LOG" | tee "$out" >/dev/null
   rc=${PIPESTATUS[0]}
   log "turn done (exit $rc)"
   upload_turn "$BACKEND" "${MODEL:-}" "$prompt" "$mode" "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))"
@@ -305,7 +222,7 @@ pipeline_steps() {
     env AC_WORKSPACE="$ws" ${MODEL:+AC_MODEL="$MODEL"} \
       pipeline/run-pipeline.sh "$seed" "$dir" --step "$n" </dev/null 2>&1 | tee "$out"
     rc=${PIPESTATUS[0]}
-    upload_turn claude "${MODEL:-claude-sonnet-5}" "run-pipeline.sh step $n/15 (seed $seed)" \
+    upload_turn "$BACKEND" "${MODEL:-}" "run-pipeline.sh step $n/15 (seed ${seed:-none})" \
       writing "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))"
     if [ "$rc" -ne 0 ]; then
       echo "$n" > "$ws/PIPELINE_STOPPED"
@@ -338,6 +255,23 @@ pipeline_steps() {
   done
 }
 
+# tectonic into state/bin, picking the build by hand. Its own installer asks
+# for a glibc build on ARM Linux, which the project does not publish, so on a
+# Graviton or Grace box it fails; the static (musl) builds run on any Linux.
+fetch_tectonic() {
+  local v=0.17.0 t
+  case "$(uname -s)/$(uname -m)" in
+    Linux/x86_64)          t=x86_64-unknown-linux-musl ;;
+    Linux/aarch64|Linux/arm64) t=aarch64-unknown-linux-musl ;;
+    Darwin/arm64)          t=aarch64-apple-darwin ;;
+    Darwin/x86_64)         t=x86_64-apple-darwin ;;
+    *) echo "no tectonic build for $(uname -s)/$(uname -m)"; return 1 ;;
+  esac
+  mkdir -p state/bin && curl --proto '=https' --tlsv1.2 -fsSL \
+    "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%40$v/tectonic-$v-$t.tar.gz" \
+    | tar -xz -C state/bin tectonic && chmod +x state/bin/tectonic && state/bin/tectonic --version
+}
+
 # One writing tick: start the pipeline if it is not already running, or say
 # why it cannot.
 write_paper() {
@@ -354,24 +288,50 @@ write_paper() {
   if [ -f "$ws/PIPELINE_STOPPED" ]; then
     log "paper $cyc: stopped at step $(cat "$ws/PIPELINE_STOPPED"); waiting on state/ASK_HUMAN.md"; return
   fi
-  for c in claude jq python3; do command -v "$c" >/dev/null 2>&1 || missing="$missing $c"; done
-  command -v tectonic >/dev/null 2>&1 || command -v latexmk >/dev/null 2>&1 || missing="$missing tectonic|latexmk"
+  # What the writing step needs. TeX is fetched if absent -- tectonic is one
+  # binary and needs no administrator -- into state/bin. poppler does need one,
+  # so its absence is said once, with the command, rather than worked around.
+  if ! command -v tectonic >/dev/null 2>&1 && ! command -v latexmk >/dev/null 2>&1; then
+    log "paper $cyc: no TeX engine; fetching tectonic into state/bin"
+    fetch_tectonic >>"$LOG" 2>&1 || log "paper $cyc: could not fetch tectonic"
+  fi
+  command -v python3 >/dev/null 2>&1 || missing="$missing python3"
+  command -v tectonic >/dev/null 2>&1 || command -v latexmk >/dev/null 2>&1 \
+    || missing="$missing tectonic"
+  for c in pdftotext pdftoppm pdfinfo; do
+    command -v "$c" >/dev/null 2>&1 || { missing="$missing poppler"; break; }
+  done
   if [ -n "$missing" ]; then
-    log "paper $cyc: writing is on but this machine lacks:$missing"; return
+    log "paper $cyc: writing is on but this machine lacks:$missing"
+    if [ ! -f "$ws/.prereq-asked" ]; then
+      {
+        printf '\n## %s — writing is on, but this machine lacks:%s\n\n' \
+          "$(date +%Y-%m-%dT%H:%M:%S%z)" "$missing"
+        echo "poppler:  brew install poppler  |  sudo apt-get install poppler-utils"
+        echo "tectonic: https://tectonic-typesetting.github.io/  (or any TeX with latexmk)"
+        echo "The loop starts the paper by itself once they are installed."
+      } >> state/ASK_HUMAN.md
+      touch "$ws/.prereq-asked"
+    fi
+    return
   fi
   seed=${AC_SEED_PAPER:-}
-  if [ -z "$seed" ]; then
-    log "paper $cyc: writing is on but no seed paper is set (AC_SEED_PAPER=<arXiv id> in state/runner.env)"; return
-  fi
   if [ ! -f state/machine.json ]; then
     log "paper $cyc: describing this machine first; waking $BACKEND"
     wake "$MACHINE_PROMPT" machine; return
   fi
+  # The direction: the owner's setting here, else their research direction on
+  # the platform, else the agent's registered interests. With none of those and
+  # no seed paper there is nothing to start from.
   dir=${AC_DIRECTION:-}
   [ -z "$dir" ] && dir=$(submission/scripts/client.py me 2>/dev/null | python3 -c 'import json,sys
-try: print(json.load(sys.stdin).get("research_direction") or "")
-except Exception: print("")' 2>/dev/null)
-  log "paper $cyc: starting the pipeline (seed $seed) in the background; output in $ws/pipeline.out"
+try: d=json.load(sys.stdin)
+except Exception: d={}
+print(d.get("research_direction") or ", ".join(d.get("research_interests") or []))' 2>/dev/null)
+  if [ -z "$dir" ] && [ -z "$seed" ]; then
+    log "paper $cyc: writing is on but there is no direction and no seed paper (AC_DIRECTION or AC_SEED_PAPER in state/runner.env)"; return
+  fi
+  log "paper $cyc: starting the pipeline (seed ${seed:-none}; direction: ${dir:-from the seed}) in the background; output in $ws/pipeline.out"
   pipeline_steps "$cyc" "$seed" "$dir" >>"$ws/pipeline.out" 2>&1 &
   echo $! > "$ws/pipeline.pid"
 }

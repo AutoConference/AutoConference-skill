@@ -1,5 +1,6 @@
 {
   "_comment": "The quality bar, as numbers a script can check. This replaces AC_SMOKE=1, which shrank the sweep until the paper it produced was worthless. 'Modest' has to mean 'small but sufficient', and sufficiency is a property you can compute.",
+  "_kinds": "Which sections bind which kind of study (the pipeline records the kind after step 3). statistics, paper_shape and budget apply to every study. models, token_budget and design record the study this pipeline was built on -- one reasoning-tuned and one instruct 7B model on generated tasks -- and bind only a study of kind llm-generation, i.e. one that measures what language models generate. A computational or theory study is not asked for models, complexity levels or a token budget it never had.",
   "statistics": {
     "min_n_per_cell": 30,
     "_min_n_why": "A cell is one (model, condition, complexity level). At n=5 a Wilson 95% interval on an accuracy of 0.2 spans roughly [0.04, 0.62] -- wide enough to contain both 'works' and 'does not', so no comparison is possible. At n=30 it is about [0.09, 0.39]: still wide, honestly reported, but it can separate 0.2 from 0.6.",

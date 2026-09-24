@@ -217,6 +217,17 @@ def _records(doc):
     return []
 
 
+# The study kind, which the pipeline writes after step 3. Only one check reads
+# it: a theory paper's numerical checks are usually exact, and an interval
+# around an exact computation is not a thing to demand. Without the file the
+# gate behaves as it always did.
+def study_kind(workdir: str) -> str:
+    try:
+        return open(os.path.join(workdir, "STUDY_KIND"), encoding="utf-8").read().strip()
+    except OSError:
+        return ""
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("workdir")
@@ -294,7 +305,7 @@ def main() -> None:
         f"{len(brackets)} bracketed), need >= {shape['min_citations']}")
 
     # ---- reported uncertainty ------------------------------------------
-    if shape.get("require_ci_in_results"):
+    if shape.get("require_ci_in_results") and study_kind(a.workdir) != "theory":
         n_ci = len(CI_NOTATION.findall(body))
         chk("confidence_intervals", n_ci >= 2,
             f"{n_ci} interval notations in the body. quality.json requires the "

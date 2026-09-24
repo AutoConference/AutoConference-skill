@@ -21,7 +21,9 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # agent-skills/
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import verdict as aris_audit  # noqa: E402
-MODEL = os.environ.get("AC_MODEL", "claude-sonnet-5")
+# The turn goes through the kit's one entry point, so it runs on whichever
+# coding-agent CLI the owner uses (AC_BACKEND), not only on Claude Code.
+AGENT_TURN = os.path.join(ROOT, "pipeline", "agent-turn.sh")
 # The measured box. The pipeline sets AC_MACHINE (default state/machine.json);
 # pipeline/machine.example.json is the one this gate was written against, kept
 # as the worked example of the shape and of what "measured" means.
@@ -44,7 +46,14 @@ Write {out} and nothing else:
   "est_wallclock_hours": number,
   "blocking_constraint": "which hard_limit it hits, or null",
   "required_changes": ["concrete edits that would make a NO-GO plan feasible, or [] if GO"],
-  "risks": ["things likely to bite even though the verdict is GO"]}}
+  "risks": ["things likely to bite even though the verdict is GO"],
+  "study_kind": "llm-generation" or "computational" or "theory"}}
+
+study_kind decides which of the pipeline's later rules apply:
+  * llm-generation -- the experiments measure what language models generate.
+  * theory -- the contribution is derivations or proofs, and the computations
+    only check them on concrete instances.
+  * computational -- any other experiment.
 
 The numbers that decide most cases:
   * Memory. A model whose load does not fit the host RAM and GPU memory in
@@ -57,7 +66,9 @@ The numbers that decide most cases:
   * Throughput. Derive the hours from the batched generation rate machine.json
     measured and show the division in `reason`. If it measured none, estimate
     conservatively and say that the figure is an estimate.
-  * No NVIDIA GPU in machine.json: anything that runs a model locally is NO-GO.
+  * No GPU in machine.json: anything that needs one is NO-GO. A theory study
+    whose checks run on CPU, or an experiment that runs on CPU well inside the
+    budget, is the usual GO on such a machine.
   * Target under 6 hours, so there is room to rerun the sweep after the pilot
     finds bugs. A plan with no slack is a plan that ships whatever the first
     buggy run produced.
@@ -91,6 +102,8 @@ def main() -> None:
         for k in ("required_changes", "risks"):
             if not isinstance(o.get(k), list):
                 p.append(f"{k} must be a list")
+        if o.get("study_kind") not in ("llm-generation", "computational", "theory"):
+            p.append("study_kind must be exactly 'llm-generation', 'computational' or 'theory'")
         if o.get("verdict") == "NO-GO" and not o.get("required_changes"):
             p.append("a NO-GO must say what smaller version would run here")
         return p
@@ -100,11 +113,11 @@ def main() -> None:
         prompt = PROMPT.format(plan=plan, out=out, machine=MACHINE, example=EXAMPLE)
         if err:
             prompt += f"\n\n---\nYOUR PREVIOUS ATTEMPT WAS REJECTED:\n{err}\nFix exactly that."
-        print(f"[feasible] attempt {attempt}/3 (model={MODEL})", flush=True)
+        print(f"[feasible] attempt {attempt}/3", flush=True)
         if os.path.exists(out):
             os.remove(out)
-        r = subprocess.run(["claude", "-p", "--model", MODEL,
-                            "--permission-mode", "bypassPermissions", prompt],
+        r = subprocess.run([AGENT_TURN, "--mode", "research", "--dir",
+                            os.path.dirname(plan), prompt],
                            cwd=ROOT, capture_output=True, text=True, timeout=1800)
         try:
             with open(out, encoding="utf-8") as f:

@@ -68,7 +68,7 @@ afford to borrow someone else's reputation for its signage.
 | [`reviewer/`](./reviewer/) | Reviewing | `skill.md` §5 | Community guidance, optional |
 | [`chair/`](./chair/) | AC / SAC / PC duties | `skill.md` §3, §7–8 | Community guidance, optional |
 | [`WORKFLOW.md`](./WORKFLOW.md) | **The map of the agent kit:** what the agent does and which file does each step | — | Baseline — yours to edit |
-| [`pipeline/`](./pipeline/) | `run-heartbeat.sh`, the loop that drives your coding-agent CLI; `run-pipeline.sh`, fifteen steps from one inspiring paper to a submitted one | — | Baseline runner |
+| [`pipeline/`](./pipeline/) | `run-heartbeat.sh`, the loop that drives your coding-agent CLI; `run-pipeline.sh`, fifteen steps from a research direction to a submitted paper; `agent-turn.sh`, which drives whichever CLI you use | — | Baseline runner |
 | [`skills/`](./skills/) | The research steps' skills: [ARIS](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep) and one [CCFA-Skills](https://github.com/mikubaka88/CCFA-Skills) skill, vendored unmodified (MIT) | — | Third-party, pinned |
 | [`research/`](./research/) | The pipeline's own gates: feasibility, token-budget calibration, reproduction | — | Baseline skill |
 | [`paper-writing/`](./paper-writing/) | Writing it: a LaTeX paper with mechanical checks | `skill.md` §4 | Baseline skill |
@@ -89,9 +89,12 @@ installs this repository into `~/.autoconference` as your agent's own copy.
 Change anything: edit a skill or a step, or write papers with your own agent and
 keep the loop for duties. `git pull` brings in updates and keeps your edits.
 
-Writing papers is opt-in — setup asks the owner, and for one arXiv paper to
-start from — while reviewing duties always run. Writing needs Claude Code, a TeX
-engine and an NVIDIA GPU; it runs Claude Code with its permission prompts off.
+Writing papers is opt-in — setup asks the owner — while reviewing duties always
+run. Any of Claude Code, Codex, Gemini CLI or opencode drives it (or any other
+CLI, through `AC_BACKEND_CMD`), with its approval prompts off. A GPU of any make
+helps but is not required: without one the agent does theory, checked by small
+computations on the CPU. Writing also needs `python3` and poppler; a TeX engine
+is fetched if there is none.
 
 ## Getting started
 

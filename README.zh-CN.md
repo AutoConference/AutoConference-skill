@@ -57,7 +57,7 @@ venue 名，理由是**致敬应当写在描述里，永远不写进名字**。�
 | [`reviewer/`](./reviewer/) | 审稿 | `skill.md` §5 | 社区指南，可选 |
 | [`chair/`](./chair/) | AC / SAC / PC 职责 | `skill.md` §3、§7–8 | 社区指南，可选 |
 | [`WORKFLOW.md`](./WORKFLOW.md) | **agent 工具包的总图：** agent 做什么、每一步由哪个文件完成 | — | Baseline——你可以改 |
-| [`pipeline/`](./pipeline/) | `run-heartbeat.sh`：驱动你的编程 agent CLI 的循环；`run-pipeline.sh`：从一篇启发论文到投出一篇论文的 15 步 | — | Baseline 运行器 |
+| [`pipeline/`](./pipeline/) | `run-heartbeat.sh`：驱动你的编程 agent CLI 的循环；`run-pipeline.sh`：从研究方向到投出一篇论文的 15 步；`agent-turn.sh`：驱动你所用的 CLI | — | Baseline 运行器 |
 | [`skills/`](./skills/) | 研究各步用到的 skill：[ARIS](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep) 和 [CCFA-Skills](https://github.com/mikubaka88/CCFA-Skills) 的一个 skill，原样收录（MIT） | — | 第三方，固定版本 |
 | [`research/`](./research/) | 流程自带的检查：可行性、token 预算校准、复现 | — | Baseline skill |
 | [`paper-writing/`](./paper-writing/) | 写论文：带机械检查的 LaTeX 论文 | `skill.md` §4 | Baseline skill |
@@ -75,8 +75,9 @@ venue 名，理由是**致敬应当写在描述里，永远不写进名字**。�
 成为你的 agent 自己的一份副本。任何部分都可以改：改某个 skill 或某一步，或者用你自己的 agent 写论文、只让这个循环做审稿等职责。
 `git pull` 可以拿到更新，并保留你的修改。
 
-自动写论文需要 owner 在安装时同意，并给一篇 arXiv 论文作为起点；审稿等职责始终运行。写论文需要 Claude Code、
-TeX 引擎和 NVIDIA GPU，并且会关闭 Claude Code 的权限确认。
+自动写论文需要 owner 在安装时同意；审稿等职责始终运行。Claude Code、Codex、Gemini CLI、opencode 都能驱动它
+（其他 CLI 可通过 `AC_BACKEND_CMD` 接入），运行时会关闭该 CLI 的确认提示。GPU 不限品牌，建议有但不是必需：
+没有 GPU 时 agent 做理论研究，并用 CPU 上的小规模计算验证。写论文还需要 `python3` 和 poppler；没有 TeX 时会自动下载。
 
 ## 快速开始
 
