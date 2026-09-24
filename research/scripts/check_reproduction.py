@@ -122,6 +122,24 @@ def rounds_to(value: str, pool: list) -> bool:
 
 CITATION_NEAR = re.compile(r"arxiv[:\s]*\d{4}\.\d{4,5}", re.I)
 
+# Author-year citations -- "(Cohen et al., 2021; Damian et al., 2023)" and
+# "Wilson (1927)" -- which is how paper-writing's papers cite once rendered.
+# The year in one is the cited work's, never a claim about this experiment; the
+# check was built on papers that cited by arXiv id and read every such year as
+# a fabricated result. Also a year range written in prose ("2025–2026").
+_AUTHOR = r"[A-Z][A-Za-z'\-]+(?: et al\.)?(?:,? (?:and|&) [A-Z][A-Za-z'\-]+)?"
+_YEAR = r"(?:19|20)\d{2}[a-z]?"
+CITATION_SPANS = [
+    re.compile(r"\([^()]*?" + _AUTHOR + r",? " + _YEAR + r"[^()]*\)"),   # (Author, 2020; ...)
+    re.compile(_AUTHOR + r" \(" + _YEAR + r"(?:[,;][^()]*)?\)"),          # Author (2020)
+    re.compile(r"(?<!\d)(?:19|20)\d{2}\s*[–—-]\s*(?:19|20)\d{2}(?!\d)"),   # 2025–2026
+]
+YEAR = re.compile(r"(?:19|20)\d{2}")
+
+# Standard constants a methods section prints and no experiment produces: the
+# normal quantiles behind 90/95/99% intervals, pi, e.
+CONSTANTS = [1.959964, 1.644854, 2.575829, 3.14159265, 2.71828183]
+
 
 def build_claims(workdir: str, submission_path: str) -> tuple:
     """Split the paper's printed numbers into (unsupported, matched_by_rounding).
@@ -140,10 +158,19 @@ def build_claims(workdir: str, submission_path: str) -> tuple:
     cited_ids = {m.group(1) for m in ARXIV_ID.finditer(text)}
     pool = result_numbers(os.path.join(workdir, "runs"))
 
+    spans = [m.span() for rx in CITATION_SPANS for m in rx.finditer(text)]
+
+    def in_citation(pos: int) -> bool:
+        return any(a <= pos < b for a, b in spans)
+
     seen, claims, rounded = set(), [], []
     for m in MEANINGFUL.finditer(text):
         v = m.group(1)
-        if v in seen or v in cited_ids:
+        if v in cited_ids:
+            continue
+        if YEAR.fullmatch(v) and in_citation(m.start()):
+            continue    # this occurrence is a cited work's year; others still count
+        if v in seen:
             continue
         seen.add(v)
         ctx = text[max(0, m.start() - 70):m.end() + 30].replace("\n", " ")
@@ -151,6 +178,8 @@ def build_claims(workdir: str, submission_path: str) -> tuple:
         # number, not a claim about this experiment.
         if CITATION_NEAR.search(ctx):
             rounded.append({"value": v, "matched": "belongs_to_a_cited_work"})
+        elif rounds_to(v, CONSTANTS):
+            rounded.append({"value": v, "matched": "a_standard_constant"})
         elif rounds_to(v, pool):
             rounded.append({"value": v, "matched": "rounded_to_a_result_number"})
         else:
@@ -392,7 +421,12 @@ def main() -> None:
                 prior = json.load(f)
         except (OSError, ValueError):
             prior = {}
-        prior_exps = prior.get("experiments") or []
+        # Only the replay's own entries carry over. A "(paper)" entry is an
+        # earlier claims pass's verdict on an earlier paper; keeping it meant
+        # one failed check could never be passed again, however the paper was
+        # fixed.
+        prior_exps = [e for e in (prior.get("experiments") or [])
+                      if e.get("script") != "(paper)"]
         if prior_exps:
             result["experiments"] = prior_exps + [r for r in report
                                                   if r.get("script") == "(paper)"]
