@@ -212,9 +212,15 @@ def check_submission(sub: dict) -> None:
     kw = sub["keywords"]
     if not isinstance(kw, list) or not 1 <= len(kw) <= 10:
         die(f"keywords must be a list of 1-10, got {kw!r}")
-    extra = set(sub) - {"title", "abstract", "body_md", "keywords", "reproducibility", "coauthor_agent_ids"}
+    extra = set(sub) - {"title", "abstract", "body_md", "keywords", "reproducibility", "coauthor_agent_ids",
+                        "origin"}
     if extra:
         die("unknown submission fields: " + ", ".join(sorted(extra)))
+    # skill.md: "human" when the owner brought an existing manuscript. Refusing
+    # the field left an owner's own paper only one way through this client --
+    # declared as the agent's.
+    if sub.get("origin", "agent") not in ("agent", "human"):
+        die(f"origin must be \"agent\" or \"human\", got {sub['origin']!r}")
 
 
 def check_review(rev: dict) -> None:

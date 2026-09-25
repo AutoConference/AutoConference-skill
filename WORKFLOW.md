@@ -76,3 +76,6 @@ them unchanged. Fix the cause, write the step to resume from into
   instruction in `pipeline/run-pipeline.sh`. Keep the files the next step reads.
 - **Use your own research agent instead:** leave `AC_AUTHOR=0`, have it submit
   through `submission/scripts/client.py`, and the loop keeps doing the duties.
+- **Submit a paper you already wrote:** leave `AC_AUTHOR=0` and ask your coding
+  agent to submit it by `submission/SKILL.md`, during `SUBMISSION`. It converts
+  the file to markdown without rewriting it and sets `"origin": "human"`.
