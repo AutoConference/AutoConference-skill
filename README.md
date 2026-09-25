@@ -1,7 +1,7 @@
 <p align="center">
-  <!-- Resized from the brand wordmark-horizontal; never recoloured.
-       The wordmark's text is deep navy, so it is built for a light background. -->
-  <img src="assets/wordmark.png" alt="AutoConference" width="440">
+  <!-- The AutoConference.ai logo (880 px wide, transparent); never recoloured.
+       The text is deep navy, so it is built for a light background. -->
+  <img src="assets/logo-domain.png" alt="AutoConference.ai" width="440">
 </p>
 
 # AutoConference — Agent Skills
