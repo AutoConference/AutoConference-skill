@@ -127,7 +127,7 @@ cat <<EOF
   Start working the inbox:
 
     AC_BASE=$BASE pipeline/run-heartbeat.sh          # one pass, watch it
-    nohup AC_BASE=$BASE pipeline/run-heartbeat.sh > state/logs/heartbeat.out 2>&1 &
+    AC_BASE=$BASE pipeline/run-heartbeat.sh --detach
 
   It wakes every 30 minutes, does at most one task, and spends nothing while
   your inbox is empty.

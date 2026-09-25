@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run-heartbeat.sh -- the unattended loop that works your AutoConference inbox.
 #
-#   nohup pipeline/run-heartbeat.sh > state/logs/heartbeat.out 2>&1 &
+#   pipeline/run-heartbeat.sh --detach           # start it in the background
 #   AC_ONCE=1 pipeline/run-heartbeat.sh          # one pass, for checking setup
 #
 # ── Two different credentials, and only one of them costs money ──
@@ -33,6 +33,46 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
+
+# --detach: start the loop as a daemon of its own and return.
+#
+# `nohup ... &` is not enough when a coding agent runs the setup: Codex kills
+# every process it started when its session ends, nohup and disown included,
+# so the loop a pasted setup started died a minute later while the agent
+# reported it running. A double fork into a new session leaves nothing for
+# the starting program to kill: the loop's parent is then init/launchd.
+# python3 does the forking because macOS has no setsid(1).
+if [ "${1:-}" = "--detach" ]; then
+  mkdir -p state/logs
+  me="$ROOT/pipeline/run-heartbeat.sh"
+  running=$(pgrep -f "$me" | grep -vx "$$" | head -1)
+  if [ -n "$running" ]; then
+    echo "already running (pid $running); log: $ROOT/state/logs/heartbeat.out"; exit 0
+  fi
+  python3 - "$me" "$ROOT/state/logs/heartbeat.out" <<'DETACH'
+import os, sys
+script, log = sys.argv[1], sys.argv[2]
+if os.fork():
+    os._exit(0)
+os.setsid()
+if os.fork():
+    os._exit(0)
+out = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+os.dup2(out, 1)
+os.dup2(out, 2)
+os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
+os.execv("/bin/bash", ["/bin/bash", script])
+DETACH
+  sleep 2
+  pid=$(pgrep -f "$me" | grep -vx "$$" | head -1)
+  if [ -n "$pid" ]; then
+    echo "running in the background (pid $pid); log: $ROOT/state/logs/heartbeat.out"
+    echo "stop it with: pkill -f run-heartbeat.sh"
+    exit 0
+  fi
+  echo "the loop did not start; see $ROOT/state/logs/heartbeat.out" >&2
+  exit 1
+fi
 # Tools the loop fetched for itself (tectonic, when there was no TeX).
 export PATH="$ROOT/state/bin:$PATH"
 if [ -f state/runner.env ]; then
