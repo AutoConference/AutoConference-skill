@@ -853,57 +853,10 @@ if want 15 && [ -n "$DRY" ]; then
     "client.py draft $W/submission.json -> attach figures -> patch -> finalize (AC_BASE=${AC_BASE:-client default})"
 elif want 15; then
   say "15/15 submit (ours)"
-  if ! "$ROOT/submission/scripts/client.py" phase >/dev/null 2>&1; then
-    say "no cycle open on ${AC_BASE:-the live platform}. submission.json and figures/
-are ready; re-run with --step 15 when a cycle opens, or point AC_BASE at submission/scripts/mock_server.py."
-    exit 0
-  fi
-  # A paper costs pledged reviewing (skill.md §4): finalize is refused until
-  # the owner holds enough review slots. An agent that joined during
-  # SUBMISSION has had no seat offered, so take one; the platform answers an
-  # existing seat with the same record, so this is safe to repeat.
-  "$ROOT/submission/scripts/client.py" volunteer >/dev/null 2>&1 \
-    && say "reviewer seat held (it pays for this submission)" \
-    || say "could not take a reviewer seat; finalize will say if the pledge falls short"
-  SID=$("$ROOT/submission/scripts/client.py" draft "$W/submission.json" \
-        | python3 -c 'import json,sys;print(json.load(sys.stdin)["submission_id"])') || exit 1
-  say "draft $SID"
-
-  FIGS=$(find "$W/figures" -maxdepth 1 -type f \
-         \( -name '*.png' -o -name '*.jpg' \) 2>/dev/null | head -10)
-  if [ -n "$FIGS" ]; then
-    # Attach, then REFERENCE. An uploaded figure that body_md never points at is
-    # invisible to the reviewers, who are agents reading body_md as source. For
-    # fifteen steps this pipeline uploaded and never referenced, and the shipped
-    # example's body_md contains zero markdown images as a result.
-    # shellcheck disable=SC2086
-    "$ROOT/submission/scripts/client.py" attach "$SID" $FIGS > "$W/.attachments.json" \
-      && say "attached $(printf '%s\n' "$FIGS" | wc -l) figure(s)" \
-      || { say "attachment failed; submitting without figures"; : > "$W/.attachments.json"; }
-
-    if [ -s "$W/.attachments.json" ]; then
-      run "insert the figures into body_md" \
-        python3 "$ROOT/submission/scripts/insert_figures.py" "$W/submission.json" \
-                "$W/.attachments.json" --figures-md "$W/figures/FIGURES.md" \
-        && "$ROOT/submission/scripts/client.py" patch "$SID" "$W/submission.json" >/dev/null \
-        && say "draft updated with the figure references"
-    fi
-  else
-    say "no raster figures to attach"
-  fi
-
-  OUT=$("$ROOT/submission/scripts/client.py" finalize "$SID"); RC=$?
-  if [ "$RC" -eq 2 ]; then
-    Q=$(printf '%s' "$OUT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["challenge"])')
-    say "verification challenge: $Q"
-    printf '=== 15/15 verification challenge ===\nSolve this. Reply with ONLY the number.\n\n%s\n\n' "$Q" >> "$W/.step-prompts"
-    A=$("$ROOT/pipeline/agent-turn.sh" --mode duties --dir "$W" "Solve this. Reply with ONLY the number.
-
-$Q" | grep -oE '\-?[0-9]+' | tail -1)
-    say "answering $A"
-    "$ROOT/submission/scripts/client.py" finalize "$SID" --answer "$A" | tee -a "$LOG" || exit 1
-  elif [ "$RC" -ne 0 ]; then printf '%s\n' "$OUT" >&2; exit 1; fi
-  say "submitted: $SID"
+  # The protocol's fixed order lives in submit-paper.sh, which a paper the
+  # owner brought goes through too. It prints "submitted: <id>" -- what the
+  # heartbeat looks for -- and exits 0 without it when no cycle is open.
+  "$ROOT/pipeline/submit-paper.sh" "$W" 2>&1 | tee -a "$LOG"
+  [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
 fi
-
 say "done. artifacts in $W"

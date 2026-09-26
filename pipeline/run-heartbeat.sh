@@ -25,6 +25,8 @@
 #      AC_AUTHOR (1 = also write a paper each cycle, with pipeline/run-pipeline.sh),
 #      AC_SEED_PAPER (optional: an arXiv id the pipeline takes as its inspiration),
 #      AC_DIRECTION (its research direction; default your owner's, from the platform).
+#      AC_OWN_PAPER (a paper the owner wrote: its file or folder, submitted for them
+#      in the next SUBMISSION window, ahead of AC_AUTHOR).
 #
 # Settings can also live in state/runner.env, one KEY=value per line, which
 # setup writes (the owner's answer about writing papers, the platform's
@@ -188,7 +190,7 @@ Do not download a model or run a benchmark to fill a field. Leave out any
 number you did not measure, and say so in a note.
 PROMPT_END
 
-log "heartbeat up (backend=$BACKEND model=${MODEL:-<cli default>} base=${AC_BASE:-live} interval=${INTERVAL}s writing=$([ "$AUTHOR" = 1 ] && echo on || echo off))"
+log "heartbeat up (backend=$BACKEND model=${MODEL:-<cli default>} base=${AC_BASE:-live} interval=${INTERVAL}s writing=$([ "$AUTHOR" = 1 ] && echo on || echo off)${AC_OWN_PAPER:+ own-paper=$AC_OWN_PAPER})"
 
 exec 9>state/heartbeat.lock
 if ! flock -n 9 2>/dev/null; then
@@ -512,6 +514,114 @@ print(d.get("research_direction") or ", ".join(d.get("research_interests") or []
   set +m
 }
 
+# ── A paper the owner brought ─────────────────────────────────────────────
+#
+# AC_OWN_PAPER=<path>: a paper the owner already wrote, as a file or the folder
+# holding it and its figures. In the next SUBMISSION window the loop copies it
+# into state/own-paper/source/, one turn converts it to markdown -- the paper's
+# own text, not rewritten -- and pipeline/submit-paper.sh puts it in with
+# origin "human". It takes that cycle's one paper, ahead of AC_AUTHOR. Once in,
+# it is kept under state/own-paper-submitted/<cycle>/ with the path it came
+# from, so a later cycle does not submit the same paper again. A failure stops
+# it with the reason in state/ASK_HUMAN.md, as a pipeline step does.
+#
+# The turn writes plain files and the loop assembles the JSON: a paper is full
+# of backslashes, and a model escaping 100 KB of LaTeX math by hand is how a
+# submission.json fails to parse.
+read -r -d '' OWN_PROMPT <<'PROMPT_END'
+Your owner wrote a paper and asked you to submit it to AutoConference for
+them. Its files are in state/own-paper/source/. You only prepare it; the loop
+submits it. Do not call the platform.
+
+Convert, never rewrite. The paper's own text, in its own words: do not
+summarise, shorten, reorder or improve it. Write, in state/own-paper/:
+
+  body.md             everything after the abstract, as markdown: sections,
+                      equations ($...$ and $$...$$), tables, references
+  abstract.md         the paper's abstract (100-5000 characters)
+  reproducibility.md  how its experiments were run, from the paper's own
+                      account (50-5000 characters); say plainly what the paper
+                      does not state rather than inventing it
+  meta.json           {"title": "...", "keywords": ["...", ...]}  (1-10)
+
+Figures: the paper's image files are in state/own-paper/figures/. Reference
+each where the paper places it as ![caption](figures/<file name>); the loop
+uploads them. A figure with no image file keeps its caption as text.
+
+submission/references/authoring.md and interfaces/submission-interface.md say
+what the platform renders. If the paper cannot be converted as it stands --
+the body over 100,000 characters, unreadable, not a paper -- write why to
+state/ASK_HUMAN.md and write no body.md.
+PROMPT_END
+
+# A paper already submitted from this path, in any cycle: printed, so the log
+# can say where it went.
+own_paper_done() {
+  local f
+  for f in state/own-paper-submitted/*/SUBMITTED_FROM; do
+    [ -f "$f" ] && [ "$(cat "$f")" = "${AC_OWN_PAPER:-}" ] && { basename "$(dirname "$f")"; return 0; }
+  done
+  return 1
+}
+
+own_paper_stop() {
+  mkdir -p state/own-paper; touch state/own-paper/STOPPED
+  {
+    printf '\n## %s — your paper (%s) was not submitted\n\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "${AC_OWN_PAPER:-}"
+    printf '%s\n\n' "$1"
+    echo "To retry: fix it, then delete state/own-paper/STOPPED (and state/own-paper/submission.json"
+    echo "to convert it again). To stop, remove AC_OWN_PAPER from state/runner.env."
+  } >> state/ASK_HUMAN.md
+  log "own paper: stopped — see state/ASK_HUMAN.md"
+}
+
+own_paper() {
+  local cyc=$1 src=$AC_OWN_PAPER ws=state/own-paper out prompts rc start t0
+  if [ -f "$ws/STOPPED" ]; then log "own paper: stopped; waiting on state/ASK_HUMAN.md"; return; fi
+  if [ ! -f "$ws/submission.json" ]; then
+    [ -e "$src" ] || { own_paper_stop "AC_OWN_PAPER is $src, which is not on this machine."; return; }
+    rm -rf "$ws"; mkdir -p "$ws/source" "$ws/figures"
+    cp -R "$src" "$ws/source/" || { own_paper_stop "Could not copy $src."; return; }
+    # Raster images only, flat: what the platform takes as an attachment.
+    find "$ws/source" -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) \
+      -exec cp {} "$ws/figures/" \; 2>/dev/null
+    log "own paper: converting $src for $cyc; waking $BACKEND"
+    wake "$OWN_PROMPT" own-paper
+    [ -f "$ws/body.md" ] || { own_paper_stop "The conversion wrote no body.md; its reason, if it gave one, is above."; return; }
+    if ! python3 - "$ws" <<'ASSEMBLE' >>"$LOG" 2>&1; then
+import json, os, sys
+ws = sys.argv[1]
+text = lambda n: open(os.path.join(ws, n), encoding="utf-8").read().strip()
+meta = json.load(open(os.path.join(ws, "meta.json"), encoding="utf-8"))
+sub = {"title": meta["title"].strip(), "abstract": text("abstract.md"), "body_md": text("body.md"),
+       "keywords": meta["keywords"], "reproducibility": text("reproducibility.md"), "origin": "human"}
+json.dump(sub, open(os.path.join(ws, "submission.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+print(f"own paper: assembled submission.json ({len(sub['body_md'])} characters of body)")
+ASSEMBLE
+      own_paper_stop "The converted files could not be assembled (the log says which)."; return
+    fi
+  fi
+  log "own paper: submitting to $cyc"
+  out=$(mktemp); prompts=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
+  AC_STEP_PROMPTS=$prompts pipeline/submit-paper.sh "$ws" 2>&1 9>&- | tee -a "$LOG" > "$out"
+  rc=${PIPESTATUS[0]}
+  upload_turn "$BACKEND" "${MODEL:-}" "$(cat "$prompts")" own-paper-submit "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))"
+  if grep -q 'submitted: ' "$out"; then
+    mkdir -p state/submitted state/own-paper-submitted; touch "state/submitted/$cyc"
+    rm -rf "state/own-paper-submitted/$cyc"; mv "$ws" "state/own-paper-submitted/$cyc"
+    printf '%s\n' "$src" > "state/own-paper-submitted/$cyc/SUBMITTED_FROM"
+    log "own paper: submitted to $cyc"
+  elif [ "$rc" -ne 0 ]; then
+    own_paper_stop "The platform refused it:
+\`\`\`
+$(tail -15 "$out")
+\`\`\`"
+  else
+    log "own paper: no cycle open to take it; will retry"
+  fi
+  rm -f "$out" "$prompts"
+}
+
 # Stopping the loop stops the paper too: `pkill -f run-heartbeat.sh` sends TERM
 # here, and each running pipeline's process group goes with it. The step it
 # was on is not recorded as done, so the next start resumes there.
@@ -568,9 +678,14 @@ try: c=json.load(sys.stdin).get("cycle") or ""
 except Exception: c=""
 print(c if re.fullmatch(r"[a-z0-9-]+", c) else "")' 2>/dev/null)
 
-  if [ "$AUTHOR" = 1 ] && [ "$PH_NAME" = SUBMISSION ] && [ -n "$PH_CYCLE" ] \
+  # A paper the owner brought takes the cycle's one paper, ahead of writing.
+  if [ "$PH_NAME" = SUBMISSION ] && [ -n "$PH_CYCLE" ] \
      && [ ! -f "work/$PH_CYCLE/SUBMITTED" ] && [ ! -f "state/submitted/$PH_CYCLE" ]; then
-    write_paper "$PH_CYCLE"
+    if [ -n "${AC_OWN_PAPER:-}" ] && ! own_paper_done >/dev/null; then
+      own_paper "$PH_CYCLE"
+    elif [ "$AUTHOR" = 1 ]; then
+      write_paper "$PH_CYCLE"
+    fi
   fi
   if [ "$N" -gt 0 ]; then
     log "$N unhandled task(s); waking $BACKEND"
