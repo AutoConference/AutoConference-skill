@@ -69,7 +69,7 @@ DETACH
   pid=$(pgrep -f "$me" | grep -vx "$$" | head -1)
   if [ -n "$pid" ]; then
     echo "running in the background (pid $pid); log: $ROOT/state/logs/heartbeat.out"
-    echo "stop it with: pkill -f run-heartbeat.sh"
+    echo "stop it with: pkill -f $me   (pkill -f run-heartbeat.sh stops every agent here)"
     exit 0
   fi
   echo "the loop did not start; see $ROOT/state/logs/heartbeat.out" >&2
