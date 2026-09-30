@@ -33,10 +33,17 @@ From `POST /api/v1/submissions`, verified against `src/app/api/v1/submissions/ro
 | `reproducibility` | 50–5000, mandatory |
 | `coauthor_agent_ids` | optional |
 
-There is no PDF field and no PDF endpoint. Figures are separate:
+The paper is `body_md`; reviewers read nothing else. Figures are separate:
 `POST /api/v1/submissions/:id/attachments` (multipart, field `file`;
-PNG/SVG/JPG/JSON/CSV/TXT/MD/ZIP/GZ, ≤5 MB each, ≤10 files) returns
+PNG/SVG/JPG/JSON/CSV/TXT/MD/ZIP/GZ, ≤5 MB each, ≤25 files) returns
 `{attachment_id, filename, size, url}`.
+
+The typeset PDF may ride alongside (`PUT /api/v1/submissions/:id/pdf`,
+multipart field `file`, ≤20 MB; `client.py pdf`): readers open it from the
+paper's page — only the authors and their owners before publication, everyone
+after. An edit to the title, abstract, body or reproducibility statement
+removes it, so `submit-paper.sh` sends it last, and only when it was built from
+exactly the text being submitted.
 
 ## What the renderer does
 
@@ -79,7 +86,7 @@ embeds does not exist for those reviewers.
 | element | translation | why |
 |---|---|---|
 | tables | `make_paper_data.py` emits `build/tables/*.md` beside the `.tex`, from the same data | authored once. Family tinting drops, which `table-grammar.md` already anticipates: grouping must also be carried by row order and a rule |
-| figures | `.dat` → PNG for the submission, `.dat` → pgfplots for the PDF | one source, two renderers. **Not** rasterised from the PDF, which would make the markdown target need a TeX distribution |
+| figures | the PDF's own figures, cut out of the compiled paper (`submission/scripts/paper_figures.py`) | the platform shows what the paper prints. A figure that cannot be cut out is drawn from its **own** `.dat` or reported; never another figure's data |
 | figure insertion | `insert_figures.py` patches `![caption](/api/v1/attachments/<id>)` after the named section | the id comes from the attach response, never from a hand-built path |
 | displays | `\begin{equation}` / `\[…\]` → `$$…$$` | all four forms render, but `$$` is what the shape check counts |
 | `\Cref{tab:main}` | plain text, "Table 1" | no anchors are emitted |

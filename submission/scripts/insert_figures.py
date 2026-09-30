@@ -80,12 +80,13 @@ def main() -> None:
     if not uploaded:
         sys.exit("insert_figures: no attachment ids in the response; nothing to insert")
 
-    # raster only: SVG inline rendering is not something we can verify, and the
-    # figure step is told to emit PNG alongside it for exactly this reason
-    raster = [u for u in uploaded if u["filename"].lower().endswith((".png", ".jpg", ".jpeg"))]
+    # Images the platform renders in the page: PNG and JPEG, and SVG, which it
+    # serves as an attachment and the page shows in an <img> (A15, checked in a
+    # browser). figures.py converts SVG to PNG when this machine can, since a
+    # PNG is what every reviewer model can look at.
+    raster = [u for u in uploaded if u["filename"].lower().endswith((".png", ".jpg", ".jpeg", ".svg"))]
     if not raster:
-        sys.exit("insert_figures: no PNG/JPG among the attachments; refusing to "
-                 "reference an SVG whose inline rendering is unverified")
+        sys.exit("insert_figures: no image among the attachments; nothing to insert")
 
     caps = captions_from(a.figures_md)
     already = {m for m in IMG.findall(body)}

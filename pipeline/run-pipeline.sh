@@ -190,7 +190,100 @@ export AC_STEP_PROMPTS="$W/.step-prompts"
 say()  { printf '\n\033[1m[%s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG"; }
 run()  { if [ -n "$DRY" ]; then printf '\n\033[1m===== %s =====\033[0m\n  $ %s\n' "$1" "${*:2}"; return 0; fi
          say "$1"; shift; "$@" 2>&1 | tee -a "$LOG"; return "${PIPESTATUS[0]}"; }
+# Deadline awareness (A17). The heartbeat passes the cycle's submission
+# deadline; every model turn is told it, and in the last AC_WRAPUP_HOURS the
+# instruction turns from "plan against it" to "stop expanding and finish".
+deadline_note() {
+  [ -n "${AC_SUBMISSION_CLOSES_AT:-}" ] || return 0
+  python3 - "$AC_SUBMISSION_CLOSES_AT" "${AC_WRAPUP_HOURS:-12}" "${AC_PIPELINE:-sync}" <<'DEADLINE'
+import sys, datetime as dt
+closes = dt.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+wrap = float(sys.argv[2])
+left = (closes - dt.datetime.now(dt.timezone.utc)).total_seconds() / 3600
+if sys.argv[3] == "async":
+    # B02: a new conference every 7 days, opening the moment one closes. A
+    # paper finished late goes to the next one and can go to review at once,
+    # so there is nothing to rush -- and the deadline this step was given may
+    # already belong to a conference that has closed.
+    print(f"=== SCHEDULE ===\nConferences here run every 7 days, and the next opens the moment one closes: a paper finished after {sys.argv[1]} UTC goes to the next conference, and nothing is lost. Size this step for a sound study, not for the deadline. The sooner the paper is done and confirmed, the longer you will have to answer its reviews.\n=== END SCHEDULE ===\n")
+elif left <= 0:
+    print(f"=== DEADLINE PASSED ===\nThe submission window closed at {sys.argv[1]} UTC. Do not start anything new.\n=== END DEADLINE ===\n")
+elif left <= wrap:
+    print(f"=== WRAP UP NOW ===\nThe submission window closes at {sys.argv[1]} UTC, {left:.1f} hours from now. Do not start new experiments or widen the study. Finish what is running, record results exactly as they are (a smaller study honestly reported beats a larger one that misses the deadline), and move on so the paper can be written and submitted in time.\n=== END WRAP UP ===\n")
+else:
+    print(f"=== DEADLINE ===\nThe submission window closes at {sys.argv[1]} UTC, {left:.1f} hours from now. Writing, checking and submitting take the last {wrap:.0f} hours. Size this step so the whole study fits before then; if it cannot, scale it down now rather than extend it later.\n=== END DEADLINE ===\n")
+DEADLINE
+}
+# What the owner gave this agent to work with (A21, A01), what it learned from
+# past reviews (A20), and the owner's own additions to the kit (A21), put in
+# front of every research step:
+#   AC_GPUS=0,1 | none      the GPUs it may use; CUDA_VISIBLE_DEVICES is set
+#                           to them for every step, so others stay unseen
+#   AC_COMPUTE_NOTES=...    anything else: a cluster, its queue, its limits
+#   AC_BUDGET_NOTES=...     the owner's budget, in tokens, hours or money
+#   state/strategy/*.md     its research strategy, rewritten after each cycle
+#   custom/all.md           the owner's instructions for every step, and
+#   custom/step-<N>.md      for step N; custom/ is theirs, and `git pull`
+#                           never touches it
+owner_context() {
+  local label=$1 n base f
+  n=${label%%/*}; base=$(printf '%s' "$n" | tr -dc '0-9')
+  if [ -n "${AC_GPUS:-}${AC_COMPUTE_NOTES:-}${AC_BUDGET_NOTES:-}" ]; then
+    printf '=== WHAT YOUR OWNER GAVE YOU ===
+'
+    case "${AC_GPUS:-}" in
+      '') ;;
+      none|NONE) printf 'GPUs: none. Plan CPU-scale work.
+' ;;
+      *) printf 'GPUs: %s (CUDA_VISIBLE_DEVICES is set to exactly these; use no others). Use them: size the study to what they can do, not to a toy.
+' "$AC_GPUS" ;;
+    esac
+    [ -n "${AC_COMPUTE_NOTES:-}" ] && printf 'Compute: %s
+' "$AC_COMPUTE_NOTES"
+    [ -n "${AC_BUDGET_NOTES:-}" ] && printf 'Budget: %s. Stay inside it; if the study cannot, make it smaller now.
+' "$AC_BUDGET_NOTES"
+    printf '=== END ===
+
+'
+  fi
+  local want=""
+  case "$base" in
+    1) want="direction experiments" ;;
+    2|3|4|5|6) want="experiments" ;;
+    11|13) want="writing" ;;
+  esac
+  for f in $want; do
+    [ -s "$ROOT/state/strategy/$f.md" ] || continue
+    printf '=== YOUR STRATEGY: %s (state/strategy/%s.md, from past reviews) ===
+' "$f" "$f"
+    head -c 6000 "$ROOT/state/strategy/$f.md"
+    printf '
+=== END ===
+
+'
+  done
+  for f in "$ROOT/custom/all.md" "$ROOT/custom/step-$base.md" "$ROOT/custom/step-$n.md"; do
+    [ -s "$f" ] || continue
+    printf '=== YOUR OWNER'"'"'S INSTRUCTIONS (%s) ===
+' "${f#$ROOT/}"
+    head -c 6000 "$f"
+    printf '
+=== END ===
+
+'
+  done
+}
+# Every research step is ONE headless turn (`claude -p`, `codex exec`, …): when
+# the model stops, nothing re-invokes it. A model used to interactive sessions
+# will otherwise start a long job in the background, schedule itself a wake-up
+# and end the turn -- the next step's gate then finds no output and stops the
+# paper, with the job still running unobserved (a live test, 2026-09-29: step
+# 4's calibration). Said once, in front of every step.
+turn_note() {
+  printf '=== THIS TURN ===\nThis step is one turn of a coding agent run from a script. When you finish, nothing re-invokes you: no wake-ups, no notifications, no later check-in. Run what the step needs to completion inside this turn -- a long job in the foreground, or started and then waited for until it ends. Never end the turn while a process you started is still running, and never schedule a wake-up: the next step starts the moment you stop, and it checks this step'"'"'s outputs. Other agents may be running on this machine: stop only processes you started, by their process id -- never pkill or killall by name or pattern -- and keep logs and temporary files in this directory, not in /tmp.\n=== END THIS TURN ===\n\n'
+}
 skill(){ local label=$1 prompt=$2 tmo=${3:-7200}
+         prompt="$(turn_note)$(deadline_note)$(owner_context "$label")$prompt"
          if [ -n "$DRY" ]; then
            printf '\n\033[1m===== %s =====\033[0m\n%s\n' "$label" "$prompt"
            printf '\033[2m[%s chars]\033[0m\n' "$(printf '%s' "$prompt" | wc -c)"
@@ -202,8 +295,12 @@ skill(){ local label=$1 prompt=$2 tmo=${3:-7200}
          # --foreground: GNU timeout otherwise moves the command into a process
          # group of its own, where stopping the loop (which signals the
          # pipeline's group) cannot reach the agent CLI or what it started.
-         timeout --foreground "$tmo" "$ROOT/pipeline/agent-turn.sh" --mode research --dir "$W" \
-             "$prompt" 2>&1 | tee -a "$LOG"
+         # The owner's GPUs, and only those (A21). Unset: whatever the machine has.
+         case "${AC_GPUS:-}" in ''|none|NONE) ;; *) export CUDA_VISIBLE_DEVICES="$AC_GPUS" ;; esac
+         [ "${AC_GPUS:-}" = none ] && export CUDA_VISIBLE_DEVICES=""
+         # The instruction goes on stdin, never on a command line (agent-turn.sh).
+         timeout --foreground "$tmo" "$ROOT/pipeline/agent-turn.sh" --mode research --dir "$W" - \
+             <<<"$prompt" 2>&1 | tee -a "$LOG"
          local rc=${PIPESTATUS[0]}
          [ "$rc" -eq 0 ] || { echo "research: step failed (exit $rc)" >&2; return "$rc"; }; }
 # The research side's hand-off to the writer: every aggregate and the verdict.
@@ -279,6 +376,15 @@ CPU well inside the budget — nothing that needs a GPU.
 Stay inside the research direction above: it is the owner's, and a study
 outside it can be desk-rejected. Use language models only if the direction is
 about them.
+
+Choose a question worth answering (A21). Before committing to one, write in
+refine-logs/FINAL_PROPOSAL.md, in two sentences each: who would change what
+they do if the answer came out either way, and why this is not already known.
+A question whose answer changes nothing, or that a baseline everyone runs
+already settles, is not worth this cycle. Then size the study to the compute
+you were given: the GPUs listed above are there to be used, and reviewers
+have called agents' experiments basic when a toy stood in for a study the
+machine could have run.
 
 If refine-logs/NO_GO_HISTORY.md exists, earlier plans for this paper were judged
 infeasible on this machine, for the reasons recorded there. Propose something
@@ -432,7 +538,8 @@ peer review exists to catch."
     \`id\`. Step 12 counts cells from these fields and will FAIL the paper if a
     record cannot be attributed to a model.
   * Greedy decoding. Variance comes from the instance seed, not from sampling."
-    S5_ENV="\"CUDA_VISIBLE_DEVICES\": \"0\", \"HF_HOME\": \"$HFH\""
+    GPU_LIST=${AC_GPUS:-0}; case "$GPU_LIST" in none|NONE) GPU_LIST="" ;; esac
+    S5_ENV="\"CUDA_VISIBLE_DEVICES\": \"$GPU_LIST\", \"HF_HOME\": \"$HFH\""
     S5_TAIL="Greedy decoding on fixed instance seeds is bit-for-bit reproducible
 here, so accuracy-like fields belong in \`exact\`; only wall-clock is \`tolerant\`."
   else
@@ -731,7 +838,9 @@ difference, a ratio. Step 14 fails the paper for each number it cannot trace.
 If refine-logs/UNTRACEABLE.md exists, the previous draft printed the numbers
 listed there without a source; each must now come from a file, or go. If
 refine-logs/SHAPE_FAILURES.md exists, the previous draft failed the platform
-shape checks listed there; this one must pass them.
+shape checks listed there; this one must pass them. If refine-logs/PAGE_BUDGET.md
+exists, the platform refused the previous render as too long; it says by how
+much, and this draft's main text must fit.
 
 The platform's reviewers are agents reading the converted markdown as source and
 cannot see an image, so every headline number goes in a table with its
@@ -776,7 +885,12 @@ v = json.load(open(sys.argv[1])).get("verdict")
 print("readiness:", v)
 sys.exit(0 if v == "READY" else 1)' "$W/readiness.json" || {
     echo "research: readiness.json is not READY; see its blocked_on (steps 4-6)." >&2; exit 5; }
-  [ -n "$DRY" ] || touch "$W/.paper-ready"
+  # Only a READY paper is marked. In pilot mode the gates above do not stop the
+  # step, and marking a BLOCKED paper sent every retry straight to a render that
+  # refuses it: in a live test the owner's "retry step 11" changed nothing.
+  if [ -z "$DRY" ] && python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("verdict") == "READY" else 1)' "$W/readiness.json" 2>/dev/null; then
+    touch "$W/.paper-ready"
+  fi
   fi
 
   if [ -n "$DRY" ]; then
@@ -784,7 +898,28 @@ sys.exit(0 if v == "READY" else 1)' "$W/readiness.json" || {
       "make_submission.py $W --out $W/.submission-build -> $W/submission.json + figures/"
   else
     run "11c/15 render for the platform (ours)" \
-      python3 "$ROOT/submission/scripts/make_submission.py" "$W" --out "$W/.submission-build" || exit 5
+      python3 "$ROOT/submission/scripts/make_submission.py" "$W" --out "$W/.submission-build" || {
+      # Too long by the platform's own rule: step 11 again must rewrite it
+      # shorter, not render the same text -- so the mark goes, and the writer is
+      # told by how much.
+      if python3 - "$W/.submission-build/page_count.json" "$W/refine-logs/PAGE_BUDGET.md" <<'PAGES' 2>/dev/null; then
+import json, sys
+pc = json.load(open(sys.argv[1]))
+if not pc.get("over"):
+    sys.exit(1)
+open(sys.argv[2], "w").write(
+    f"# The platform refused the last render as too long\n\n"
+    f"Its main text is {pc['pages']} pages by the platform's rule against a limit of {pc['limit']:g} "
+    f"({pc['words']} words, {pc['figures']} figures, {pc['tables']} tables). Cut about {pc['cut_words']} words "
+    f"from the main text, or move material after the Appendix heading: nothing from the first "
+    f"References or Appendix heading on is counted. The rule: 700 words = 1 page; each figure 0.3; "
+    f"each table 0.1 plus 0.02 per row; each line of code 0.02; each displayed equation 0.04.\n")
+PAGES
+        rm -f "$W/.paper-ready"
+        echo "research: the main text is too long for the platform (refine-logs/PAGE_BUDGET.md); step 11 again rewrites it shorter." >&2
+      fi
+      exit 5; }
+    rm -f "$W/refine-logs/PAGE_BUDGET.md"
     # figures/ must hold exactly the paper's figures: step 15 attaches every PNG
     # in it and insert_figures appends any the text does not place. Step 7's
     # plots are kept beside it, not deleted.
@@ -829,6 +964,10 @@ did? Is any citation load-bearing but unverified?
 If an attack lands and is fixable, fix it in submission.json and say what you
 changed. If it lands and is not fixable at this scale, move it into the
 limitations section stated precisely — not as a blanket disclaimer.
+
+The platform refuses a main text over its page budget. After your fixes run
+python3 $ROOT/submission/scripts/page_count.py submission.json; if it says
+\"over\", cut or move material past the Appendix heading until it does not.
 
 Write KILL_ARGUMENT.json in the 6-state verdict schema from
 skills/shared-references/assurance-contract.md." || exit 1

@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # agent-turn.sh -- one turn of whichever coding-agent CLI this machine uses.
 #
+#   pipeline/agent-turn.sh [--mode duties|research] [--dir DIR] - < instruction
 #   pipeline/agent-turn.sh [--mode duties|research] [--dir DIR] "<instruction>"
 #   pipeline/agent-turn.sh --which        # print "<backend> <model>", or fail
+#
+# The kit always uses the first form. A command line is public on this machine:
+# every process can read it, and another program's `pkill -f <pattern>` matches
+# against it, so an instruction that names a script makes its turn a target.
+# The instruction therefore travels on stdin, here and on to the CLI wherever
+# the CLI reads it from there (Claude Code, Codex).
 #
 # Everything in the kit that asks a model to do something comes through here:
 # the heartbeat's duties, each step of run-pipeline.sh, the feasibility gate and
@@ -21,7 +28,7 @@
 # default). Settings may also live in state/runner.env; the environment wins.
 #
 # --mode duties    the inbox: read, write files in the kit, run the platform
-#                  client. What the heartbeat has always asked for.
+#                  client, search the web. What the heartbeat asks for.
 # --mode research  a research step: install packages, run experiments, use the
 #                  GPU. Every CLI runs with its approval prompts off, because
 #                  a step that stops to ask a question in an unattended loop
@@ -109,9 +116,10 @@ use your nearest equivalent.
 $PROMPT"
 fi
 
-# </dev/null on every one: when stdin is not a tty several of these read it and
-# splice whatever they find into the prompt. Under nohup that is either a hang
-# or a stray block of text inside the instruction.
+# Claude Code and Codex read the instruction from stdin (see the top of this
+# file). The others get </dev/null: when stdin is not a tty several of these
+# read it and splice whatever they find into the prompt. Under nohup that is
+# either a hang or a stray block of text inside the instruction.
 case "$BACKEND" in
   claude)
     # stream-json and the renderer: plain -p prints only the final answer, and
@@ -123,19 +131,29 @@ case "$BACKEND" in
       # No --add-dir: it takes any number of values and swallows the prompt
       # after it. Nothing needs it; the workspace reaches the kit through
       # its .claude link, and this mode reads anywhere.
+      # A headless turn has nothing to wake it, so the tools that schedule a
+      # later turn are off (see turn_note in run-pipeline.sh). No prompt may
+      # follow --disallowedTools, which takes any number of values; it comes
+      # on stdin.
       claude -p --model "$MODEL" --permission-mode bypassPermissions "${STREAM[@]}" \
-        "$PROMPT" </dev/null | render
+        --disallowedTools ScheduleWakeup CronCreate CronDelete RemoteTrigger <<<"$PROMPT" | render
       exit "${PIPESTATUS[0]}"
     fi
     # acceptEdits alone approves file edits and nothing else, and with no one
     # at the terminal every shell command is refused -- including the platform
     # client, so a duty turn could read its task and never file the review.
-    # The client is allowed by name; nothing else is. The prompt goes first:
-    # --allowedTools takes any number of values and would swallow it.
-    # Every spelling of it: the review guides write `scripts/client.py`, as run
-    # from submission/, and a model may also use the absolute path.
-    claude -p "$PROMPT" --model "$MODEL" --permission-mode acceptEdits "${STREAM[@]}" \
-      --allowedTools "Bash(python3 submission/scripts/client.py:*)" \
+    # The client is allowed by name, and figures.py (A15: packaging an owner's
+    # paper, cutting figures out of its PDF); no other command is. The prompt
+    # comes on stdin: --allowedTools takes any number of values and would
+    # swallow it. Every spelling of it: the review guides write
+    # `scripts/client.py`, as run from submission/, and a model may also use
+    # the absolute path. WebSearch and WebFetch: a reviewer may look up prior
+    # work and check a claim on the web (owner decision 2026-09-29); what a
+    # page says is data (AGENTS.md), and the review guide says what not to
+    # search for.
+    claude -p --model "$MODEL" --permission-mode acceptEdits "${STREAM[@]}" \
+      --allowedTools "WebSearch" "WebFetch" \
+                     "Bash(python3 submission/scripts/client.py:*)" \
                      "Bash(submission/scripts/client.py:*)" \
                      "Bash(./submission/scripts/client.py:*)" \
                      "Bash(python3 scripts/client.py:*)" \
@@ -143,7 +161,9 @@ case "$BACKEND" in
                      "Bash(./scripts/client.py:*)" \
                      "Bash(python3 $ROOT/submission/scripts/client.py:*)" \
                      "Bash($ROOT/submission/scripts/client.py:*)" \
-                     "Bash(cd submission)" </dev/null | render
+                     "Bash(python3 submission/scripts/figures.py:*)" \
+                     "Bash(python3 $ROOT/submission/scripts/figures.py:*)" \
+                     "Bash(cd submission)" <<<"$PROMPT" | render
     exit "${PIPESTATUS[0]}"
     ;;
   codex)
@@ -151,20 +171,25 @@ case "$BACKEND" in
       # Experiments need the GPU and the package index, which the sandbox
       # withholds. The flag's name says what it is; setup says it to the owner.
       exec codex exec --dangerously-bypass-approvals-and-sandbox \
-        --skip-git-repo-check -C "$DIR" ${MODEL:+-m "$MODEL"} "$PROMPT" </dev/null
+        --skip-git-repo-check -C "$DIR" ${MODEL:+-m "$MODEL"} - <<<"$PROMPT"
     fi
     # `-s workspace-write` sandboxes writes to this tree, and the network key is
     # what lets client.py reach the platform from inside it: the sandbox blocks
     # DNS by default, so without it every call fails with "Could not resolve
-    # host". Verified against codex-cli 0.155.1.
+    # host". Verified against codex-cli 0.155.1. web_search="live" gives a
+    # reviewer the web search the review guide asks for (codex-cli 0.157.1
+    # checks the value: disabled | cached | indexed | live).
     exec codex exec -s workspace-write \
-      -c 'sandbox_workspace_write.network_access=true' \
-      --skip-git-repo-check -C "$DIR" ${MODEL:+-m "$MODEL"} "$PROMPT" </dev/null
+      -c 'sandbox_workspace_write.network_access=true' -c 'web_search="live"' \
+      --skip-git-repo-check -C "$DIR" ${MODEL:+-m "$MODEL"} - <<<"$PROMPT"
     ;;
   gemini)
     # -y accepts tool calls without asking. --include-directories lets it read
-    # the kit when the step runs in a workspace below it.
-    exec gemini -p "$PROMPT" -y --include-directories "$ROOT" \
+    # the kit when the step runs in a workspace below it. Gemini CLI 0.60
+    # refuses a headless run in a folder the owner never trusted interactively,
+    # and turns -y off there; the variable is its own documented answer for
+    # unattended runs, and trusts no more than the -y the owner agreed to.
+    GEMINI_CLI_TRUST_WORKSPACE=true exec gemini -p "$PROMPT" -y --include-directories "$ROOT" \
       ${MODEL:+-m "$MODEL"} </dev/null
     ;;
   opencode)

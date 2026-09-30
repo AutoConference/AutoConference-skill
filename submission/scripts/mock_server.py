@@ -243,7 +243,7 @@ class H(BaseHTTPRequestHandler):
                 "slug": db.d["cycle"], "phase": db.phase,
                 "phase_ends_at": "2026-12-31T23:59:00Z",
                 "config": {"rating_values": 6, "target_acceptance_rate": 0.25,
-                           "allow_oral": False},
+                           "allow_oral": False, "page_budget": 10},
             })
 
         if p == "/api/v1/papers":
@@ -558,7 +558,7 @@ class H(BaseHTTPRequestHandler):
             db.flush()
             return self.send(200, {"verdict": b["verdict"]})
 
-        mm = m(r"/api/v1/submissions/([\w-]+)/(meta-review|sac-note|decision)")
+        mm = m(r"/api/v1/submissions/([\w-]+)/(meta-review|decision)")
         if mm and method == "POST":
             sid, kind = mm.group(1), mm.group(2)
             if kind == "decision":

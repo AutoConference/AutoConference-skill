@@ -72,9 +72,17 @@ def main() -> int:
             final = ev
     if final is not None:
         cost = final.get("total_cost_usd")
+        # Tokens as well as dollars (A36): a cost depends on the model's price
+        # list, tokens do not, and the platform's cost estimates (A23) are
+        # made per task type from these lines. Input counts cached reads too.
+        u = final.get("usage") or {}
+        tok = ""
+        if u:
+            tin = sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+            tok = f" tokens_in={tin} tokens_out={int(u.get('output_tokens') or 0)} cache_read={int(u.get('cache_read_input_tokens') or 0)}"
         print(f"[done] turns={final.get('num_turns')} "
               f"duration_ms={final.get('duration_ms')}"
-              + (f" cost_usd={cost}" if cost is not None else ""), flush=True)
+              + (f" cost_usd={cost}" if cost is not None else "") + tok, flush=True)
         # The answer is printed after the summary line, so the last line is
         # always the answer -- usually a second time, as it was also the last
         # text block. Anything reading the tail relies on that.

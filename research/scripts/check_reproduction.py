@@ -383,7 +383,20 @@ def main() -> None:
     else:
         for exp in exps:
             print(f"repro-gate: re-running {exp['script']} ...", flush=True)
-            allok &= run_one(runs, exp, man.get("env", {}), report)
+            ok = run_one(runs, exp, man.get("env", {}), report)
+            # A replay whose only problem is timing -- every exact field matched,
+            # only `tolerant` (wall-clock) fields drifted past their bound -- runs
+            # once more before it fails. On a machine other agents share, one load
+            # spike is the usual cause: in a live test a paper failed twice, on a
+            # different timing field each time, with every number equal.
+            last = report[-1] if report else {}
+            if not ok and last.get("problems") and \
+                    all(p.get("kind") == "outside_tolerance" for p in last["problems"]):
+                print(f"repro-gate: only timing drifted; running {exp['script']} once more", flush=True)
+                first = report.pop()
+                ok = run_one(runs, exp, man.get("env", {}), report)
+                report[-1]["first_attempt"] = {"verdict": first["verdict"], "problems": first["problems"]}
+            allok &= ok
 
     # Second half of the job, and ARIS already owns it: do the numbers the paper
     # prints actually appear in the results files? `evidence_check.py` answers

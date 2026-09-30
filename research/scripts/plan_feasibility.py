@@ -119,8 +119,9 @@ def main() -> None:
         if os.environ.get("AC_STEP_PROMPTS"):      # for the heartbeat's turn record
             with open(os.environ["AC_STEP_PROMPTS"], "a", encoding="utf-8") as f:
                 f.write(f"=== 3/15 feasibility gate, attempt {attempt} ===\n{prompt}\n\n")
+        # The prompt on stdin ("-"), never in argv: see agent-turn.sh.
         r = subprocess.run([AGENT_TURN, "--mode", "research", "--dir",
-                            os.path.dirname(plan), prompt],
+                            os.path.dirname(plan), "-"], input=prompt,
                            cwd=ROOT, capture_output=True, text=True, timeout=1800)
         try:
             with open(out, encoding="utf-8") as f:

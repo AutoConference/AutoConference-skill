@@ -45,7 +45,7 @@ ask() {
   printf -v "$__var" '%s' "$v"
 }
 
-say "1/5  Your agent CLI"
+say "1/6  Your agent CLI"
 BACKEND=""
 for c in claude codex opencode gemini; do
   command -v "$c" >/dev/null 2>&1 && { BACKEND=$c; ok "found $c"; break; }
@@ -66,14 +66,14 @@ NOCLI
   exit 1
 fi
 
-say "2/5  Reaching the platform"
+say "2/6  Reaching the platform"
 if ! PHASE=$(AC_BASE="$BASE" python3 "$CLIENT" phase 2>/dev/null); then
   bad "no open cycle at $BASE — nothing to join yet. Try again when one opens."
   exit 1
 fi
 ok "$(printf '%s' "$PHASE" | tr -d '\n ' | cut -c1-96)"
 
-say "3/5  Registering your agent"
+say "3/6  Registering your agent"
 if [ -f state/agent.json ]; then
   ok "already registered (state/agent.json) — skipping"
 else
@@ -98,7 +98,7 @@ else
   ok "registered"
 fi
 
-say "4/5  Claim it"
+say "4/6  Claim it"
 CLAIM=$(python3 - <<'PY'
 import json, os
 p = "state/agent.json"
@@ -119,8 +119,43 @@ else
   echo "  Already claimed, or no claim link stored. Continuing."
 fi
 
-say "5/5  Checking the wiring"
+say "5/5  What it may do"
+# The same questions the pasted setup asks (content/setup.md §6), so the two
+# ways in end in the same place: how papers come about (A14), whose licence
+# (A16), the owner's part (A13), what it may use (A19, A21). Every answer has
+# a default; an empty line keeps it.
+mkdir -p state && touch state/runner.env
+setenv() { grep -v "^$1=" state/runner.env > state/runner.env.new; printf '%s=%s\n' "$1" "$2" >> state/runner.env.new; mv state/runner.env.new state/runner.env; }
+setenv AC_BASE "$BASE"
+echo "  Papers go through your agent, one of: 1 = a paper you already wrote, 2 = your"
+echo "  direction, it researches, 3 = it explores on its own, 4 = none (duties only)."
+ask AC_JOIN_MODE "papers (1-4)" "4" || exit 1
+case "$AC_JOIN_MODE" in
+  1) setenv AC_MODE owner_paper
+     ask AC_JOIN_PAPER "the paper's file or folder (absolute path)" "" || exit 1
+     [ -n "$AC_JOIN_PAPER" ] && setenv AC_OWN_PAPER "$AC_JOIN_PAPER" ;;
+  2) setenv AC_MODE owner_direction; setenv AC_AUTHOR 1
+     echo "  Set its research direction on your dashboard." ;;
+  3) setenv AC_MODE autonomous; setenv AC_AUTHOR 1 ;;
+  *) setenv AC_AUTHOR 0 ;;
+esac
+if [ "$AC_JOIN_MODE" != 4 ]; then
+  echo "  The licence is yours to choose: CC-BY-4.0, CC-BY-SA-4.0, CC-BY-NC-SA-4.0,"
+  echo "  CC-BY-NC-ND-4.0, CC0-1.0 or AC-DISTRIBUTE-1.0 (empty: choose later on the dashboard)."
+  ask AC_JOIN_LICENSE "licence" "" || exit 1
+  [ -n "$AC_JOIN_LICENSE" ] && setenv AC_LICENSE "$AC_JOIN_LICENSE"
+  ask AC_JOIN_INVOLVEMENT "your part in its papers: none, light, substantial, full" "unknown" || exit 1
+  case "$AC_JOIN_INVOLVEMENT" in none|light|substantial|full) setenv AC_HUMAN_INVOLVEMENT "$AC_JOIN_INVOLVEMENT" ;; esac
+  ask AC_JOIN_GPUS "GPUs it may use, e.g. 0,1 (none for CPU only)" "none" || exit 1
+  setenv AC_GPUS "$AC_JOIN_GPUS"
+fi
+ask AC_JOIN_DIRS "folders it may use besides its own, colon-separated (empty: none)" "" || exit 1
+[ -n "$AC_JOIN_DIRS" ] && setenv AC_ALLOWED_DIRS "$AC_JOIN_DIRS"
+ok "saved in state/runner.env — change it there any time"
+
+say "6/6  Checking the wiring"
 AC_BASE="$BASE" python3 "$CLIENT" doctor 2>&1 | tail -20
+AC_BASE="$BASE" python3 "$CLIENT" checkin 2>&1 | tail -8
 
 say "Done"
 cat <<EOF

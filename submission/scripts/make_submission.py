@@ -35,9 +35,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 # ---------------------------------------------------------------- limits ----
@@ -440,6 +442,229 @@ def drop_first_arg(text: str, cmd: str, keep: int = 2) -> str:
         text = text[: m.start()] + (last or "") + text[j:]
 
 
+def keep_first_arg(text: str, cmd: str, n: int = 2) -> str:
+    r"""`\texorpdfstring{$\Gamma$}{Gamma}` -> `$\Gamma$`: the first of n arguments.
+
+    hyperref's way to put math in a heading: the first argument is what the
+    page shows, the second only the PDF's bookmark. Left alone, the command
+    reached a live test's submission as the literal text of a heading.
+    """
+    pat = re.compile(r"\\" + cmd + r"\s*\*?\s*(?=\{)")
+    while True:
+        m = pat.search(text)
+        if not m:
+            return text
+        j, first = m.end(), None
+        for k in range(n):
+            g = read_group(text, j)
+            if g is None:
+                break
+            if k == 0:
+                first = g
+            j = end_of_group(text, j)
+        text = text[: m.start()] + (first or "") + text[j:]
+
+
+# LaTeX accents, composed. A writer who spells a name right -- Erd\H{o}s,
+# R\'enyi, Ga\v{s}evi\'c -- must not have it reach the page as control
+# sequences; a live test's paper did, in its prose and in its citations.
+ACCENTS = {"'": "\u0301", "`": "\u0300", "^": "\u0302", '"': "\u0308", "~": "\u0303",
+           "=": "\u0304", ".": "\u0307", "H": "\u030b", "c": "\u0327", "k": "\u0328",
+           "v": "\u030c", "u": "\u0306", "r": "\u030a"}
+LETTERS = {"ss": "\u00df", "ae": "\u00e6", "AE": "\u00c6", "oe": "\u0153", "OE": "\u0152",
+           "aa": "\u00e5", "AA": "\u00c5", "o": "\u00f8", "O": "\u00d8", "l": "\u0142",
+           "L": "\u0141", "i": "\u0131", "j": "\u0237"}
+
+
+def _accent(mark: str, letter: str) -> str:
+    if letter.startswith("\\"):
+        letter = LETTERS.get(letter[1:], letter[1:])
+    return unicodedata.normalize("NFC", letter + ACCENTS[mark])
+
+
+def latex_accents(text: str) -> str:
+    r"""`\'e` `\'{e}` `{\"u}` `\H{o}` `\v{s}` `\'{\i}` -> the letter; `\ss` `\o` `\ae` too."""
+    one = lambda m: _accent(m.group(1), m.group(2))
+    text = re.sub(r"\\(['`^\"~=.])\s*\{\s*(\\[ij]|[A-Za-z])\s*\}", one, text)
+    text = re.sub(r"\\(['`^\"~=.])(\\[ij](?![A-Za-z])|[A-Za-z])", one, text)
+    text = re.sub(r"\\([Hckvur])\s*\{\s*(\\[ij]|[A-Za-z])\s*\}", one, text)
+    return re.sub(r"\\(ss|ae|AE|oe|OE|aa|AA|o|O|l|L)(?![A-Za-z])(?:\{\})?", lambda m: LETTERS[m.group(1)], text)
+
+
+def drop_definitions(text: str) -> str:
+    r"""Remove `\renewcommand{\x}[n]{body}`, `\newcommand*\x{body}` and
+    `\providecommand` from running text: definitions print nothing."""
+    pat = re.compile(r"\\(?:re)?newcommand\*?|\\providecommand\*?")
+    while True:
+        m = pat.search(text)
+        if not m:
+            return text
+        j = skip_ws(text, m.end())
+        if j < len(text) and text[j] == "{":
+            j = end_of_group(text, j)
+        else:
+            nm = re.match(r"\\[A-Za-z@]+", text[j:])
+            j += nm.end() if nm else 0
+        am = re.match(r"\s*(?:\[[^\]]*\]\s*){0,2}", text[j:])
+        j += am.end() if am else 0
+        if skip_ws(text, j) < len(text) and text[skip_ws(text, j)] == "{":
+            j = end_of_group(text, skip_ws(text, j))
+        text = text[: m.start()] + text[j:]
+
+
+def ensuremath(text: str) -> str:
+    r"""`\ensuremath{\mathsf{A}}` in running text -> `$\mathsf{A}$`. It arrives
+    by expanding a paper's own macros (`\newcommand{\armA}{\ensuremath{...}}`),
+    after the math was protected, so it has to be turned into math here."""
+    pat = re.compile(r"\\ensuremath\s*(?=\{)")
+    while True:
+        m = pat.search(text)
+        if not m:
+            return text
+        inner = read_group(text, m.end())
+        j = end_of_group(text, m.end())
+        text = text[: m.start()] + ("$" + inner.strip() + "$" if inner else "") + text[j:]
+
+
+def links(text: str) -> str:
+    r"""`\href{url}{text}` -> `[text](url)`, `\url{url}` -> `<url>`."""
+    pat = re.compile(r"\\(href|url)\s*(?=\{)")
+    while True:
+        m = pat.search(text)
+        if not m:
+            return text
+        url = read_group(text, m.end())
+        j = end_of_group(text, m.end())
+        if url is None:
+            text = text[: m.start()] + text[m.end():]
+            continue
+        if m.group(1) == "href":
+            label = read_group(text, j)
+            if label is not None:
+                j = end_of_group(text, j)
+            text = text[: m.start()] + f"[{label if label is not None else url}]({url.strip()})" + text[j:]
+        else:
+            text = text[: m.start()] + f"<{url.strip()}>" + text[j:]
+
+
+# Theorem-like environments: the heading each gets, unless the paper's own
+# \newtheorem says otherwise.
+THEOREMS = {"theorem": "Theorem", "lemma": "Lemma", "proposition": "Proposition",
+            "corollary": "Corollary", "definition": "Definition", "remark": "Remark",
+            "assumption": "Assumption", "claim": "Claim", "conjecture": "Conjecture",
+            "example": "Example", "observation": "Observation", "fact": "Fact"}
+
+
+def strip_bare_braces(text: str) -> str:
+    r"""Drop the braces that are nobody's argument: `10{,}000`, `M{\"u}ller`
+    once the accent is composed, `{\tiny small}` once the size is gone. A bare
+    brace only groups in LaTeX and prints nothing; in markdown it prints.
+
+    Braces right after a command name, or after another argument (`}{`, `]{`),
+    stay: whatever is left there is a command this does not know, and the
+    unhandled-construct report has to be able to name it."""
+    out: list[str] = []
+    stack: list[bool] = []          # per open brace: is it bare?
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\" and i + 1 < n:
+            out.append(text[i : i + 2])
+            i += 2
+            continue
+        if c == "{":
+            k = i - 1
+            while k >= 0 and (text[k].isalpha() or text[k] == "@"):
+                k -= 1
+            argument = (k >= 0 and k < i - 1 and text[k] == "\\") or (i > 0 and text[i - 1] in "}]")
+            stack.append(not argument)
+            out.append("{" if argument else "")
+        elif c == "}" and stack:
+            out.append("" if stack.pop() else "}")
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+# The label prefixes a theorem-like environment is referred to by.
+THEOREM_LABELS = ("thm", "lem", "lemma", "prop", "cor", "def", "defn", "rem", "asm", "assum",
+                  "assump", "clm", "claim", "conj", "ex", "obs", "fact")
+
+
+def theorem_styles(paper: Path) -> dict[str, tuple[str, str | None]]:
+    r"""env -> (heading, counter), counter None for an unnumbered one. Each
+    starts on its own counter, as amsthm does; the paper's own
+    `\newtheorem{lemma}[theorem]{Lemma}` wins, shared counter and all."""
+    styles: dict[str, tuple[str, str | None]] = {env: (name, env) for env, name in THEOREMS.items()}
+    for f in ("preamble.tex", "macros.tex", "design.tex", "preamble-layout.tex", "main.tex"):
+        fp = paper / f
+        if not fp.exists():
+            continue
+        src = strip_comments(fp.read_text(encoding="utf-8", errors="replace"))
+        for m in re.finditer(r"\\newtheorem(\*?)\s*\{(\w+)\}\s*(?:\[(\w+)\])?\s*\{([^}]*)\}", src):
+            star, env, shared, name = m.groups()
+            styles[env] = (name.strip() or env.capitalize(), None if star else (shared or env))
+    return styles
+
+
+# The platform's page budget, counted the way the platform counts it
+# (src/lib/page-budget.ts; the table in skill.md): the rule is deterministic, so
+# a paper can be sized before it is sent. A live test's paper passed every gate
+# here and was refused at the last step as 10.8 pages of 10.
+END_OF_MAIN = re.compile(r"^#{1,6}\s*(references|bibliography|appendix|appendices|supplementary)\b", re.I | re.M)
+
+
+def count_pages(body_md: str) -> dict:
+    m = END_OF_MAIN.search(body_md)
+    main = body_md[: m.start()] if m else body_md
+    tally = {"code": 0, "math": 0}
+
+    def code(mm: re.Match) -> str:
+        tally["code"] += sum(1 for line in mm.group(1).split("\n") if line.strip())
+        return "\n"
+
+    def display(_mm: re.Match) -> str:
+        tally["math"] += 1
+        return " "
+
+    text = re.sub(r"^```[^\n]*\n([\s\S]*?)^```", code, main, flags=re.M)
+    text = re.sub(r"\$\$[\s\S]*?\$\$", display, text)
+    figures = len(re.findall(r"!\[", text))
+    tables = rows = 0
+    in_table = False
+    prose = []
+    for line in text.split("\n"):
+        if line.strip().startswith("|"):
+            if not in_table:
+                tables += 1
+                in_table = True
+            rows += 1
+        else:
+            in_table = False
+            prose.append(line)
+    words = len(re.sub(r"^#{1,6}\s+", "", re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", "\n".join(prose)), flags=re.M).split())
+    pages = (words / 700 + figures * 0.3 + tables * 0.1 + rows * 0.02
+             + tally["code"] * 0.02 + tally["math"] * 0.04)
+    return {"pages": math.floor(pages * 10 + 0.5) / 10, "words": words, "figures": figures,
+            "tables": tables, "table_rows": rows, "code_lines": tally["code"],
+            "display_math": tally["math"], "back_matter_free": m is not None}
+
+
+def clip_alt(alt: str, n: int = 180) -> str:
+    r"""A caption's first n characters, for an image's alt text, never ending
+    inside a `$...$` span. A cut formula leaves an unpaired `$`, which the
+    renderer takes for the start of math that swallows what follows -- a live
+    test's figure caption was cut at `$\hat\kappa`."""
+    if len(alt) <= n:
+        return alt
+    cut = alt[:n]
+    dollars = [m.start() for m in re.finditer(r"(?<!\\)\$", cut)]
+    if len(dollars) % 2:
+        cut = cut[: dollars[-1]]
+    return cut.rstrip()
+
+
 DRAWING_ENVS = ("tikzpicture", "axis", "groupplot", "semilogyaxis", "semilogxaxis",
                 "loglogaxis", "polaraxis", "pgfpicture", "scope", "pgfonlayer",
                 "pgfplotsinterruptdatabb")
@@ -593,6 +818,10 @@ def if_file_exists(text: str, base: Path) -> str:
 def inline_to_md(text: str, macros: Macros) -> str:
     """Inline markup only. Math is protected by the caller before this runs."""
     text = macros.expand(text)
+    text = keep_first_arg(text, "texorpdfstring", 2)
+    text = ensuremath(text)
+    text = links(text)
+    text = latex_accents(text)
     text = drop_first_arg(text, "textcolor", 2)
     text = drop_first_arg(text, "multicolumn", 3)
     # \cellcolor[model]{colour} takes one argument and the cell's text follows
@@ -602,10 +831,15 @@ def inline_to_md(text: str, macros: Macros) -> str:
     text = re.sub(r"\\(?:cellcolor|rowcolor)\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}", "", text)
     text = drop_first_arg(text, "fcolorbox", 3)
     text = drop_first_arg(text, "colorbox", 2)
+    # Scaling is typesetting too; what is scaled is the content.
+    text = drop_first_arg(text, "resizebox", 3)
+    text = drop_first_arg(text, "scalebox", 2)
     # Struts and invisible spacers align a typeset table and are nothing on a
     # rendered one: \phantom{0}, \hphantom, \vphantom, \rule[raise]{w}{h}.
-    text = re.sub(r"\\[hv]?phantom\s*\{[^{}]*\}", "", text)
+    # \rule first: a colour swatch is `\phantom{\rule{1ex}{1ex}}`, and the
+    # phantom's argument is only empty once the rule inside it is gone.
     text = re.sub(r"\\rule\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}\s*\{[^{}]*\}", "", text)
+    text = re.sub(r"\\[hv]?phantom\s*\{[^{}]*\}", "", text)
     for cmd, open_s, close_s in SIMPLE_WRAP:
         pat = re.compile(cmd + r"\s*\{")
         while True:
@@ -620,6 +854,16 @@ def inline_to_md(text: str, macros: Macros) -> str:
             text = text[: m.start()] + open_s + inner + close_s + text[end:]
     text = re.sub(r"\\label\s*\{[^}]*\}", "", text)
     text = re.sub(r"\\(vspace|hspace|noindent|centering|small|footnotesize|normalsize|bf|it)\b\*?(\{[^}]*\})?", "", text)
+    # Layout with no argument to keep or drop: sizes, grouping, float barriers.
+    text = re.sub(r"\\(tiny|scriptsize|large|Large|LARGE|huge|Huge|normalfont|raggedright|raggedleft|"
+                  r"FloatBarrier|begingroup|endgroup|sloppy|protect|selectfont|qedhere|qed)(?![A-Za-z])[ \t]*", "", text)
+    text = re.sub(r"\\setlength\s*(?:\{[^}]*\}|\\[A-Za-z@]+)\s*\{[^}]*\}", "", text)
+    # A definition made in the body -- `\renewcommand{\headrulewidth}{0pt}` after
+    # \maketitle -- sets something up and prints nothing.
+    text = drop_definitions(text)
+    # Running heads and page styles (fancyhdr): a page furniture, not text.
+    text = re.sub(r"\\(?:[lcr]head|[lcr]foot|fancyhead|fancyfoot|fancyhf)\s*(?:\[[^\]]*\])?\s*\{[^{}]*\}", "", text)
+    text = re.sub(r"\\(?:thispagestyle|pagestyle)\s*\{[^{}]*\}", "", text)
     # Counter machinery, which arrives by expanding the paper's own list macros
     # (\contribution is `\stepcounter{accontrib}\item[\textbf{(\arabic{...})}]`).
     # Markdown numbers its own lists, so the counters have nothing to drive.
@@ -637,6 +881,7 @@ def inline_to_md(text: str, macros: Macros) -> str:
     text = re.sub(r"\\ding\s*\{[^}]*\}", "", text)
     text = re.sub(r"\\(checkmark|cmark)\b", "\u2713", text)
     text = re.sub(r"\\xmark\b", "\u2717", text)
+    text = strip_bare_braces(text)
     for a, b in ESCAPES.items():
         text = text.replace(a, b)
     text = text.replace("---", "\u2014").replace("--", "\u2013")
@@ -656,6 +901,9 @@ class Converter:
         self.missing_cites: set[str] = set()
         self.unknown_cmds: set[str] = set()
         self._math: list[str] = []
+        self.thm_styles = theorem_styles(self.paper)
+        self.theorem_names: list[str] = []   # "Lemma 1", in order of appearance
+        self._thm_next = 0
 
     # -- pass 1: number every float and section so \Cref can be resolved -----
     def index(self, body: str) -> None:
@@ -665,12 +913,27 @@ class Converter:
         counts = {"table": 0, "figure": 0, "section": 0, "equation": 0}
         kind_of = {"tab": "table", "fig": "figure", "sec": "section", "eq": "equation",
                    "app": "section", "alg": "algorithm"}
+        # Theorem-like environments are numbered on their own counters and a
+        # label inside one names it, whatever its prefix says.
+        thm_counts: dict[str, int] = {}
+        last_thm = ""
+        envs = "|".join(sorted(self.thm_styles, key=len, reverse=True))
         for m in re.finditer(
             r"\\(section|subsection|subsubsection)\s*\*?\s*\{|"
             r"\\begin\{(table|figure|equation|acwidetable|acwidefigure)\*?\}|"
-            r"\\label\s*\{([^}]*)\}",
+            r"\\label\s*\{([^}]*)\}|"
+            r"\\begin\{(" + envs + r")\*?\}",
             body,
         ):
+            if m.group(4):
+                heading, counter = self.thm_styles[m.group(4)]
+                if counter is None:
+                    last_thm = heading
+                else:
+                    thm_counts[counter] = thm_counts.get(counter, 0) + 1
+                    last_thm = f"{heading} {thm_counts[counter]}"
+                self.theorem_names.append(last_thm)
+                continue
             if m.group(1) == "section":
                 counts["section"] += 1
             elif m.group(2):
@@ -681,7 +944,9 @@ class Converter:
                 label = m.group(3)
                 prefix = label.split(":")[0] if ":" in label else ""
                 kind = kind_of.get(prefix)
-                if kind and kind in counts:
+                if prefix in THEOREM_LABELS and last_thm:
+                    self.labels[label] = last_thm
+                elif kind and kind in counts:
                     self.labels[label] = f"{kind.capitalize()} {counts[kind]}"
                 elif kind == "algorithm":
                     self.labels[label] = "the algorithm"
@@ -833,6 +1098,30 @@ class Converter:
                       lambda m: self.items(m.group(2), "1. "), text, flags=re.S)
         text = re.sub(r"\\begin\{(abstract|quote|quotation)\}(.*?)\\end\{\1\}",
                       lambda m: m.group(2), text, flags=re.S)
+        # paper-writing's titled box (template/preamble.tex): its title in bold,
+        # then what it holds.
+        text = re.sub(r"\\begin\{protocolbox\}\s*\{([^}]*)\}(.*?)\\end\{protocolbox\}",
+                      lambda m: f"\n\n**{m.group(1).strip()}**\n\n{m.group(2).strip()}\n\n", text, flags=re.S)
+        # Theorem, lemma, ...: "**Lemma 1 (title).** statement", numbered as
+        # the index pass numbered them, so a \cref and its target agree.
+        def theorem(m: re.Match) -> str:
+            if self._thm_next < len(self.theorem_names):
+                heading = self.theorem_names[self._thm_next]
+            else:
+                heading = self.thm_styles[m.group(1)][0]
+            self._thm_next += 1
+            body, title = m.group(2), ""
+            tm = re.match(r"\s*\[([^\]]*)\]", body)
+            if tm:
+                title, body = f" ({tm.group(1).strip()})", body[tm.end():]
+            body = re.sub(r"\\label\s*\{[^}]*\}", "", body).strip()
+            return f"\n\n**{heading}{title}.** {body}\n\n"
+        envs = "|".join(sorted(self.thm_styles, key=len, reverse=True))
+        text = re.sub(r"\\begin\{(" + envs + r")\*?\}(.*?)\\end\{\1\*?\}", theorem, text, flags=re.S)
+        def proof(m: re.Match) -> str:
+            body = re.sub(r"\\qed(?:here)?(?![A-Za-z])", "", m.group(2)).strip()
+            return f"\n\n*{(m.group(1) or 'Proof').strip()}.* {body} \u220e\n\n"
+        text = re.sub(r"\\begin\{proof\}(?:\[([^\]]*)\])?(.*?)\\end\{proof\}", proof, text, flags=re.S)
         return text
 
     def items(self, body: str, bullet: str) -> str:
@@ -886,7 +1175,7 @@ class Converter:
             head = f"**{number}.** " if number else ""
             # The url is a placeholder on purpose: insert_figures.py replaces it
             # with the real attachment url, which only exists after the upload.
-            return ("\n\n![" + alt[:180] + "](figures/" + fname + ")\n\n"
+            return ("\n\n![" + clip_alt(alt) + "](figures/" + fname + ")\n\n"
                     + head + alt + "\n\n")
 
         return re.sub(
@@ -1058,11 +1347,9 @@ def inline_to_md_block(text: str, macros: Macros, conv: Converter) -> str:
 
 # --------------------------------------------------------------- figures ----
 def render_dat(dat: Path, out: Path, title: str = "") -> bool:
-    """A `.dat` -> a PNG, with PIL rather than a TeX run.
-
-    The contract is explicit that this must NOT be rasterised from the PDF,
-    because that would make the markdown target depend on a TeX distribution.
-    matplotlib is not present here, so this draws the grouped-bar case that
+    """A `.dat` -> a PNG, with PIL rather than a TeX run: the fallback for a
+    figure paper_figures.py could not take from the PDF, and only ever from that
+    figure's own data. matplotlib is not present here, so this draws the grouped-bar case that
     `make_paper_data.py` emits and refuses anything else rather than inventing a
     chart type."""
     try:
@@ -1165,6 +1452,21 @@ def extract_title(paper: Path, conv: "Converter") -> str:
     return re.sub(r"\s+", " ", out).strip()
 
 
+def default_page_limit() -> float:
+    """The venue's main-text limit in pages, 0 = none: what the platform last
+    said (state/phase.json, which `client.py phase` writes every round), else
+    AC_PAGE_LIMIT, else 10. The platform's number comes first because it is
+    the one finalizing is refused by."""
+    state = Path(os.environ.get("AC_STATE") or Path(__file__).resolve().parents[2] / "state")
+    try:
+        pb = json.loads((state / "phase.json").read_text(encoding="utf-8")).get("page_budget")
+        if isinstance(pb, (int, float)) and not isinstance(pb, bool) and pb >= 0:
+            return float(pb)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return float(os.environ.get("AC_PAGE_LIMIT") or 10)
+
+
 # ------------------------------------------------------------------ main ----
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
@@ -1174,6 +1476,9 @@ def main() -> int:
     ap.add_argument("--reproducibility", default=None,
                     help="file holding the reproducibility prose; the research side owns it")
     ap.add_argument("--keywords", default=None, help="comma-separated, if paper.json has none")
+    ap.add_argument("--page-limit", type=float, default=None,
+                    help="the venue's main-text page budget, 0 = none (default: the platform's, "
+                         "from state/phase.json; else AC_PAGE_LIMIT; else 10)")
     a = ap.parse_args()
 
     project = Path(a.project).resolve()
@@ -1249,17 +1554,30 @@ def main() -> int:
     if repro_path.exists():
         repro = repro_path.read_text(encoding="utf-8").strip()
 
-    # Figures: .dat -> PNG, never from the PDF.
+    # Figures: the paper's own, cut out of its compiled PDF (paper_figures.py),
+    # so the platform shows exactly what the paper prints. A figure that cannot
+    # be taken from the PDF may be drawn from its OWN data -- never from another
+    # figure's, which once put the opening bar chart where a paper had its
+    # method diagram -- and with neither it is reported, not shown wrong.
     outdir = Path(a.out) if a.out else project / "submission"
     figdir = outdir / "figures"
-    made = []
+    made, figure_problems = [], []
+    from paper_figures import extract as extract_figures
+    labelled = [label for label, _ in conv.figures if label.startswith("fig:")]
+    taken = extract_figures(project, figdir, labelled) if labelled else {}
     for label, cap in conv.figures:
         stem = label.split(":")[-1]
-        for cand in [paper / "data" / f"{stem}.dat", paper / "data" / "opening.dat"]:
-            if cand.exists():
-                if render_dat(cand, figdir / f"{stem}.png", cap[:80]):
-                    made.append(f"{stem}.png")
-                break
+        got = taken.get(label, "error: the figure has no \\label{fig:...}")
+        if not got.startswith("error"):
+            made.append(got)
+            continue
+        own = paper / "data" / f"{stem}.dat"
+        title = re.sub(r"[*_`$\\{}]", "", inline_to_md(cap, conv.macros))[:80]
+        if own.exists() and render_dat(own, figdir / f"{stem}.png", title):
+            made.append(f"{stem}.png")
+            warn(f"figure {label}: {got[7:]}; drawn from its own data ({own.name}) instead of the PDF")
+        else:
+            figure_problems.append(f"figure {label} could not be taken from the PDF ({got[7:]}) and has no data of its own")
 
     sub = {
         "title": title,
@@ -1272,6 +1590,11 @@ def main() -> int:
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "submission.json").write_text(
         json.dumps(sub, indent=2, ensure_ascii=False), encoding="utf-8")
+    pc = count_pages(body_md)
+    limit = a.page_limit if a.page_limit is not None else default_page_limit()
+    over = limit > 0 and pc["pages"] > limit
+    pc.update(limit=limit, over=over, cut_words=math.ceil((pc["pages"] - limit) * 700) if over else 0)
+    (outdir / "page_count.json").write_text(json.dumps(pc, indent=2), encoding="utf-8")
 
     # ---- report, and be loud about every hole ---------------------------
     print(f"make-submission: wrote {outdir / 'submission.json'}")
@@ -1281,8 +1604,13 @@ def main() -> int:
     print(f"  keywords         {len(keywords)}")
     print(f"  reproducibility  {len(repro)} chars")
     print(f"  figures          {len(made)} rendered {made if made else ''}")
+    print(f"  platform pages   {pc['pages']} of {limit:g} (main text: {pc['words']} words, "
+          f"{pc['figures']} figures, {pc['tables']} tables)")
 
     problems = 0
+    for msg in figure_problems:
+        warn(msg)
+        problems += 1
     for field, (lo, hi) in LIMITS.items():
         n = len(sub[field] if field != "body_md" else body_md)
         if n < lo or n > hi:
@@ -1300,6 +1628,11 @@ def main() -> int:
     if conv.missing_cites:
         warn(f"{len(conv.missing_cites)} citation key(s) not in references.bib, "
              f"dropped: {sorted(conv.missing_cites)[:6]}")
+        problems += 1
+    if over:
+        warn(f"the main text is {pc['pages']} pages by the platform's rule, against a limit of "
+             f"{limit:g}: cut about {pc['cut_words']} words, or move material past an Appendix "
+             f"heading -- nothing after one is counted. The platform refuses it as it is.")
         problems += 1
     if conv.unknown_cmds:
         cmds = sorted(conv.unknown_cmds)
