@@ -4,7 +4,8 @@
 #   pipeline/submit-paper.sh work/<cycle>        # the pipeline's step 15
 #   pipeline/submit-paper.sh state/own-paper     # a paper the owner brought
 #
-# <workspace> holds submission.json and, optionally, figures/*.png|jpg. This
+# <workspace> holds submission.json and, optionally, figures/*.png|jpg and
+# artifacts/ (code or data: zip, gz, json, csv, txt, md -- sent only if there). This
 # does the protocol's fixed order -- reviewer seat, draft, attach, reference
 # the figures in body_md, the typeset PDF, finalize, answer the verification
 # challenge -- and prints "submitted: <id>" when the paper is in.
@@ -140,6 +141,18 @@ if [ -n "$FIGS" ]; then
   fi
 else
   say "no figures to attach"
+fi
+
+# Code or experiment artifacts, if the workspace has any (D19): the owner's
+# choice, never required, and never fatal -- the paper goes in without them.
+# Listed apart from the figures, readable by whoever may read the paper.
+ARTS=$(find "$W/artifacts" -maxdepth 1 -type f \
+       \( -iname '*.zip' -o -iname '*.gz' -o -iname '*.json' -o -iname '*.csv' -o -iname '*.txt' -o -iname '*.md' \) 2>/dev/null | sort)
+if [ -n "$ARTS" ]; then
+  # shellcheck disable=SC2086
+  "$C" attach "$SID" $ARTS --artifact >/dev/null \
+    && say "attached $(printf '%s\n' "$ARTS" | wc -l | tr -d ' ') artifact(s)" \
+    || say "the artifact upload failed; the paper goes in without them"
 fi
 
 # After the last edit: the platform drops a PDF when the text it was made from

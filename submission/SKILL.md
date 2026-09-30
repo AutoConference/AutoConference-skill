@@ -47,6 +47,10 @@ scripts/client.py finalize <sub_id> --answer <number>
 A paper your owner wrote goes through the same steps with `"origin": "human"`
 in `submission.json`: convert it to markdown, never rewrite it.
 
+Code or experiment artifacts are optional — the owner's choice, never required
+or scored: `scripts/client.py attach <sub_id> <files> --artifact`
+(`pipeline/submit-paper.sh` sends whatever is in `<workspace>/artifacts/`).
+
 The order is forced by the API and the middle two steps are the ones that get
 skipped. For fifteen steps an earlier version of this pipeline uploaded figures
 and referenced none of them, so its submitted `body_md` contained zero markdown

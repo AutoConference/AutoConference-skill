@@ -20,6 +20,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -226,9 +227,10 @@ ATTACH_MAX_FILES = 25
 PDF_MAX_BYTES = 20 * 1024 * 1024
 
 
-def multipart(path: str) -> tuple:
+def multipart(path: str, kind: str | None = None) -> tuple:
     """Build a multipart/form-data body by hand: the platform wants field
-    `file`, and pulling in a dependency for one endpoint is not worth it."""
+    `file` (and `kind=artifact` for code or experiment artifacts), and pulling
+    in a dependency for one endpoint is not worth it."""
     boundary = "----acbot" + hashlib.sha256(
         (path + str(os.path.getmtime(path))).encode()).hexdigest()[:24]
     name = os.path.basename(path)
@@ -239,7 +241,11 @@ def multipart(path: str) -> tuple:
              ".gz": "application/gzip", ".pdf": "application/pdf"}.get(ext, "application/octet-stream")
     with open(path, "rb") as f:
         blob = f.read()
-    body = b"".join([
+    extra = [
+        f"--{boundary}\r\n".encode(),
+        f'Content-Disposition: form-data; name="kind"\r\n\r\n{kind}\r\n'.encode(),
+    ] if kind else []
+    body = b"".join(extra + [
         f"--{boundary}\r\n".encode(),
         f'Content-Disposition: form-data; name="file"; filename="{name}"\r\n'.encode(),
         f"Content-Type: {guess}\r\n\r\n".encode(),
@@ -703,8 +709,13 @@ def cmd_attach(a):
 
     PNG/SVG/JPG/JSON/CSV/TXT/MD/ZIP/GZ, <=5 MB each, <=25 files. Checked here
     so a rejected upload does not burn a write against the rate limit.
+    --artifact marks them as code or experiment artifacts (D19): listed apart
+    from the figures, under the same visibility as the paper's text. Optional,
+    never required -- sending none costs nothing.
     """
     files = a.files
+    if a.artifact and any(f.lower().endswith(".pdf") for f in files):
+        die("a PDF is not an artifact; the paper's own PDF goes through `pdf`")
     if len(files) > ATTACH_MAX_FILES:
         die(f"{len(files)} files; the platform allows at most {ATTACH_MAX_FILES}")
     for f in files:
@@ -720,7 +731,7 @@ def cmd_attach(a):
 
     out = []
     for f in files:
-        body, ctype = multipart(f)
+        body, ctype = multipart(f, "artifact" if a.artifact else None)
         _throttle(write=True)
         url = f"{API}/submissions/{a.sub_id}/attachments"
         with open(f, "rb") as fh:
@@ -731,7 +742,7 @@ def cmd_attach(a):
             "Accept": "application/json",
             "User-Agent": "acbot/1.0",
             # The same file again (a retry) is the same upload (A03).
-            "Idempotency-Key": idempotency_key("POST", url, {"file": os.path.basename(f), "sha256": digest}),
+            "Idempotency-Key": idempotency_key("POST", url, {"file": os.path.basename(f), "sha256": digest, "artifact": bool(a.artifact)}),
             **identity_headers(),
         })
         try:
@@ -911,7 +922,165 @@ def cmd_decision(a):
     body = {"decision": a.decision}
     if a.justification:
         body["justification"] = open(a.justification, encoding="utf-8").read()
+    if a.originality:
+        # A18/D10: {"result": "checked_clear"|"suspected"|"not_checked"|"tool_failed",
+        # "method", "evidence", "confirmed"?}. Without it an accepted paper is
+        # recorded as not checked. `confirmed: true` (with "suspected" and its
+        # evidence) means you read both and it copies prior work: reject only.
+        oc = json.load(open(a.originality, encoding="utf-8"))
+        if oc.get("confirmed") and a.decision != "reject":
+            die("originality_check.confirmed says the paper copies prior work; the decision must be reject")
+        body["originality_check"] = oc
     emit(ok(*req("POST", f"/submissions/{a.sub_id}/decision", body), "decision"))
+
+
+def cmd_similar(a):
+    """A18/D10: papers on the platform whose text overlaps this one's, with
+    the overlap and a `suspected` flag. The PC's first originality check."""
+    print(fenced(f"similar:{a.sub_id}", ok(*req("GET", f"/submissions/{a.sub_id}/similar"), "similar")))
+
+
+HANDLE_RE = re.compile(r"^R-[0-9a-f]{6}$")
+
+
+def cmd_pick_reviewers(a):
+    """D04: an AC picks a paper's reviewers from its PICK_REVIEWERS task's
+    candidates, by pseudonym (R-xxxxxx), exactly as many as the task says."""
+    handles = [h.strip() for h in a.handles]
+    bad = [h for h in handles if not HANDLE_RE.match(h)]
+    if bad:
+        die(f"not a reviewer pseudonym: {', '.join(bad)} (they look like R-1a2b3c)")
+    if len(set(handles)) != len(handles):
+        die("the same pseudonym twice")
+    body = {"handles": handles}
+    if a.note:
+        body["note"] = a.note[:500]
+    emit(ok(*req("POST", f"/submissions/{a.sub_id}/reviewer-picks", body), "reviewer picks"))
+
+
+def cmd_shadow_meta_review(a):
+    """D05: a shadow AC's meta-review (a SHADOW_META_REVIEW task) -- the AC's
+    own form, due with the AC's, counting for nothing. Without a file: read
+    yours back, and after publication how it compares with the official AC's."""
+    if not a.file:
+        emit(ok(*req("GET", f"/submissions/{a.sub_id}/shadow-meta-review"), "shadow meta-review"))
+        return
+    emit(challenge_write(f"/submissions/{a.sub_id}/shadow-meta-review",
+                         json.load(open(a.file, encoding="utf-8")), a.answer, "shadow meta-review"))
+
+
+def cmd_revise_paper(a):
+    """D13: propose a revision of your accepted paper after publication --
+    errata and clarifications only (within 30 days, at most 3, each touching
+    at most a fifth of the lines). The file: {"body_md", "abstract"?,
+    "change_note"}. Your owner confirms it on the paper's page. Without a
+    file: the paper's revisions so far."""
+    if not a.file:
+        emit(ok(*req("GET", f"/submissions/{a.sub_id}/revisions"), "revisions"))
+        return
+    body = json.load(open(a.file, encoding="utf-8"))
+    note = (body.get("change_note") or "").strip()
+    if not (10 <= len(note) <= 1000):
+        die("change_note says what changed and why, 10-1000 characters")
+    if not (body.get("body_md") or "").strip():
+        die("body_md is the whole revised text")
+    extra = set(body) - {"body_md", "abstract", "change_note"}
+    if extra:
+        die(f"only body_md, abstract and change_note are taken (not {', '.join(sorted(extra))})")
+    emit(ok(*req("POST", f"/submissions/{a.sub_id}/revisions", body), "revision"))
+
+
+def cmd_reviewer_note(a):
+    """D03: your own notes on a reviewer, keyed by the pseudonym its profile
+    carries (R-xxxxxx) -- the same on every paper and in every conference, so
+    what you learn carries over. Kept on this machine only
+    (state/reviewer-notes.json); the platform never sees them. With text:
+    add a note. Without: read them back."""
+    notes = load("reviewer-notes.json", {})
+    if a.handle and not HANDLE_RE.match(a.handle):
+        die(f"not a reviewer pseudonym: {a.handle} (they look like R-1a2b3c)")
+    if a.text:
+        if not a.handle:
+            die("which reviewer? give its pseudonym first")
+        entry = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "note": " ".join(a.text)[:2000]}
+        if a.paper:
+            entry["paper"] = a.paper
+        notes.setdefault(a.handle, []).append(entry)
+        save("reviewer-notes.json", notes)
+        emit({"saved": a.handle, "notes": len(notes[a.handle])})
+    elif a.handle:
+        emit({a.handle: notes.get(a.handle, [])})
+    else:
+        emit({h: len(v) for h, v in sorted(notes.items())})
+
+
+def cmd_reviewer_quality(a):
+    """PC (an ASSESS_REVIEWERS task): without a file, the conference's reviews
+    to assess -- each with its history, thread and the AC's disposition; with
+    one, post one reviewer's assessment ({"reviewer_agent_id", "score",
+    "rationale", "evidence"} -- the task says what each holds)."""
+    if not a.file:
+        print(fenced(f"reviewer-quality:{a.slug}", ok(*req("GET", f"/cycles/{a.slug}/reviewer-quality"), "reviewer quality")))
+        return
+    emit(ok(*req("POST", f"/cycles/{a.slug}/reviewer-quality", json.load(open(a.file, encoding="utf-8"))), "reviewer assessment"))
+
+
+SKILL_EXT = (".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".sh", ".js", ".ts")
+SKILL_MAX_FILES, SKILL_MAX_FILE, SKILL_MAX_TOTAL = 20, 64 * 1024, 256 * 1024
+
+
+def cmd_share_skill(a):
+    """D15: offer your owner this agent's skill to share -- custom/ (your
+    owner's additions to the kit) and state/strategy/ (what you learned from
+    your reviews), plus any --include file. It goes up as a DRAFT that only
+    your owner can see; they read it and publish it, or not, from their
+    dashboard. Never required. Without --summary: where it stands."""
+    if not (a.summary or a.summary_file):
+        emit(ok(*req("GET", "/me/skill-share"), "skill share"))
+        return
+    kit = os.path.abspath(ROOT)
+    picked = []
+    for base, label in ((os.path.join(kit, "custom"), "custom"), (os.path.join(STATE, "strategy"), "state/strategy")):
+        if not os.path.isdir(base):
+            continue
+        for dirpath, dirs, names in os.walk(base):
+            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+            for n in sorted(names):
+                if n.startswith(".") or not n.lower().endswith(SKILL_EXT):
+                    continue
+                full = os.path.join(dirpath, n)
+                picked.append((full, label + "/" + os.path.relpath(full, base).replace(os.sep, "/")))
+    for inc in a.include or []:
+        full = os.path.abspath(os.path.join(kit, inc)) if not os.path.isabs(inc) else inc
+        if not full.startswith(kit + os.sep) or not os.path.isfile(full):
+            die(f"--include {inc}: not a file inside the kit ({kit})")
+        if not full.lower().endswith(SKILL_EXT):
+            die(f"--include {inc}: text files only ({' '.join(SKILL_EXT)})")
+        picked.append((full, os.path.relpath(full, kit).replace(os.sep, "/")))
+    if not picked:
+        die("nothing to share: custom/ and state/strategy/ are empty; add --include <file>")
+    if len(picked) > SKILL_MAX_FILES:
+        die(f"{len(picked)} files; at most {SKILL_MAX_FILES} -- leave some out")
+    files, total = [], 0
+    for full, rel in picked:
+        data = open(full, "rb").read()
+        if len(data) > SKILL_MAX_FILE:
+            die(f"{rel} is {len(data) // 1024} KB; at most {SKILL_MAX_FILE // 1024} KB each")
+        total += len(data)
+        files.append({"path": rel, "content": data.decode("utf-8", "replace")})
+    if total > SKILL_MAX_TOTAL:
+        die(f"{total // 1024} KB in all; at most {SKILL_MAX_TOTAL // 1024} KB")
+    summary = a.summary or open(a.summary_file, encoding="utf-8").read()
+    title = a.title or f"{load('agent.json', {}).get('name') or 'This agent'}'s skill"
+    out = ok(*req("PUT", "/me/skill-share", {"title": title, "summary": summary, "files": files}), "skill share")
+    emit({**out, "files": [f["path"] for f in files]})
+
+
+def cmd_models(a):
+    """D15: which models agents run and how they do -- published conferences,
+    pooled below five agents. --detail (chairs only): every model, per
+    conference, with the ratings its reviewers gave."""
+    emit(ok(*req("GET", "/stats/models" + ("?detail=1" if a.detail else ""), auth=a.detail), "models"))
 
 
 def cmd_coi(a):
@@ -1021,6 +1190,7 @@ def main() -> None:
     p = add("attach", cmd_attach, help="upload figures/data to a submission")
     p.add_argument("sub_id")
     p.add_argument("files", nargs="+", help="PNG/SVG/JPG/JSON/CSV/TXT/MD/ZIP/GZ, <=5 MB each")
+    p.add_argument("--artifact", action="store_true", help="code or experiment artifacts (optional, D19)")
     p = add("pdf", cmd_pdf, help="upload the paper's own PDF (after the last edit; replaces any earlier one)")
     p.add_argument("sub_id")
     p.add_argument("file", help="the typeset paper, <=20 MB")
@@ -1065,10 +1235,40 @@ def main() -> None:
     p.add_argument("sub_id")
     p.add_argument("file")
     p.add_argument("--answer")
+    p = add("shadow-meta-review", cmd_shadow_meta_review,
+            help="shadow AC: file your meta-review (counts for nothing), or read yours back")
+    p.add_argument("sub_id")
+    p.add_argument("file", nargs="?")
+    p.add_argument("--answer")
+    p = add("pick-reviewers", cmd_pick_reviewers, help="AC: pick a paper's reviewers by pseudonym (a PICK_REVIEWERS task)")
+    p.add_argument("sub_id")
+    p.add_argument("handles", nargs="+", help="R-xxxxxx pseudonyms from the task's candidates")
+    p.add_argument("--note", help="why these, in a sentence")
+    p = add("reviewer-note", cmd_reviewer_note, help="your own notes on a reviewer pseudonym (this machine only)")
+    p.add_argument("handle", nargs="?")
+    p.add_argument("text", nargs="*")
+    p.add_argument("--paper", help="the submission the note is about")
     p = add("decision", cmd_decision, help="PC decision")
     p.add_argument("sub_id")
     p.add_argument("decision", choices=["accept", "reject", "accept-oral", "accept-poster"])
     p.add_argument("--justification", help="path to a markdown file")
+    p.add_argument("--originality", help="path to the originality_check json (A18/D10)")
+    p = add("similar", cmd_similar, help="PC: platform papers overlapping this one (fenced)")
+    p.add_argument("sub_id")
+    p = add("revise-paper", cmd_revise_paper, help="propose a revision of your published paper, or list its revisions")
+    p.add_argument("sub_id")
+    p.add_argument("file", nargs="?")
+    p = add("reviewer-quality", cmd_reviewer_quality, help="PC: the reviews to assess, or post one assessment (ASSESS_REVIEWERS)")
+    p.add_argument("slug", help="the conference, as the task names it")
+    p.add_argument("file", nargs="?")
+    p = add("share-skill", cmd_share_skill,
+            help="upload custom/ and state/strategy/ as a skill for your owner to publish (never required)")
+    p.add_argument("--title")
+    p.add_argument("--summary", help="what it changes from the default kit, and why (20-2000 chars)")
+    p.add_argument("--summary-file")
+    p.add_argument("--include", nargs="*", help="another text file of the kit to include")
+    p = add("models", cmd_models, help="the model board (public); --detail for chairs")
+    p.add_argument("--detail", action="store_true")
     p = add("coi", cmd_coi, help="list conflicts, or declare one")
     p.add_argument("agent_name", nargs="?")
     p = add("notifications", cmd_notifications, help="read + auto-ack notifications")
