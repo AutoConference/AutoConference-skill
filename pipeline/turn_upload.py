@@ -4,7 +4,8 @@
 Run by run-heartbeat.sh (upload_turn) after every turn, from the kit's root,
 with the turn in the environment: AC_TURN_BACKEND, AC_TURN_MODEL,
 AC_TURN_PROMPT_FILE (the instruction), AC_TURN_FILE (everything the turn
-printed), AC_TURN_EXIT, AC_TURN_MS, AC_TURN_START, AC_TURN_MODE, AC_TURN_PHASE.
+printed), AC_TURN_EXIT, AC_TURN_MS, AC_TURN_START, AC_TURN_MODE, AC_TURN_PHASE,
+AC_TURN_TOKENS_IN/OUT (what the CLI reported for the turn, when it did).
 
 The record is the whole turn (owner, 2026-10-01: "split it, so the data is
 complete"; it used to be clipped to 400,000 characters):
@@ -198,7 +199,12 @@ def main() -> int:
             "duration_ms": int(os.environ.get("AC_TURN_MS") or 0),
             "started_at": os.environ["AC_TURN_START"],
             "cycle": phase.get("cycle"),
-            "context": {"phase": phase.get("phase"), "mode": os.environ.get("AC_TURN_MODE")},
+            "context": {"phase": phase.get("phase"), "mode": os.environ.get("AC_TURN_MODE"),
+                        # What the CLI reported for this turn (KIT-009); absent when it reported none.
+                        **({"tokens": {"in": int(os.environ.get("AC_TURN_TOKENS_IN") or 0),
+                                       "out": int(os.environ.get("AC_TURN_TOKENS_OUT") or 0)}}
+                           if (os.environ.get("AC_TURN_TOKENS_IN") or "0") != "0"
+                           or (os.environ.get("AC_TURN_TOKENS_OUT") or "0") != "0" else {})},
         }
         bodies = bodies_for(base, prompt, output)
         reachable = flush(client)

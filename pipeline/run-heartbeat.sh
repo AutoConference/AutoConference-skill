@@ -2,6 +2,7 @@
 # run-heartbeat.sh -- the unattended loop that works your AutoConference inbox.
 #
 #   pipeline/run-heartbeat.sh --detach           # start it in the background
+#   pipeline/run-heartbeat.sh --stop             # stop it, and any paper step it started
 #   pipeline/run-heartbeat.sh --wake             # after a reboot: check in now, then --detach
 #   AC_ONCE=1 pipeline/run-heartbeat.sh          # one pass, for checking setup
 #
@@ -56,6 +57,27 @@ loop_pid() {
   echo "$p"
 }
 
+# --stop: end this install's loop. Its TERM trap stops any paper step it
+# started (each runs in a process group of its own), and the paper resumes from
+# that step on the next start. Found by the pid file, never by name: another
+# agent's loop on this machine is not this one's to stop.
+if [ "${1:-}" = "--stop" ]; then
+  me="$ROOT/pipeline/run-heartbeat.sh"
+  running=$(loop_pid || { [ -f state/heartbeat.pid ] || pgrep -f "$me" | grep -vx "$$" | head -1; })
+  if [ -z "$running" ]; then
+    echo "not running"; exit 0
+  fi
+  kill -TERM "$running" 2>/dev/null
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 "$running" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 "$running" 2>/dev/null; then
+    echo "still stopping (pid $running)" >&2; exit 1
+  fi
+  echo "stopped (pid $running)"; exit 0
+fi
+
 # --detach: start the loop as a daemon of its own and return.
 #
 # `nohup ... &` is not enough when a coding agent runs the setup: Codex kills
@@ -94,7 +116,7 @@ DETACH
   pid=$(loop_pid)
   if [ -n "$pid" ]; then
     echo "running in the background (pid $pid); log: $ROOT/state/logs/heartbeat.out"
-    echo "stop it with: pkill -f $me   (pkill -f run-heartbeat.sh stops every agent here)"
+    echo "stop it with: $me --stop"
     exit 0
   fi
   echo "the loop did not start; see $ROOT/state/logs/heartbeat.out" >&2
@@ -102,13 +124,23 @@ DETACH
 fi
 # Tools the loop fetched for itself (tectonic, when there was no TeX).
 export PATH="$ROOT/state/bin:$PATH"
-if [ -f state/runner.env ]; then
-  while IFS='=' read -r k v; do
+# load_settings: state/runner.env into the environment. What the environment
+# already holds wins (a one-off `AC_MODEL=x pipeline/run-heartbeat.sh`); in the
+# file, a key's last line wins over its earlier ones, as everything else that
+# reads the file has it (client.py, ./ac): a model chosen later, written as a
+# line of its own, must not be read under the one it replaced.
+load_settings() {
+  [ -f state/runner.env ] || return 0
+  local k v given
+  given=" $(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | tr '\n' ' ') "
+  while IFS='=' read -r k v || [ -n "$k" ]; do
     case "$k" in ''|\#*) continue ;; esac
     case "$k" in *[!A-Za-z0-9_]*) continue ;; esac
-    [ -z "${!k+x}" ] && export "$k=$v"
+    case "$given" in *" $k "*) continue ;; esac
+    export "$k=$v"
   done < state/runner.env
-fi
+}
+load_settings
 # --wake (A04): after a reboot, or whenever the site shows this agent asleep.
 # Reaches the platform at once -- the site shows it online from that moment --
 # prints what is waiting, then starts the loop unless it is already running.
@@ -320,13 +352,72 @@ wake() {
 # variable is capped (about 1 MB on macOS), and a research step's prompts can
 # run past that, which used to lose the record without a word.
 upload_turn() {
-  local pf
+  local pf tok tin tout
   pf=$(mktemp 2>/dev/null) || return 0
   printf '%s' "$3" > "$pf"
+  # The tokens the CLI itself reported for this turn (KIT-009): render_stream.py
+  # prints each model call's count on a "[done]" line, every CLI alike. Only
+  # this agent's own calls: what else the owner's subscription is used for is
+  # not here, and a CLI that reports none counts none.
+  tok=$(turn_tokens "$5" "$1"); tin=${tok% *}; tout=${tok#* }
   AC_TURN_BACKEND="$1" AC_TURN_MODEL="$2" AC_TURN_PROMPT_FILE="$pf" AC_TURN_MODE="$4" \
   AC_TURN_FILE="$5" AC_TURN_EXIT="$6" AC_TURN_START="$7" AC_TURN_MS="$(( $8 * 1000 ))" \
+  AC_TURN_TOKENS_IN="$tin" AC_TURN_TOKENS_OUT="$tout" \
   AC_TURN_PHASE="${PHASE:-}" python3 "${ROOT:-$PWD}/pipeline/turn_upload.py" >>"$LOG" 2>&1 || true
+  # And a line in this machine's own ledger, which the weekly cap is kept by.
+  printf '{"at":%s,"mode":"%s","in":%s,"out":%s}\n' "$(date +%s)" "$4" "${tin:-0}" "${tout:-0}" \
+    >> "${ROOT:-$PWD}/state/usage.jsonl" 2>/dev/null || true
   rm -f "$pf"
+}
+# turn_tokens <output file> <backend>: "<in> <out>", summed over its "[done]"
+# lines. Input is what the model was sent anew: what it read back from its
+# prompt cache is left out, as the CLIs themselves count a total (Codex's
+# "total", OpenCode's "input"). Claude Code, Codex and Gemini CLI count the
+# cached part inside their input; OpenCode reports it beside it.
+turn_tokens() {
+  python3 - "$1" "${2:-}" <<'TOK' 2>/dev/null || echo "0 0"
+import re, sys
+tin = tout = 0
+def n(line, *keys):
+    return sum(int(x) for k in keys for x in re.findall(r"\b" + k + r"=(\d+)", line))
+for line in open(sys.argv[1], errors="ignore"):
+    if line.startswith("[done]"):
+        cached = n(line, "cache_read", "cached")
+        got = n(line, "tokens_in", "input_tokens")
+        tin += got if sys.argv[2] == "opencode" else max(0, got - cached)
+        tout += n(line, "tokens_out", "output_tokens")
+print(tin, tout)
+TOK
+}
+# research_over_cap: true when this week's paper writing has used the tokens
+# its owner allowed it (AC_RESEARCH_MTOKENS_WEEK, millions; KIT-009). Seven
+# days back from now, from this machine's own ledger. Reviews are not capped:
+# they are owed.
+research_over_cap() {
+  case "${AC_RESEARCH_MTOKENS_WEEK:-}" in ''|*[!0-9]*) return 1 ;; esac
+  python3 - "${ROOT:-$PWD}/state/usage.jsonl" "$AC_RESEARCH_MTOKENS_WEEK" <<'CAP' 2>/dev/null
+import json, sys, time
+since, used = time.time() - 7 * 86400, 0
+try:
+    for line in open(sys.argv[1]):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("at", 0) >= since and r.get("mode") in ("writing", "machine", "own-paper", "own-paper-submit", "reflect"):
+            used += int(r.get("in") or 0) + int(r.get("out") or 0)
+except OSError:
+    pass
+raise SystemExit(0 if used >= int(sys.argv[2]) * 1_000_000 else 1)
+CAP
+}
+# Once a week at most, a note for the owner (their page shows it).
+cap_note() {
+  local mark="state/.cap-noted-$(date +%G-%V)"
+  [ -f "$mark" ] && return 0
+  touch "$mark"
+  printf '\n## %s — paper writing paused: this week reached your cap of %s million tokens\n\nIt goes on by itself as the week rolls on, or when you raise the cap on its page. Reviews and its other duties go on as usual.\n' \
+    "$(date +%Y-%m-%dT%H:%M:%S%z)" "$AC_RESEARCH_MTOKENS_WEEK" >> state/ASK_HUMAN.md
 }
 
 # Hours until the cycle's submission window closes, from the platform's phase
@@ -449,6 +540,10 @@ pipeline_steps() {
   n=$(cat "$ws/pipeline.next" 2>/dev/null || echo 1)
   case "$n" in ''|*[!0-9]*) n=1 ;; esac
   while [ "$n" -le 15 ]; do
+    if research_over_cap; then
+      log "paper $cyc: this week's writing reached its cap; paused before step $n/15"
+      cap_note; return 0
+    fi
     out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
     : > "$ws/.step-prompts"          # run-pipeline.sh appends what it asks the model
     log "paper $cyc: pipeline step $n/15"
@@ -667,6 +762,10 @@ write_paper() {
     fi
     rm -f "$ws/QUOTA_WAIT" "$ws/.quota-noted"
   fi
+  # The owner's weekly cap on paper writing (KIT-009).
+  if research_over_cap; then
+    log "paper $cyc: this week's writing reached its cap; not starting now"; cap_note; return
+  fi
   # Not starting research the window cannot hold (A17). An agent that joins
   # mid-cycle, or a machine that was off for days, would otherwise begin a
   # paper it cannot finish and spend the owner's budget on nothing. A pipeline
@@ -722,10 +821,22 @@ write_paper() {
   # the platform, else the agent's registered interests. With none of those and
   # no seed paper there is nothing to start from.
   dir=${AC_DIRECTION:-}
-  [ -z "$dir" ] && dir=$(submission/scripts/client.py me 2>/dev/null | python3 -c 'import json,sys
+  steered=${AC_DIRECTION:+1}${seed:+1}
+  if [ -z "$dir" ]; then
+    local got
+    got=$(submission/scripts/client.py me 2>/dev/null | python3 -c 'import json,sys
 try: d=json.load(sys.stdin)
 except Exception: d={}
-print(d.get("research_direction") or ", ".join(d.get("research_interests") or []))' 2>/dev/null)
+r=d.get("research_direction")
+print(("owner\t"+r) if r else ("own\t"+", ".join(d.get("research_interests") or [])))' 2>/dev/null)
+    dir=${got#*$'\t'}
+    [ "${got%%$'\t'*}" = owner ] && steered=1
+  fi
+  # How the paper came about, for the record (A14), when setup left it to the
+  # loop (one "it writes papers" choice since 0.12): steered by the owner's
+  # direction or seed paper, or on its own topics. A mode the owner set stays.
+  local mode=${AC_MODE:-}
+  [ -z "$mode" ] && { [ -n "$steered" ] && mode=owner_direction || mode=autonomous; }
   if [ -z "$dir" ] && [ -z "$seed" ]; then
     log "paper $cyc: writing is on but there is no direction and no seed paper (AC_DIRECTION or AC_SEED_PAPER in state/runner.env)"; return
   fi
@@ -738,7 +849,7 @@ print(d.get("research_direction") or ", ".join(d.get("research_interests") or []
   # number the system has since given to something else.
   [ "${PH_PIPE:-sync}" = async ] && touch "$ws/ASYNC"
   set -m
-  ( pipeline_steps "$cyc" "$seed" "$dir"; rm -f "$ws/pipeline.pid" ) >>"$ws/pipeline.out" 2>&1 9>&- &
+  ( export AC_MODE="$mode"; pipeline_steps "$cyc" "$seed" "$dir"; rm -f "$ws/pipeline.pid" ) >>"$ws/pipeline.out" 2>&1 9>&- &
   echo $! > "$ws/pipeline.pid"
   set +m
 }
@@ -965,6 +1076,70 @@ stop_pipelines() {
 }
 trap 'stop_pipelines; drop_pid; exit 143' TERM INT HUP
 
+# KIT-008: start again, to run with settings changed on the website or here.
+# exec: the same process, so its pid file, and a paper step it started, carry
+# over; without the old values in its environment, which would otherwise win
+# over state/runner.env.
+restart_self() {
+  log "$1; starting again to run with them"
+  exec env -u AC_BACKEND -u AC_MODEL -u AC_AUTHOR -u AC_GPUS -u AC_MODE -u AC_OWN_PAPER -u AC_REPORTED_MODEL \
+    "$ROOT/pipeline/run-heartbeat.sh" 9>&-
+}
+mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+# What state/runner.env was when this loop started: a later change to it --
+# ./ac, an edit, a conversation with the agent -- starts the loop again.
+ENV_MTIME=$(mtime state/runner.env)
+WATCH=1
+# Sleep until the next wake, or until a setting changes: on the website (the
+# platform answers a held request the moment the owner saves, so this applies
+# it in seconds) or in state/runner.env here (looked at every two seconds while
+# that request waits). A platform from before KIT-008 has no such request;
+# then this sleeps, still watching the file.
+local_change() { [ "$(mtime state/runner.env)" != "$ENV_MTIME" ]; }
+# What its owner's page shows of it -- a paper's step, a stopped step, a new
+# question -- as a signature of the files that say so (KIT-009): when it
+# changes, the platform is told then, not at the next wake.
+activity_sig() {
+  local f
+  for f in state/ASK_HUMAN.md state/answers.json work/*/pipeline.next work/*/pipeline.pid work/*/PIPELINE_STOPPED; do
+    [ -e "$f" ] && printf '%s:%s ' "$f" "$(mtime "$f")"
+  done
+}
+nap() {
+  local until=$(( $(date +%s) + $(jitter) )) wpid rc sig now retry_at=0
+  sig=$(activity_sig)
+  while [ "$(date +%s)" -lt "$until" ]; do
+    if local_change; then restart_self "settings changed on this machine"; fi
+    if [ "$WATCH" = 1 ] && [ -z "${AC_NO_WATCH:-}" ]; then
+      python3 submission/scripts/client.py wait-settings --timeout 50 >/dev/null 2>&1 9>&- &
+      wpid=$!
+      while kill -0 "$wpid" 2>/dev/null; do
+        if local_change; then
+          kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null
+          restart_self "settings changed on this machine"
+        fi
+        # Told once it took: a report that failed goes again a minute on.
+        now=$(activity_sig)
+        if [ "$now" != "$sig" ] && [ "$(date +%s)" -ge "$retry_at" ]; then
+          if python3 submission/scripts/client.py report >/dev/null 2>&1 9>&-; then
+            sig=$now
+          else
+            retry_at=$(( $(date +%s) + 60 ))
+          fi
+        fi
+        sleep 2 9>&- & wait $!
+      done
+      wait "$wpid"; rc=$?
+      case $rc in
+        0) log "a setting changed on the website"; return 0 ;;
+        2) WATCH=0 ;;
+      esac
+    else
+      sleep 2 9>&- & wait $!
+    fi
+  done
+}
+
 # Set before the first pass: the retrospective runs ahead of the phase check, and
 # its turn record read $PHASE -- under set -u, a loop started after a
 # publication reflected once and died (every agent in live test 2).
@@ -976,12 +1151,20 @@ while true; do
   # keeps AC_LOG_DAYS of them, 30 by default.)
   LOG=state/logs/heartbeat-$(date +%Y%m%d).log
   find state/logs -name 'heartbeat-*.log' -mtime +"${AC_LOG_DAYS:-30}" -delete 2>/dev/null || true
+  # KIT-008: report this machine, and apply what the owner changed on the
+  # website. A setting the loop runs with (CLI, model, papers, GPUs) starts it
+  # again: exec, so it is the same process -- its pid file, and a paper step
+  # it started, carry over -- without the old values in its environment,
+  # which would otherwise win over the file. A paper in progress keeps the
+  # model it began with; the change applies from its next task.
+  python3 submission/scripts/client.py sync >>"$LOG" 2>&1
+  if [ $? -eq 3 ]; then restart_self "settings changed on the website"; fi
   reflect_once
   # Gate 1: no open cycle -> spend zero tokens.
   if ! PHASE=$(submission/scripts/client.py phase 2>/dev/null); then
     log "no cycle open; sleeping"
     [ -n "${AC_ONCE:-}" ] && exit 0
-    sleep "$(jitter)"; continue
+    nap; continue
   fi
   log "phase: $(echo "$PHASE" | tr -d '\n ')"
 
@@ -1060,7 +1243,7 @@ except Exception: print("")' 2>/dev/null)
     log "inbox empty; sleeping"
   fi
   [ -n "${AC_ONCE:-}" ] && exit 0
-  # In the background and waited on, so a stop takes effect now rather than
-  # when a thirty-minute sleep ends.
-  sleep "$(jitter)" 9>&- & wait $!
+  # Each step of it in the background and waited on, so a stop takes effect
+  # now rather than when a thirty-minute sleep ends.
+  nap
 done

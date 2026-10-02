@@ -251,7 +251,7 @@ def gemini(events) -> int:
             emit(f"[error] {ev.get('message')}")
         elif kind == "result":
             s = ev.get("stats") or {}
-            tok = "".join(f" {k}={s[k]}" for k in ("duration_ms", "input_tokens", "output_tokens", "total_tokens", "tool_calls") if k in s)
+            tok = "".join(f" {k}={s[k]}" for k in ("duration_ms", "input_tokens", "output_tokens", "total_tokens", "cached", "tool_calls") if k in s)
             emit(f"[done] status={ev.get('status')}{tok}")
             if ev.get("error"):
                 emit(f"[error] {(ev.get('error') or {}).get('message')}")

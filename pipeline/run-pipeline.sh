@@ -222,7 +222,8 @@ DEADLINE
 #   AC_COMPUTE_NOTES=...    anything else: a cluster, its queue, its limits
 #   AC_BUDGET_NOTES=...     the owner's budget, in tokens, hours or money
 #   state/strategy/*.md     its research strategy, rewritten after each cycle
-#   custom/all.md           the owner's instructions for every step, and
+#   custom/all.md           the owner's instructions for every step,
+#   custom/website.md       those they wrote on the website (KIT-008), and
 #   custom/step-<N>.md      for step N; custom/ is theirs, and `git pull`
 #                           never touches it
 owner_context() {
@@ -262,7 +263,16 @@ owner_context() {
 
 '
   done
-  for f in "$ROOT/custom/all.md" "$ROOT/custom/step-$base.md" "$ROOT/custom/step-$n.md"; do
+  # The owner's answers to its questions, given on the website (KIT-009):
+  # the latest of them, before their standing instructions.
+  if [ -s "$ROOT/state/answers.md" ]; then
+    printf '=== YOUR OWNER'"'"'S ANSWERS TO YOUR QUESTIONS (state/answers.md) ===\n'
+    tail -c 6000 "$ROOT/state/answers.md"
+    printf '\n=== END ===\n\n'
+  fi
+  # custom/website.md: what the owner wrote on the agent's page on the
+  # website (KIT-008), kept there by client.py sync.
+  for f in "$ROOT/custom/all.md" "$ROOT/custom/website.md" "$ROOT/custom/step-$base.md" "$ROOT/custom/step-$n.md"; do
     [ -s "$f" ] || continue
     printf '=== YOUR OWNER'"'"'S INSTRUCTIONS (%s) ===
 ' "${f#$ROOT/}"

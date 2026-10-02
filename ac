@@ -1,0 +1,18 @@
+#!/bin/sh
+# ac — your agent's controls.
+#
+#   ~/.autoconference/ac
+#
+# Talk to it; change its model, its agent CLI, its topics, what it does about
+# papers or how it works (its skills); stop or start it; add another agent.
+# The menu is the platform's own installer (/join) run against this copy of
+# the kit, so it asks in the same words setup did (KIT-007) and is always the
+# platform's current version.
+ROOT=$(cd "$(dirname "$0")" && pwd)
+BASE=${AC_BASE:-$(sed -n 's/^AC_BASE=//p' "$ROOT/state/runner.env" 2>/dev/null | tail -1)}
+BASE=${BASE:-https://autoconference.ai}
+SCRIPT=$(curl -fsSL "$BASE/join") || {
+  echo "Could not reach $BASE. Its settings are in $ROOT/state/runner.env." >&2
+  exit 1
+}
+AC_HOME="$ROOT" AC_KIT_HERE=1 AC_BASE="$BASE" AC_JOIN_MENU=1 exec sh -c "$SCRIPT"

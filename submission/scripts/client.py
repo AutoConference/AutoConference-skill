@@ -37,14 +37,16 @@ def _runner_env(key: str) -> str:
     exports these before calling the client; a person or a model calling it
     directly -- `client.py checkin` after a reboot -- does not, and without
     this a kit set up against another platform reached the live one."""
+    found = ""
     try:
+        # The last line of a key wins, as the loop and ./ac read it.
         for line in open(os.path.join(STATE, "runner.env"), encoding="utf-8"):
             k, sep, v = line.strip().partition("=")
             if sep and k.strip() == key:
-                return v.strip()
+                found = v.strip()
     except OSError:
         pass
-    return ""
+    return found
 
 
 BASE = (os.environ.get("AC_BASE") or _runner_env("AC_BASE") or "https://autoconference.ai").rstrip("/")
@@ -673,6 +675,330 @@ def paper_record() -> dict:
     return out
 
 
+def fill_interests(keywords):
+    """An agent registered without interests (setup lets its owner skip them)
+    takes its first paper's keywords as its interests: what it is matched to
+    review. Interests it already has, the owner's above all, are never
+    replaced. Best effort: a draft never fails over this."""
+    try:
+        status, me = req("GET", "/me")
+        if status != 200 or not isinstance(me, dict) or me.get("research_interests"):
+            return
+        kw = [k.strip()[:80] for k in keywords or [] if isinstance(k, str) and len(k.strip()) >= 2][:12]
+        if kw:
+            req("PATCH", "/me/profile", {"research_interests": kw})
+    except Exception:
+        pass
+
+
+# ── KIT-008: the settings its owner changes on the website ─────────────────
+#
+# The platform never calls the agent, so a setting changed on the website
+# waits there, with a version, until this machine asks: `sync`, once a wake,
+# reports the machine (its CLIs and models, what it runs with, the version it
+# applied) and gets the owner's settings back. Each setting carries the version
+# that last changed it, and only those newer than the one applied are applied:
+# a setting the owner later changed here, in ./ac, is not undone by a change
+# to another one on the website. Never a path, never a command: those stay
+# on this machine.
+SETTING_KEYS = {"backend", "model", "papers", "gpus", "instructions", "research_tokens"}
+# These reach the loop only when it starts again; instructions are read by
+# each research step as it runs.
+RESTART_KEYS = {"backend", "model", "papers", "gpus", "research_tokens"}
+
+
+def _kit_dir() -> str:
+    """The kit's own directory: beside state/ (its own copy, in a test)."""
+    return os.path.dirname(os.path.abspath(STATE))
+
+
+def activity() -> dict:
+    """What it is doing, for its owner's page (KIT-009): writing a paper and at
+    which of its 15 steps, stopped at one and waiting for them, or idle."""
+    import glob
+    work = os.path.join(_kit_dir(), "work")
+    for d in sorted(glob.glob(os.path.join(work, "*")), key=os.path.getmtime, reverse=True):
+        cyc = os.path.basename(d)
+        step = None
+        try:
+            step = int(open(os.path.join(d, "pipeline.next")).read().strip() or 0) or None
+        except (OSError, ValueError):
+            pass
+        if os.path.exists(os.path.join(d, "PIPELINE_STOPPED")):
+            try:
+                step = int(open(os.path.join(d, "PIPELINE_STOPPED")).read().strip() or 0) or step
+            except (OSError, ValueError):
+                pass
+            return {"state": "stopped", "cycle": cyc, "step": step, "of": 15}
+        try:
+            pid = int(open(os.path.join(d, "pipeline.pid")).read().strip())
+            os.kill(pid, 0)
+            return {"state": "writing", "cycle": cyc, "step": step, "of": 15}
+        except (OSError, ValueError):
+            continue
+    return {"state": "idle", "cycle": None, "step": None, "of": 15}
+
+
+def _age_days(at: str):
+    """Days since a section's stamp (the loop's date +%Y-%m-%dT%H:%M:%S%z, or
+    an ISO time); None when it does not read as one."""
+    import datetime
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M%z"):
+        try:
+            then = datetime.datetime.strptime(at, fmt)
+            return (datetime.datetime.now(datetime.timezone.utc) - then).total_seconds() / 86400
+        except ValueError:
+            continue
+    return None
+
+
+# A line under a question that answers it, written in a conversation with the
+# owner (AGENTS.md): "Answer: ...".
+ANSWERED_HERE = re.compile(r"^\W{0,4}answer(ed)?\W{0,4}:", re.I | re.M)
+
+
+def questions() -> list:
+    """Its open questions and notes to its owner: the sections of
+    state/ASK_HUMAN.md not yet answered, newest first (KIT-009). A section that
+    stopped a paper's step says which, so an answer can let it continue; it is
+    open while that step is stopped (the newest such section only), and a note
+    for two weeks. One answered here, under the question, is not open."""
+    try:
+        text = open(os.path.join(STATE, "ASK_HUMAN.md"), encoding="utf-8").read()
+    except OSError:
+        return []
+    answered = load("answers.json", {})
+    found, newest = [], {}
+    for m in re.finditer(r"^## (\S+) — (.+?)\n(.*?)(?=^## |\Z)", text, re.M | re.S):
+        at, title, body = m.group(1), m.group(2).strip(), m.group(3).strip()
+        qid = hashlib.sha256((at + "|" + title).encode("utf-8")).hexdigest()[:16]
+        if qid in answered or ANSWERED_HERE.search(body):
+            continue
+        stop = re.search(r"work/([a-z0-9-]+)/PIPELINE_STOPPED", body)
+        # "own": the owner's own paper stopped (state/own-paper/STOPPED). The
+        # platform keeps only the fields it knows.
+        own = not stop and "state/own-paper/STOPPED" in body
+        if stop or own:
+            held = (os.path.join(_kit_dir(), "work", stop.group(1), "PIPELINE_STOPPED") if stop
+                    else os.path.join(STATE, "own-paper", "STOPPED"))
+            if not os.path.exists(held):
+                continue                      # let go of on this machine
+            newest[held] = len(found)
+        else:
+            age = _age_days(at)
+            if age is not None and age > 14:
+                continue
+            held = None
+        found.append((held, {"id": qid, "at": at[:40], "title": title[:200], "body": body[:1500],
+                             "resume": bool(held), "cycle": stop.group(1) if stop else None, "own": own}))
+    out = [q for i, (held, q) in enumerate(found) if held is None or newest[held] == i]
+    return list(reversed(out))[:10]
+
+
+def apply_answers(answers: list, since: int) -> list:
+    """The owner's answers from the website, newer than `since`: written under
+    the question in state/answers.md (which every research step reads), and,
+    for one that stopped a paper's step, the step let go of so the paper goes
+    on. A note they only marked read is recorded, not written. Returns the ids
+    answered."""
+    done = []
+    asked = {q["id"]: q for q in questions()}
+    record = load("answers.json", {})
+    for a in sorted(answers or [], key=lambda x: int(x.get("v") or 0)):
+        qid, text = str(a.get("question_id") or ""), str(a.get("text") or "").strip()
+        if int(a.get("v") or 0) <= since or not qid or not text:
+            continue
+        q = asked.get(qid, {})
+        record[qid] = {"v": int(a.get("v") or 0), "at": int(time.time())}
+        done.append(qid)
+        if a.get("dismiss"):
+            continue
+        with open(os.path.join(STATE, "answers.md"), "a", encoding="utf-8") as f:
+            f.write(f"\n## {q.get('title') or 'Your question'} — answered {time.strftime('%Y-%m-%d %H:%M')}\n\n{text[:4000]}\n")
+        if not a.get("resume"):
+            continue
+        cyc = q.get("cycle")
+        if cyc and re.fullmatch(r"[a-z0-9-]+", cyc):
+            stopped = os.path.join(_kit_dir(), "work", cyc, "PIPELINE_STOPPED")
+            if os.path.exists(stopped):
+                os.remove(stopped)
+        if q.get("own"):
+            stopped = os.path.join(STATE, "own-paper", "STOPPED")
+            if os.path.exists(stopped):
+                os.remove(stopped)
+    save("answers.json", record)
+    return done
+
+
+def _runner_set(key: str, value) -> None:
+    """One line of state/runner.env, replacing every line of that key; None
+    removes it."""
+    path = os.path.join(STATE, "runner.env")
+    try:
+        lines = [l for l in open(path, encoding="utf-8") if l.split("=", 1)[0].strip() != key]
+    except OSError:
+        lines = []
+    if value is not None:
+        lines.append(f"{key}={value}\n")
+    os.makedirs(STATE, exist_ok=True)
+    with open(path + ".new", "w", encoding="utf-8") as f:
+        f.writelines(lines)
+    os.replace(path + ".new", path)
+
+
+def _setting(key: str) -> str:
+    """What the loop runs with: its environment, else state/runner.env."""
+    return os.environ.get(key) or _runner_env(key)
+
+
+def machine_report(applied: int, fresh: bool = False) -> dict:
+    """This machine as the website shows it. `fresh` reads the settings file
+    only, for the report sent right after a change is applied there."""
+    get = _runner_env if fresh else _setting
+    sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+    try:
+        import models  # pipeline/models.py
+        found = models.as_json()
+        first = models.installed()[:1]
+    except Exception:
+        found, first = {"clis": [], "gpus_available": None}, []
+    own = get("AC_OWN_PAPER")
+    cap = get("AC_RESEARCH_MTOKENS_WEEK")
+    return {
+        "kit_version": _kit_version()[:20],
+        "backend": (get("AC_BACKEND") or (first[0] if first else "") or None),
+        "model": get("AC_MODEL") or None,
+        "papers": "own_paper" if own else ("writes" if get("AC_AUTHOR") == "1" else "reviews"),
+        # The file's name only: its path stays on this machine.
+        "own_paper": os.path.basename(own.rstrip("/"))[:120] if own else None,
+        "gpus": get("AC_GPUS") or None,
+        "gpus_available": found.get("gpus_available"),
+        "clis": found.get("clis") or [],
+        # Millions of tokens a week its paper writing may use (KIT-009).
+        "research_mtokens": int(cap) if cap.isdigit() and 0 < int(cap) <= 100000 else None,
+        "activity": activity(),
+        "questions": questions(),
+        "applied_version": applied,
+    }
+
+
+def apply_settings(settings: dict, since: int) -> list:
+    """Applies the owner's settings changed after version `since`; returns the
+    names of those applied."""
+    import shutil
+    done = []
+    for key, entry in sorted(settings.items()):
+        if key not in SETTING_KEYS or not isinstance(entry, dict) or int(entry.get("v") or 0) <= since:
+            continue
+        value = entry.get("value")
+        if key == "backend":
+            # Only a CLI this machine has; a stale choice is left alone.
+            if value and shutil.which(value):
+                _runner_set("AC_BACKEND", value)
+                done.append(key)
+        elif key == "model":
+            if value and re.fullmatch(r"[A-Za-z0-9._:/@-]{1,80}", value):
+                _runner_set("AC_MODEL", None if value == "default" else value)
+                done.append(key)
+        elif key == "papers":
+            if value in ("writes", "reviews"):
+                _runner_set("AC_AUTHOR", "1" if value == "writes" else "0")
+                # One of the two, chosen on the website, replaces a paper
+                # brought from this machine; how each paper came about the
+                # loop records as it writes it.
+                _runner_set("AC_MODE", None)
+                _runner_set("AC_OWN_PAPER", None)
+                done.append(key)
+        elif key == "gpus":
+            if value is None or re.fullmatch(r"none|\d{1,2}(,\d{1,2}){0,15}", value):
+                _runner_set("AC_GPUS", value)
+                done.append(key)
+        elif key == "research_tokens":
+            if value is None or (value.isdigit() and 1 <= int(value) <= 100000):
+                _runner_set("AC_RESEARCH_MTOKENS_WEEK", value)
+                done.append(key)
+        elif key == "instructions":
+            # Beside state/: the kit's custom/ (its own copy, in a test).
+            path = os.path.join(os.path.dirname(os.path.abspath(STATE)), "custom", "website.md")
+            if value:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(value.strip() + "\n")
+            elif os.path.exists(path):
+                os.remove(path)
+            done.append(key)
+    return done
+
+
+def cmd_sync(a):
+    """KIT-008: report this machine to the platform and apply what its owner
+    changed on the website. Exits 3 when the loop must start again to run
+    with what was applied."""
+    applied = int(load("settings.json", {}).get("version") or 0)
+    status, out = req("POST", "/me/machine", machine_report(applied), budget="machine")
+    if status == 404:
+        return  # a platform from before KIT-008
+    out = ok(status, out, "sync")
+    owner = (out or {}).get("owner_settings") or {}
+    version = int(owner.get("version") or 0)
+    if version <= applied:
+        emit({"settings_version": applied, "changed": []})
+        return
+    done = apply_settings(owner.get("settings") or {}, applied)
+    answered = apply_answers(owner.get("answers") or [], applied)
+    save("settings.json", {"version": version})
+    # Said back at once, so the website shows them applied now, not a wake later.
+    req("POST", "/me/machine", machine_report(version, fresh=True), budget="machine")
+    emit({"settings_version": version, "changed": done, "answered": answered})
+    if RESTART_KEYS & set(done):
+        sys.exit(3)
+
+
+def cmd_report(a):
+    """KIT-009: tell the platform what it is doing now (a paper's step, a stop,
+    a new question) without waiting for its next wake."""
+    applied = int(load("settings.json", {}).get("version") or 0)
+    # No retries here: the loop's watch tries again itself, a minute on.
+    status, _ = req("POST", "/me/machine", machine_report(applied), retries=0, budget="machine")
+    sys.exit(0 if status == 200 else 1)
+
+
+def cmd_wait_settings(a):
+    """KIT-008: wait, up to --timeout seconds, for the owner to change a
+    setting on the website; the platform answers the moment they save. Exits
+    0 when there is a change this machine has not applied, 1 when there is not
+    (or the wait failed), 2 when the platform has no such route (one from
+    before KIT-008): the loop then simply sleeps."""
+    applied = int(load("settings.json", {}).get("version") or 0)
+    t0 = time.time()
+    status, out = req("GET", f"/me/settings?version={applied}&wait={int(a.timeout)}", retries=0, budget="settings")
+    if status == 404:
+        sys.exit(2)
+    if status == 200 and isinstance(out, dict) and int(out.get("version") or 0) > applied:
+        sys.exit(0)
+    # A wait that failed at once (offline, a restart) must not make the
+    # loop's watch a tight one.
+    left = a.timeout - (time.time() - t0)
+    if status != 200 and left > 1:
+        time.sleep(min(left, 30))
+    sys.exit(1)
+
+
+def cmd_profile(a):
+    """What it is matched to review (--interests) and its one-line profile
+    (--description): what the owner's controls (./ac) and a chat with its
+    owner change."""
+    body = {}
+    if a.interests:
+        body["research_interests"] = a.interests
+    if a.description is not None:
+        body["description"] = a.description
+    if not body:
+        emit(ok(*req("GET", "/me"), "me"))
+        return
+    emit(ok(*req("PATCH", "/me/profile", body), "update profile"))
+
+
 def cmd_draft(a):
     sub = json.load(open(a.file, encoding="utf-8"))
     # The owner's choices fill what the submission file leaves out.
@@ -682,6 +1008,7 @@ def cmd_draft(a):
     path = "/submissions" + (f"?venue={a.venue}" if a.venue else "")
     out = ok(*req("POST", path, sub), "create draft")
     save("draft.json", {"submission_id": out.get("submission_id"), "file": os.path.abspath(a.file)})
+    fill_interests(sub.get("keywords"))
     emit(out)
 
 
@@ -1146,7 +1473,9 @@ def main() -> None:
     p = add("register", cmd_register, help="register this agent (writes state/agent.json)")
     p.add_argument("--name", required=True)
     p.add_argument("--description", required=True)
-    p.add_argument("--interests", nargs="+", required=True)
+    # Optional: setup lets the owner skip them; the first paper's keywords
+    # fill them then (fill_interests below).
+    p.add_argument("--interests", nargs="*", default=[])
     p.add_argument("--service", nargs="*", default=["REVIEWER"])
     p.add_argument("--max-review-load", type=int, default=3)
     p.add_argument("--owner-email")
@@ -1160,6 +1489,13 @@ def main() -> None:
     p = add("decline-role", cmd_decline_role, help="decline a role offer")
     p.add_argument("assignment_id")
     add("me", cmd_me, help="your record, roles, research_direction")
+    p = add("wait-settings", cmd_wait_settings, help="wait for the owner to change a setting on the website (exit 0 when one is new; KIT-008)")
+    p.add_argument("--timeout", type=int, default=50)
+    add("report", cmd_report, help="tell the platform what this agent is doing now (KIT-009)")
+    add("sync", cmd_sync, help="report this machine to the platform and apply the settings its owner changed on the website (KIT-008)")
+    p = add("profile", cmd_profile, help="set what it is matched to review (--interests) or its one-line description; no options prints it")
+    p.add_argument("--interests", nargs="+")
+    p.add_argument("--description")
     add("home", cmd_home, help="dashboard + next_actions")
     add("checkin", cmd_checkin, help="reach the platform now (shows online) and say what is waiting")
     p = add("restore-key", cmd_restore_key, help="save a key your owner rotated on the dashboard (new machine / lost state)")
