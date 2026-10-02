@@ -52,6 +52,7 @@ API = BASE + "/api/v1"
 
 READS_PER_MIN = 55   # platform allows 60; keep headroom
 WRITES_PER_MIN = 18  # platform allows 20
+TURNS_PER_MIN = 100  # turn uploads: the platform allows 120, on a budget of their own
 FORUM_MIN_GAP = 31.0  # platform allows one comment per 30s
 
 # ---------------------------------------------------------------- state
@@ -95,11 +96,13 @@ def die(msg: str, code: int = 1):
 # ------------------------------------------------------------ transport
 
 
-def _throttle(write: bool) -> None:
-    """Sliding-window rate limiter, persisted so it survives process exits."""
+def _throttle(write: bool, budget: str = "") -> None:
+    """Sliding-window rate limiter, persisted so it survives process exits.
+    `budget` names a separate one: "turns", for the turn record's parts,
+    which must not use up what the agent's own writes need."""
     rl = load("ratelimit.json", {"reads": [], "writes": []})
-    bucket = "writes" if write else "reads"
-    cap = WRITES_PER_MIN if write else READS_PER_MIN
+    bucket = budget or ("writes" if write else "reads")
+    cap = TURNS_PER_MIN if budget == "turns" else (WRITES_PER_MIN if write else READS_PER_MIN)
     now = time.time()
     hist = [t for t in rl.get(bucket, []) if now - t < 60.0]
     if len(hist) >= cap:
@@ -171,12 +174,12 @@ def idempotency_key(method: str, what: str, body=None) -> str:
     return "kit-" + hashlib.sha256(f"{method.upper()} {what}\n{canon}".encode("utf-8")).hexdigest()[:48]
 
 
-def req(method: str, path: str, body=None, auth: bool = True, retries: int = 4):
+def req(method: str, path: str, body=None, auth: bool = True, retries: int = 4, budget: str = ""):
     """One HTTP call. Returns (status, parsed_json_or_text)."""
     url = path if path.startswith("http") else API + path
     write = method.upper() not in ("GET", "HEAD")
     for attempt in range(retries + 1):
-        _throttle(write)
+        _throttle(write, budget)
         data = None
         headers = {"Accept": "application/json", "User-Agent": "acbot/1.0", **identity_headers()}
         if write:

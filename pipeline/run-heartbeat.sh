@@ -27,7 +27,8 @@
 #      AC_SEED_PAPER (optional: an arXiv id the pipeline takes as its inspiration),
 #      AC_DIRECTION (its research direction; default your owner's, from the platform).
 #      AC_OWN_PAPER (a paper the owner wrote: its file or folder, submitted for them
-#      in the next SUBMISSION window, ahead of AC_AUTHOR).
+#      in the next SUBMISSION window, ahead of AC_AUTHOR),
+#      AC_LOG_DAYS (days of state/logs/heartbeat-*.log kept; default 30).
 #
 # Settings can also live in state/runner.env, one KEY=value per line, which
 # setup writes (the owner's answer about writing papers, the platform's
@@ -313,60 +314,19 @@ wake() {
 # upload_turn <backend> <model> <prompt> <mode> <output file> <exit> <started> <seconds>
 #
 # Fire and forget. An upload that fails must never cost the agent its work, so
-# this is best-effort and its own errors are swallowed.
+# this is best-effort and its own errors are swallowed. The whole turn goes, in
+# parts when it is long, and what cannot go now waits for the next upload
+# (pipeline/turn_upload.py). The prompt travels in a file: an environment
+# variable is capped (about 1 MB on macOS), and a research step's prompts can
+# run past that, which used to lose the record without a word.
 upload_turn() {
-  AC_TURN_BACKEND="$1" AC_TURN_MODEL="$2" AC_TURN_PROMPT="$3" AC_TURN_MODE="$4" \
+  local pf
+  pf=$(mktemp 2>/dev/null) || return 0
+  printf '%s' "$3" > "$pf"
+  AC_TURN_BACKEND="$1" AC_TURN_MODEL="$2" AC_TURN_PROMPT_FILE="$pf" AC_TURN_MODE="$4" \
   AC_TURN_FILE="$5" AC_TURN_EXIT="$6" AC_TURN_START="$7" AC_TURN_MS="$(( $8 * 1000 ))" \
-  AC_TURN_PHASE="${PHASE:-}" python3 - <<'UPLOAD' >>"$LOG" 2>&1 || true
-import json, os, sys
-sys.path.insert(0, os.path.join(os.getcwd(), "submission", "scripts"))
-import re
-# The platform refuses a turn whose text holds a control character other than
-# tab, newline and carriage return (src/lib/api.ts, CONTROL_CHARS) -- with a
-# 400 for the whole record. A research step's output is full of terminal
-# colour codes (ESC, 0x1b), so every pipeline turn was being refused and the
-# record of how each paper was made was lost. Colour sequences go whole, then
-# anything else the platform would refuse.
-ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[@-_]")
-CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-
-
-def clean(text):
-    return CONTROL.sub("", ANSI.sub("", text))
-
-
-def clip(text, cap=400000):
-    # The platform takes 400k characters. A research step can produce more, and
-    # its end -- the result, the failure -- matters as much as its start, so a
-    # long turn keeps both ends rather than only the first 400k.
-    if len(text) <= cap:
-        return text
-    half = cap // 2 - 100
-    return text[:half] + f"\n\n[... {len(text) - 2 * half} characters omitted ...]\n\n" + text[-half:]
-
-try:
-    import client  # the same module the rest of the loop speaks through
-    phase = {}
-    try:
-        phase = json.loads(os.environ.get("AC_TURN_PHASE") or "{}")
-    except Exception:
-        pass
-    body = {
-        "backend": os.environ["AC_TURN_BACKEND"],
-        "model": os.environ.get("AC_TURN_MODEL") or None,
-        "prompt": clip(clean(os.environ.get("AC_TURN_PROMPT", ""))),
-        "output": clip(clean(open(os.environ["AC_TURN_FILE"], errors="replace").read())),
-        "exit_code": int(os.environ.get("AC_TURN_EXIT") or 0),
-        "duration_ms": int(os.environ.get("AC_TURN_MS") or 0),
-        "started_at": os.environ["AC_TURN_START"],
-        "cycle": phase.get("cycle"),
-        "context": {"phase": phase.get("phase"), "mode": os.environ.get("AC_TURN_MODE")},
-    }
-    status, _ = client.req("POST", "/me/turns", body)
-    print(f"  turn uploaded: {status}")
-except Exception as e:
-    print(f"  turn upload skipped: {e}")
-UPLOAD
+  AC_TURN_PHASE="${PHASE:-}" python3 "${ROOT:-$PWD}/pipeline/turn_upload.py" >>"$LOG" 2>&1 || true
+  rm -f "$pf"
 }
 
 # Hours until the cycle's submission window closes, from the platform's phase
@@ -1011,6 +971,11 @@ trap 'stop_pipelines; drop_pid; exit 143' TERM INT HUP
 PHASE=""
 while true; do
   # Once per published cycle: what the reviews said, into the strategy (A20).
+  # (First, the day's log: a log holds every turn whole now, render_stream.py
+  # clips nothing, so a loop that runs for weeks starts a file each day and
+  # keeps AC_LOG_DAYS of them, 30 by default.)
+  LOG=state/logs/heartbeat-$(date +%Y%m%d).log
+  find state/logs -name 'heartbeat-*.log' -mtime +"${AC_LOG_DAYS:-30}" -delete 2>/dev/null || true
   reflect_once
   # Gate 1: no open cycle -> spend zero tokens.
   if ! PHASE=$(submission/scripts/client.py phase 2>/dev/null); then

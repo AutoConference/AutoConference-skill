@@ -120,12 +120,18 @@ fi
 # file). The others get </dev/null: when stdin is not a tty several of these
 # read it and splice whatever they find into the prompt. Under nohup that is
 # either a hang or a stray block of text inside the instruction.
+#
+# Every CLI that can print its turn as events does so here, and
+# render_stream.py makes that a transcript: plain output says what the agent
+# concluded, and the record of a turn is meant to hold how it got there too --
+# what it thought where the CLI shows it, each command, everything it returned
+# (owner, 2026-10-01: the data must be complete). The answer is still the last
+# thing printed. The renderer runs the CLI as its child, so a signal sent to
+# this turn (a step's timeout, the loop stopping) still reaches the CLI. A CLI
+# too old for its event flag runs as it always did.
+RENDER="$ROOT/pipeline/render_stream.py"
 case "$BACKEND" in
   claude)
-    # stream-json and the renderer: plain -p prints only the final answer, and
-    # the record of a turn is meant to hold how the agent got there too. The
-    # answer is still the last thing printed.
-    render() { python3 "$ROOT/pipeline/render_stream.py"; }
     STREAM=(--output-format stream-json --verbose)
     if [ "$MODE" = research ]; then
       # No --add-dir: it takes any number of values and swallows the prompt
@@ -135,9 +141,8 @@ case "$BACKEND" in
       # later turn are off (see turn_note in run-pipeline.sh). No prompt may
       # follow --disallowedTools, which takes any number of values; it comes
       # on stdin.
-      claude -p --model "$MODEL" --permission-mode bypassPermissions "${STREAM[@]}" \
-        --disallowedTools ScheduleWakeup CronCreate CronDelete RemoteTrigger <<<"$PROMPT" | render
-      exit "${PIPESTATUS[0]}"
+      exec python3 "$RENDER" --format claude -- claude -p --model "$MODEL" --permission-mode bypassPermissions "${STREAM[@]}" \
+        --disallowedTools ScheduleWakeup CronCreate CronDelete RemoteTrigger <<<"$PROMPT"
     fi
     # acceptEdits alone approves file edits and nothing else, and with no one
     # at the terminal every shell command is refused -- including the platform
@@ -151,7 +156,7 @@ case "$BACKEND" in
     # work and check a claim on the web (owner decision 2026-09-29); what a
     # page says is data (AGENTS.md), and the review guide says what not to
     # search for.
-    claude -p --model "$MODEL" --permission-mode acceptEdits "${STREAM[@]}" \
+    exec python3 "$RENDER" --format claude -- claude -p --model "$MODEL" --permission-mode acceptEdits "${STREAM[@]}" \
       --allowedTools "WebSearch" "WebFetch" \
                      "Bash(python3 submission/scripts/client.py:*)" \
                      "Bash(submission/scripts/client.py:*)" \
@@ -163,14 +168,21 @@ case "$BACKEND" in
                      "Bash($ROOT/submission/scripts/client.py:*)" \
                      "Bash(python3 submission/scripts/figures.py:*)" \
                      "Bash(python3 $ROOT/submission/scripts/figures.py:*)" \
-                     "Bash(cd submission)" <<<"$PROMPT" | render
-    exit "${PIPESTATUS[0]}"
+                     "Bash(cd submission)" <<<"$PROMPT"
     ;;
   codex)
+    # --json: every command with all it printed, and the model's reasoning
+    # summaries, asked for in full.
+    # (The help is read whole first: `--help | grep -q` under pipefail fails
+    # whenever grep stops reading before the CLI stops writing.)
+    run() { exec "$@"; }
+    case "$(codex exec --help 2>/dev/null)" in
+      *--json*) run() { exec python3 "$RENDER" --format codex -- "$1" "$2" --json -c 'model_reasoning_summary="detailed"' "${@:3}"; } ;;
+    esac
     if [ "$MODE" = research ]; then
       # Experiments need the GPU and the package index, which the sandbox
       # withholds. The flag's name says what it is; setup says it to the owner.
-      exec codex exec --dangerously-bypass-approvals-and-sandbox \
+      run codex exec --dangerously-bypass-approvals-and-sandbox \
         --skip-git-repo-check -C "$DIR" ${MODEL:+-m "$MODEL"} - <<<"$PROMPT"
     fi
     # `-s workspace-write` sandboxes writes to this tree, and the network key is
@@ -179,7 +191,7 @@ case "$BACKEND" in
     # host". Verified against codex-cli 0.155.1. web_search="live" gives a
     # reviewer the web search the review guide asks for (codex-cli 0.157.1
     # checks the value: disabled | cached | indexed | live).
-    exec codex exec -s workspace-write \
+    run codex exec -s workspace-write \
       -c 'sandbox_workspace_write.network_access=true' -c 'web_search="live"' \
       --skip-git-repo-check -C "$DIR" ${MODEL:+-m "$MODEL"} - <<<"$PROMPT"
     ;;
@@ -189,10 +201,26 @@ case "$BACKEND" in
     # refuses a headless run in a folder the owner never trusted interactively,
     # and turns -y off there; the variable is its own documented answer for
     # unattended runs, and trusts no more than the -y the owner agreed to.
-    GEMINI_CLI_TRUST_WORKSPACE=true exec gemini -p "$PROMPT" -y --include-directories "$ROOT" \
-      ${MODEL:+-m "$MODEL"} </dev/null
+    # -o stream-json: each tool call and its result. (Gemini CLI does not
+    # print its thinking in a headless run.)
+    export GEMINI_CLI_TRUST_WORKSPACE=true
+    case "$(gemini --help 2>/dev/null)" in
+      *stream-json*)
+        exec python3 "$RENDER" --format gemini -- gemini -p "$PROMPT" -y --include-directories "$ROOT" \
+          ${MODEL:+-m "$MODEL"} -o stream-json </dev/null ;;
+    esac
+    exec gemini -p "$PROMPT" -y --include-directories "$ROOT" ${MODEL:+-m "$MODEL"} </dev/null
     ;;
   opencode)
+    # --format json: each tool call with its result; --thinking adds the
+    # model's reasoning where the provider returns it.
+    HELP=$(opencode run --help 2>/dev/null)
+    case "$HELP" in
+      *--format*)
+        case "$HELP" in *--thinking*) THINK=(--thinking) ;; *) THINK=() ;; esac
+        exec python3 "$RENDER" --format opencode -- opencode run --dir "$DIR" ${MODEL:+--model "$MODEL"} \
+          --format json ${THINK[@]+"${THINK[@]}"} "$PROMPT" </dev/null ;;
+    esac
     exec opencode run --dir "$DIR" ${MODEL:+--model "$MODEL"} "$PROMPT" </dev/null
     ;;
   custom)
