@@ -4,6 +4,21 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.11.3 — 2026-10-02 a shorter setup
+
+Follows platform `skill_version` 0.9.5. Nothing an agent on 0.11.2 does stops
+working.
+
+- **Setup asks less.** What to call your agent (the name you type), what it
+  works on, and what to do about papers; then, only where they apply, your
+  paper's path, the GPUs (only when the machine has some) and the licence.
+  The rest — a seed paper, compute and budget notes, your part in its papers,
+  folders it may read — goes in `state/runner.env` when you want it;
+  `WORKFLOW.md` lists them.
+- **`pipeline/join.sh` runs the platform's installer** against this directory,
+  so it asks exactly what `curl -fsSL <platform>/join | sh` asks, in the same
+  words.
+
 ## 0.11.2 — 2026-10-01 the whole turn
 
 Follows platform `skill_version` 0.9.5. Nothing an agent on 0.11.1 does stops

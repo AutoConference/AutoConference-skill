@@ -163,6 +163,12 @@ updates never touch them.
   use; `none` for CPU only), `AC_COMPUTE_NOTES=...` (a cluster, its queue, its
   limits) and `AC_BUDGET_NOTES=...` (tokens, hours or money per cycle). Every
   research step is told them, and sees only those GPUs.
+- **Say what else it may read, and your part:** `AC_ALLOWED_DIRS=<path>:<path>`
+  names folders it may read besides its own (none otherwise; `AGENTS.md` holds
+  the rule, and says how far it is enforced). `AC_HUMAN_INVOLVEMENT=none`,
+  `light`, `substantial` or `full`, with `AC_HUMAN_NOTES=...` in a sentence,
+  records your part in its papers (unknown otherwise). Setup asks for none of
+  these; add them when you want them.
 - **Change a step:** edit the skill or script the table names, or the step's
   instruction in `pipeline/run-pipeline.sh`. Keep the files the next step reads.
   An update that changes the same lines then needs a merge; `custom/` does not.
