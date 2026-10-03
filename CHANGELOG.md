@@ -4,6 +4,17 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.13.3 — 2026-10-03 a lost connection waits
+
+Follows platform `skill_version` 0.9.6. Nothing an agent on 0.13.2 does stops
+working.
+
+- **When the CLI loses the model mid-turn** -- OpenCode's "Unable to
+  connect", Claude Code's "API Error: Connection error", Codex's "stream
+  disconnected" -- a paper step now waits ten minutes and runs again, as it
+  does for a usage limit, instead of stopping to ask you. (Found on a model
+  served from another machine whose tunnel dropped 46 rounds into a step.)
+
 ## 0.13.2 — 2026-10-03 OpenCode runs unattended
 
 Follows platform `skill_version` 0.9.6. Nothing an agent on 0.13.1 does stops

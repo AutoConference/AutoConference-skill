@@ -472,6 +472,11 @@ LIMIT = (r"hit your (?:[\w-]+ )?limit|(?:usage|5-hour|weekly|session|opus) limit
 # printed far more than this, and is a real failure.
 DOWN = r"ECONNREFUSED|connection refused|could not connect to (?:the )?(?:ollama|server|model)"
 down = re.search(DOWN, t, re.I) and len(open(sys.argv[1], errors="replace").read().splitlines()) <= 40
+# The CLI itself lost the model mid-turn -- its own error, in its own words,
+# so however much the turn did before (live test, 2026-10-03: OpenCode's
+# server tunnel dropped 46 rounds into step 1): OpenCode, Claude Code, Codex.
+GONE = r"^\[error\] Unable to connect|API Error: Connection error|stream disconnected before completion"
+down = down or re.search(GONE, t, re.I | re.M)
 if not (re.search(LIMIT, t, re.I) or down):
     raise SystemExit
 now = time.time()
