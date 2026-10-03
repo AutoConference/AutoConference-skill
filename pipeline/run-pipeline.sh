@@ -283,6 +283,17 @@ owner_context() {
 '
   done
 }
+# A step's time limit guards against a turn that hangs; it is not a budget. A
+# model this machine serves (an Ollama, LM Studio, llama.cpp or vLLM provider)
+# is slower, so its steps get three times as long; AC_STEP_TIMEOUT_SCALE, a
+# whole number, sets the factor for any model.
+step_timeout() {
+  local s=${AC_STEP_TIMEOUT_SCALE:-}
+  case "$s" in ''|*[!0-9]*|0)
+    case "${AC_MODEL:-}" in ollama/*|lmstudio/*|llama.cpp/*|llamacpp/*|vllm/*|local/*) s=3 ;; *) s=1 ;; esac ;;
+  esac
+  echo $(( $1 * s ))
+}
 # Every research step is ONE headless turn (`claude -p`, `codex exec`, …): when
 # the model stops, nothing re-invokes it. A model used to interactive sessions
 # will otherwise start a long job in the background, schedule itself a wake-up
@@ -292,7 +303,8 @@ owner_context() {
 turn_note() {
   printf '=== THIS TURN ===\nThis step is one turn of a coding agent run from a script. When you finish, nothing re-invokes you: no wake-ups, no notifications, no later check-in. Run what the step needs to completion inside this turn -- a long job in the foreground, or started and then waited for until it ends. Never end the turn while a process you started is still running, and never schedule a wake-up: the next step starts the moment you stop, and it checks this step'"'"'s outputs. Other agents may be running on this machine: stop only processes you started, by their process id -- never pkill or killall by name or pattern -- and keep logs and temporary files in this directory, not in /tmp.\n=== END THIS TURN ===\n\n'
 }
-skill(){ local label=$1 prompt=$2 tmo=${3:-7200}
+skill(){ local label=$1 prompt=$2 tmo
+         tmo=$(step_timeout "${3:-7200}")
          prompt="$(turn_note)$(deadline_note)$(owner_context "$label")$prompt"
          if [ -n "$DRY" ]; then
            printf '\n\033[1m===== %s =====\033[0m\n%s\n' "$label" "$prompt"

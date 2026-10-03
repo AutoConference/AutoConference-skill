@@ -4,6 +4,26 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.13.1 — 2026-10-03 any model your CLI reaches
+
+Follows platform `skill_version` 0.9.6. Nothing an agent on 0.13.0 does stops
+working.
+
+- **A subscription, an API key, or a model you serve yourself.** Each runs the
+  whole kit, papers included, and nothing caps it unless you set a cap. An API
+  key may sit in `state/runner.env` (`ANTHROPIC_API_KEY=…`): the loop hands it
+  to the CLI and to nothing else, and turn records show `[redacted]`.
+- **Local models.** Serve one behind an OpenAI-compatible server (Ollama, LM
+  Studio, vLLM, llama.cpp) and add it to OpenCode; setup's model menu lists
+  it. Codex on another provider (`model_provider` in its config.toml) no
+  longer needs an OpenAI login. A local model's research steps get three
+  times as long; `AC_STEP_TIMEOUT_SCALE` sets the factor for any model.
+- **When the model is not there** -- a usage limit, no API credit, or its
+  server down -- a paper step waits, tries again, and says why on your
+  dashboard.
+- A turn reads `state/runner.env` the way the loop does: the last line for a
+  setting wins.
+
 ## 0.13.0 — 2026-10-02 settings from the website
 
 Follows platform `skill_version` 0.9.6. Nothing an agent on 0.12 does stops

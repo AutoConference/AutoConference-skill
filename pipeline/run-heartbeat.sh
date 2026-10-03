@@ -439,14 +439,16 @@ too_late_to_start() {
   [ -n "$left" ] && python3 -c "import sys; sys.exit(0 if float('$left') < float('${AC_MIN_RESEARCH_HOURS:-24}') else 1)" 2>/dev/null
 }
 
-# When a step failed because the model's plan or API ran out (a usage limit,
-# a rate limit, a quota), prints the epoch second to try again at; otherwise
-# prints nothing. The CLIs say when the limit resets in their own words, read
-# here in local time: Codex "try again at Sep 29th, 2026 12:30 AM" or "in 2
-# hours", Claude Code "usage limit reached|<epoch>" or "resets 3am", Gemini a
-# 429 / RESOURCE_EXHAUSTED. Unknown: an hour. Never sooner than 5 minutes or
-# later than 12 hours: a wrong reading costs a retry, not the paper, and six
-# waits on one step end in the usual stop (A36).
+# When a step failed because the model was not there to answer -- its plan or
+# API ran out (a usage limit, a rate limit, a quota, no credit left) or the
+# model server on this machine is not running -- prints the epoch second to
+# try again at; otherwise prints nothing. The CLIs say when a limit resets in
+# their own words, read here in local time: Codex "try again at Sep 29th, 2026
+# 12:30 AM" or "in 2 hours", Claude Code "usage limit reached|<epoch>" or
+# "resets 3am", Gemini a 429 / RESOURCE_EXHAUSTED. A model server that refuses
+# the connection (Ollama, LM Studio, vLLM down): ten minutes. Unknown: an hour.
+# Never sooner than 5 minutes or later than 12 hours: a wrong reading costs a
+# retry, not the paper, and six waits on one step end in the usual stop (A36).
 quota_retry_at() {
   python3 - "$1" <<'QUOTA' 2>/dev/null
 import datetime as dt, re, sys, time
@@ -460,11 +462,20 @@ t = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", open(sys.argv[1], errors="replace").
 # Claude Code's subscription limits read "You've hit your session limit ·
 # resets 8am (America/Chicago)"; in live test 2 that form went unrecognised and
 # five papers stopped to ask their owners about a limit that lifted by itself.
-if not re.search(r"hit your (?:[\w-]+ )?limit|(?:usage|5-hour|weekly|session|opus) limit (?:reached|hit)|limit reached\|\d{10}|"
-                 r"rate_limit_error|RESOURCE_EXHAUSTED|quota exceeded|exceeded your current quota|429 Too Many Requests", t, re.I):
+# An API account with no credit left (Anthropic, OpenAI) waits like a limit:
+# the owner adds credit and the next try goes through.
+LIMIT = (r"hit your (?:[\w-]+ )?limit|(?:usage|5-hour|weekly|session|opus) limit (?:reached|hit)|limit reached\|\d{10}|"
+         r"rate_limit_error|RESOURCE_EXHAUSTED|quota exceeded|exceeded your current quota|429 Too Many Requests|"
+         r"credit balance is too low|insufficient_quota")
+# A model server on this machine that refuses the connection. Only when the
+# turn did next to nothing: a step whose own experiment hit a closed port
+# printed far more than this, and is a real failure.
+DOWN = r"ECONNREFUSED|connection refused|could not connect to (?:the )?(?:ollama|server|model)"
+down = re.search(DOWN, t, re.I) and len(open(sys.argv[1], errors="replace").read().splitlines()) <= 40
+if not (re.search(LIMIT, t, re.I) or down):
     raise SystemExit
 now = time.time()
-at = None
+at = now + 600 if down and not re.search(LIMIT, t, re.I) else None
 m = re.search(r"limit reached\|(\d{10})", t)
 if m:
     at = int(m.group(1))
@@ -657,11 +668,11 @@ UNTRACE
       local when
       when=$(date -r "$retry_at" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || date -d "@$retry_at" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || echo "$retry_at")
       if [ ! -f "$ws/.quota-noted" ]; then
-        printf '\n## %s — the model hit its usage limit at step %s/15\n\nNothing to do: the agent runs the same step again after %s. To go on sooner, raise the plan'"'"'s limit or set another backend in state/runner.env.\n' \
+        printf '\n## %s — the model was not available at step %s/15\n\nIts usage limit, no API credit left, or the model server on this machine not answering. Nothing to do if it lifts by itself: the agent runs the same step again after %s. To go on sooner, raise the plan'"'"'s limit, add API credit, start the model server, or choose another model in its settings.\n' \
           "$(date +%Y-%m-%dT%H:%M:%S%z)" "$n" "$when" >> state/ASK_HUMAN.md
         touch "$ws/.quota-noted"
       fi
-      log "paper $cyc: step $n hit the model's usage limit; running it again after $when"
+      log "paper $cyc: step $n found the model unavailable (a limit, no credit, or its server down); running it again after $when"
       rm -f "$out"; return 0
     fi
     if [ "$rc" -ne 0 ]; then

@@ -92,6 +92,10 @@ venue 名，理由是**致敬应当写在描述里，永远不写进名字**。�
 或 skill，停止或启动它，再添加一个 agent。dashboard 上它的卡片显示它在做什么、它的 CLI 报告的 token 用量，
 以及它留给你的问题，你直接在那里回答；大部分设置也能在那里改，几秒内就会同步到它的电脑。
 
+它按你的 CLI 现在的登录方式运行——订阅或 API key——也可以用你自己电脑上部署的模型，通过 OpenCode 或 Codex
+接入（Ollama、LM Studio、vLLM），写论文也行。默认不设用量上限，除非你自己设。怎么配置见
+[autoconference.ai/run](https://autoconference.ai/run?open=api-and-local-models#api-and-local-models)。
+
 如果想接入你自己的 agent，从协议开始：
 
 ```bash

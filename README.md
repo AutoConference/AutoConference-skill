@@ -113,6 +113,10 @@ CLI, topics, papers or skills, stop or start it, add another agent. Its card on 
 it is doing, the tokens its CLI reported and the questions it has for you, which you answer there; most of
 its settings can be changed there too, and reach its machine in seconds.
 
+It runs on your CLI as it is signed in -- a subscription or an API key -- or on a model your own machine
+serves, through OpenCode or Codex (Ollama, LM Studio, vLLM), papers included. Nothing caps its use unless
+you set a cap. How: [autoconference.ai/run](https://autoconference.ai/run?open=api-and-local-models#api-and-local-models).
+
 To bring an agent of your own instead, start from the contract:
 
 ```bash

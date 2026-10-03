@@ -48,11 +48,17 @@ while [ $# -gt 0 ]; do
 done
 case "$MODE" in duties|research) ;; *) echo "agent-turn: unknown --mode $MODE" >&2; exit 2 ;; esac
 
+# state/runner.env as the loop reads it (load_settings in run-heartbeat.sh) and
+# ./ac shows it: the last line for a setting wins, and a value already set --
+# by the environment, or this script's own -- wins over the file. An API key
+# may live there too (ANTHROPIC_API_KEY=...): it reaches the CLI and nothing else.
 if [ -f "$ROOT/state/runner.env" ]; then
-  while IFS='=' read -r k v; do
+  GIVEN=" $(compgen -v | tr '\n' ' ') "
+  while IFS='=' read -r k v || [ -n "$k" ]; do
     case "$k" in ''|\#*) continue ;; esac
     case "$k" in *[!A-Za-z0-9_]*) continue ;; esac
-    [ -z "${!k+x}" ] && export "$k=$v"
+    case "$GIVEN" in *" $k "*) continue ;; esac
+    export "$k=$v"
   done < "$ROOT/state/runner.env"
 fi
 
@@ -66,8 +72,9 @@ elif [ -z "$BACKEND" ]; then
 fi
 if [ -z "$BACKEND" ]; then
   cat >&2 <<'NOCLI'
-No agent CLI found. Install one and sign in. A subscription is enough — none of
-these needs you to buy API credits:
+No agent CLI found. Install one and sign it in: a subscription or an API key
+works the same, with no cap unless you set one. A model this machine serves
+(Ollama, LM Studio, vLLM) runs through opencode or codex.
 
   Claude Code  https://claude.com/claude-code   then: claude login
   Codex        npm i -g @openai/codex           then: codex login
@@ -86,11 +93,21 @@ fi
 MODEL=${AC_MODEL:-}
 [ -z "$MODEL" ] && [ "$BACKEND" = claude ] && MODEL=claude-sonnet-5
 
+# Codex pointed at another provider -- a model this machine serves (Ollama, LM
+# Studio) or any OpenAI-compatible endpoint, named by model_provider in its
+# config.toml -- answers without an OpenAI login.
+codex_other_provider() {
+  local cfg="${CODEX_HOME:-$HOME/.codex}/config.toml"
+  [ -f "$cfg" ] || return 1
+  grep -Eq '^[[:space:]]*model_provider[[:space:]]*=[[:space:]]*"[^"]+"' "$cfg" &&
+    ! grep -Eq '^[[:space:]]*model_provider[[:space:]]*=[[:space:]]*"openai"' "$cfg"
+}
+
 if [ -n "$WHICH" ]; then
   # Fail here rather than thirty minutes later on the first real task. Only
   # codex can be asked cheaply and offline; the others fail loudly on their
   # first turn, which beats a probe that spends a turn to find out.
-  if [ "$BACKEND" = codex ] && ! codex login status >/dev/null 2>&1; then
+  if [ "$BACKEND" = codex ] && ! codex login status >/dev/null 2>&1 && ! codex_other_provider; then
     echo "codex is not logged in. Run 'codex login' (ChatGPT subscription)" >&2
     echo "or: printenv OPENAI_API_KEY | codex login --with-api-key" >&2
     exit 1
