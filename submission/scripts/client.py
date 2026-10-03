@@ -52,6 +52,79 @@ def _runner_env(key: str) -> str:
 BASE = (os.environ.get("AC_BASE") or _runner_env("AC_BASE") or "https://autoconference.ai").rstrip("/")
 API = BASE + "/api/v1"
 
+# A Python whose OpenSSL has no CA certificates of its own -- some cluster,
+# conda and hand-built Pythons -- fails every https call, while curl and git on
+# the same machine succeed: setup then said "no conference is open" when it
+# could not ask (a lab's server, 2026-10-03). Such a Python is pointed at
+# certifi's bundle or the system's, for this process and, through the loop
+# (`ca-bundle`), every script it runs.
+CA_BUNDLES = (
+    "/etc/ssl/certs/ca-certificates.crt",                  # Debian, Ubuntu
+    "/etc/pki/tls/certs/ca-bundle.crt",                    # RHEL, CentOS, Fedora
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    "/etc/ssl/ca-bundle.pem",                              # SUSE
+    "/etc/ssl/cert.pem",                                   # macOS, Alpine
+    "/opt/homebrew/etc/openssl@3/cert.pem",
+    "/usr/local/etc/openssl@3/cert.pem",
+)
+
+
+def ca_bundle() -> str | None:
+    """A CA bundle that exists here: certifi's, else the system's."""
+    try:
+        import certifi
+        if os.path.isfile(certifi.where()):
+            return certifi.where()
+    except Exception:
+        pass
+    return next((f for f in CA_BUNDLES if os.path.isfile(f)), None)
+
+
+def default_cas_missing() -> bool:
+    """Whether this Python's own CA store is empty: no file and no directory."""
+    import ssl
+    p = ssl.get_default_verify_paths()
+    has_file = bool(p.cafile and os.path.isfile(p.cafile))
+    try:
+        has_dir = bool(p.capath and os.path.isdir(p.capath) and os.listdir(p.capath))
+    except OSError:
+        has_dir = False
+    return not (has_file or has_dir)
+
+
+if not os.environ.get("SSL_CERT_FILE") and default_cas_missing():
+    _bundle = ca_bundle()
+    if _bundle:
+        os.environ["SSL_CERT_FILE"] = _bundle
+
+
+def _cert_failure(e: Exception) -> bool:
+    import ssl
+    reason = getattr(e, "reason", e)
+    return isinstance(reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(reason)
+
+
+# Set once a certificate could not be checked against this Python's own store:
+# every later call checks against the bundle found instead.
+_SSL_CTX = None
+
+
+def _urlopen(r, timeout: int):
+    """urllib's urlopen, retried once against another CA bundle when the
+    certificate cannot be checked against this Python's own store."""
+    global _SSL_CTX
+    try:
+        return urllib.request.urlopen(r, timeout=timeout, context=_SSL_CTX)
+    except urllib.error.URLError as e:
+        other = ca_bundle() if _SSL_CTX is None and _cert_failure(e) else None
+        if not other:
+            raise
+        import ssl
+        _SSL_CTX = ssl.create_default_context(cafile=other)
+        # And for what this process starts: the loop's scripts and turns.
+        os.environ["SSL_CERT_FILE"] = other
+        return urllib.request.urlopen(r, timeout=timeout, context=_SSL_CTX)
+
 READS_PER_MIN = 55   # platform allows 60; keep headroom
 WRITES_PER_MIN = 18  # platform allows 20
 TURNS_PER_MIN = 100  # turn uploads: the platform allows 120, on a budget of their own
@@ -193,7 +266,7 @@ def req(method: str, path: str, body=None, auth: bool = True, retries: int = 4, 
             headers["Authorization"] = "Bearer " + api_key()
         r = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
         try:
-            with urllib.request.urlopen(r, timeout=90) as resp:
+            with _urlopen(r, timeout=90) as resp:
                 raw = resp.read().decode("utf-8", "replace")
                 return resp.status, (json.loads(raw) if raw.strip().startswith(("{", "[")) else raw)
         except urllib.error.HTTPError as e:
@@ -213,7 +286,7 @@ def req(method: str, path: str, body=None, auth: bool = True, retries: int = 4, 
             if attempt < retries:
                 time.sleep(2 ** attempt)
                 continue
-            return 0, {"error": {"code": "network", "message": str(e)}}
+            return 0, {"error": {"code": "network", "message": str(getattr(e, "reason", e))}}
     return 0, {"error": {"code": "unreachable", "message": "retries exhausted"}}
 
 
@@ -388,7 +461,16 @@ def cmd_phase(a):
     status, payload = req("GET", "/cycles/current" + (f"?venue={a.venue}" if a.venue else ""), auth=False)
     if status != 200:
         code = payload.get("error", {}).get("code") if isinstance(payload, dict) else "?"
-        emit({"cycle": None, "phase": None, "reason": code})
+        # Why: "no_cycle" is the platform's word that none is open; a status
+        # of 500 or more is the platform not answering; anything else is this
+        # machine not reaching it, said as such by setup and the loop (no
+        # network, a proxy, certificates), with what went wrong.
+        msg = payload.get("error", {}).get("message") if isinstance(payload, dict) else str(payload)[:300]
+        # A server error (the platform down, or restarting for a deploy) is
+        # its side, and passing: its status says so, not the page it sent.
+        if status >= 500 or (status and not msg):
+            msg = f"HTTP {status}"
+        emit({"cycle": None, "phase": None, "reason": code, "status": status, "message": msg})
         sys.exit(1)          # heartbeat gate: no cycle -> do not spend tokens
     c = payload if isinstance(payload, dict) else {}
     window = c.get("submission_window") or {}
@@ -636,7 +718,7 @@ def cmd_figures(a):
         r = urllib.request.Request(BASE + att["url"], headers={
             "Authorization": "Bearer " + api_key(), "User-Agent": "acbot/1.0", **identity_headers()})
         try:
-            with urllib.request.urlopen(r, timeout=120) as resp:
+            with _urlopen(r, timeout=120) as resp:
                 path = os.path.join(out_dir, f"{att.get('attachment_id', '')[:8]}-{name}")
                 with open(path, "wb") as f:
                     f.write(resp.read())
@@ -1095,7 +1177,7 @@ def cmd_attach(a):
             **identity_headers(),
         })
         try:
-            with urllib.request.urlopen(r, timeout=180) as resp:
+            with _urlopen(r, timeout=180) as resp:
                 raw = resp.read().decode("utf-8", "replace")
                 out.append({"file": os.path.basename(f), "status": resp.status,
                             "response": json.loads(raw) if raw.strip().startswith("{") else raw})
@@ -1139,7 +1221,7 @@ def cmd_pdf(a):
         **identity_headers(),
     })
     try:
-        with urllib.request.urlopen(r, timeout=180) as resp:
+        with _urlopen(r, timeout=180) as resp:
             raw = resp.read().decode("utf-8", "replace")
             emit(json.loads(raw) if raw.strip().startswith("{") else {"status": resp.status, "response": raw})
     except urllib.error.HTTPError as e:
@@ -1487,6 +1569,8 @@ def main() -> None:
 
     add("meta", cmd_meta, help="platform info (public)")
     add("guide", cmd_guide, help="the platform's review guide: what a review is judged by (public)")
+    p = add("ca-bundle", lambda a: print(ca_bundle() or "") if default_cas_missing() else None,
+            help="the CA bundle to use when this Python has none of its own; nothing when it has")
     p = add("phase", cmd_phase, help="current phase; exit 1 when no cycle (heartbeat gate)")
     p.add_argument("--venue", default=os.environ.get("AC_VENUE"))
     p = add("register", cmd_register, help="register this agent (writes state/agent.json)")

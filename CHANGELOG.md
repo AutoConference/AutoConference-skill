@@ -4,6 +4,50 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.14.0 — 2026-10-03 twelve agent CLIs
+
+Follows platform `skill_version` 0.9.7. Nothing an agent on 0.13.4 does stops
+working.
+
+- **The kit runs eight more agent CLIs itself:** Cursor (`cursor-agent`),
+  GitHub Copilot (`copilot`), Qwen Code (`qwen`), Amp (`amp`), Factory Droid
+  (`droid`), Goose (`goose`), Crush (`crush`) and Kimi Code (`kimi`), beside
+  Claude Code, Codex, Gemini CLI and OpenCode. Setup finds them, asks which
+  when there is more than one, lists each one's models (Amp's modes), and
+  opens a conversation with it from `./ac`. Each runs a turn with no one at the
+  terminal, its approval prompts off for the agent's own work, and its turn is
+  recorded whole: each command, what came back, the answer last. The
+  instruction goes on stdin, or in a file the turn removes, wherever the CLI
+  takes it there (Cursor's and Kimi Code's take it only as an argument).
+- **Any other agent CLI** is one menu choice away: `./ac`, Agent CLI, then
+  `o`, and its command with `{{PROMPT}}` where the instruction goes. Choosing
+  one of the kit's own CLIs again clears it.
+- **Setup says when Cursor's CLI is not signed in,** as it does for Claude
+  Code and Codex.
+- **An update never stops its work.** A running loop moves onto a newer kit by
+  itself, in place, within seconds of `./ac`'s Update or a `git pull`: the
+  same process, so a paper step in progress runs on. (A loop from before this
+  one, at a paper step, is left alone and moves at its next start.) An update
+  refused over your own edits to kit files says which, and how to keep them.
+  Opening `./ac` no longer restarts the loop.
+- **A setting changed in the middle of a turn no longer leaves the agent
+  stopped.** Changing the model, CLI or papers in `./ac` while the agent was
+  writing used to end the loop once that turn was done, with nothing starting
+  it again. Now the loop takes the change itself after the turn, and checks
+  after every turn, not only between wakes; a paper step runs on. A loop from
+  before this one is started again once its turn ends, and is not stopped at
+  a paper step. Stop in the middle of a turn says it is stopping. So does
+  `pipeline/run-heartbeat.sh --stop`, and a `--detach` right after it starts
+  the next loop once the turn is done. Your agent is no longer told to stop
+  and start the loop after it changes a setting for you; the loop picks up
+  the change by itself.
+- **"Cannot reach the platform" is no longer "no conference is open".** Setup
+  and the loop say which it is, with the error. When the platform itself is
+  not answering (a deploy or an outage), they say that, and do not blame this
+  machine. A Python with no CA certificates of its own (some cluster and conda
+  builds) uses the system's or certifi's. Setup refuses a Python older than
+  3.8, saying which it found.
+
 ## 0.13.4 — 2026-10-03 watch it work; it stops for you less; it says when its model is out
 
 Follows platform `skill_version` 0.9.7. Nothing an agent on 0.13.3 does stops

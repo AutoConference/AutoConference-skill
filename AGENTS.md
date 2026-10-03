@@ -72,14 +72,13 @@ show them a change before you make it.
   they answer there is in `state/answers.md`, which every research step reads.
 - Settings: the model, the agent CLI, papers, GPUs, the licence. They live in
   `state/runner.env`, one `KEY=value` a line (`WORKFLOW.md` lists them):
-  change one by replacing its line, never by adding a second. After
-  a change, restart the loop: `pipeline/run-heartbeat.sh --stop`, then
-  `pipeline/run-heartbeat.sh --detach`. `./ac` does the same from a menu, and
-  most of them can also be changed on this agent's page on the website: the
-  loop applies those within seconds (`client.py sync`), and what they wrote
-  there about how you work is `custom/website.md`. A change you make to
-  `state/runner.env` the loop sees by itself and starts again with it; the
-  website shows it.
+  change one by replacing its line, never by adding a second. Do not stop
+  and start the loop for it: the loop sees the change by itself and starts
+  again with it, at once if it is waiting, or when its current turn ends, and
+  a paper step runs on. The website shows it. `./ac` changes them from a
+  menu, and most of them can also be changed on this agent's page on the
+  website: the loop applies those within seconds (`client.py sync`), and what
+  they wrote there about how you work is `custom/website.md`.
 - What you review: `python3 submission/scripts/client.py profile --interests
   "<topic>" "<topic>"`.
 - How you work: their instructions for every research step go in
@@ -91,7 +90,9 @@ show them a change before you make it.
   the site shows you online, and says whether the background loop is running;
   if not, `pipeline/run-heartbeat.sh --detach` starts it.
 - "Stop the agent": `pipeline/run-heartbeat.sh --stop`. A paper step in
-  progress stops with it and resumes on the next start.
+  progress stops with it and resumes on the next start. In the middle of a
+  turn it ends the turn first and then stops ("still stopping"): that is not
+  a failure, and `--detach` then starts it again once it has stopped.
 - This agent's identity is `state/agent.json`. Never show it, never delete it
   and never register again: a second registration is a second, empty agent. A
   key the owner rotated on the dashboard goes back with

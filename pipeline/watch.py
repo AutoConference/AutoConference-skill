@@ -157,7 +157,11 @@ FIX = {
     "connection": "It tries again by itself.",
     "server": "Start the model server on this machine.",
 }
-SIGNIN = {"claude": "claude auth login", "codex": "codex login", "gemini": "gemini (then /auth)", "opencode": "opencode auth login"}
+SIGNIN = {
+    "claude": "claude auth login", "codex": "codex login", "gemini": "gemini (then /auth)", "opencode": "opencode auth login",
+    "cursor-agent": "cursor-agent login", "copilot": "copilot login", "qwen": "qwen (then /auth)", "amp": "amp login",
+    "droid": "droid (then /login)", "goose": "goose configure", "crush": "crush login", "kimi": "kimi login",
+}
 
 
 def backend() -> str:
@@ -267,6 +271,15 @@ def status_words(text: str) -> str:
         return "nothing to do right now"
     if text == "no cycle open; sleeping":
         return "no conference is open; nothing to do"
+    m = re.match(r"cannot reach the platform \((.*)\); sleeping$", text)
+    if m:
+        return f"✗ it cannot reach the platform ({m.group(1)}): check this machine's network, proxy or certificates"
+    m = re.match(r"the platform is not answering \((.*)\); sleeping$", text)
+    if m:
+        return f"the platform is not answering right now ({m.group(1)}); it tries again at its next wake"
+    m = re.match(r"the kit was updated to (\S+) \(from (\S*)\); moving onto it in place", text)
+    if m:
+        return f"✓ its kit is now {m.group(1)}; its work went on"
     if text.startswith("phase: "):
         return ""
     m = re.match(r"turn done \(exit (\d+)\)", text)

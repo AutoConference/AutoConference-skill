@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """models.py -- the agent CLIs on this machine, and the models each offers
 its owner, read from the CLI itself rather than from a list that goes stale:
-Claude Code's three and any further model its cache says the account has,
-Codex's model cache, `opencode models` (the owner's own providers first), and
-Gemini CLI's own defaults.
+Claude Code's family and any further model its cache says the account has,
+Codex's model cache, `opencode models` (the owner's own providers first),
+Gemini CLI's own defaults, `cursor-agent models`, Droid's own list, Amp's
+modes, and the models the owner configured for Copilot, Qwen Code, Goose,
+Crush and Kimi Code.
 
   python3 pipeline/models.py <cli>    the numbered list setup and ./ac show
   python3 pipeline/models.py --json   every CLI here, for the platform (KIT-008)
@@ -21,7 +23,7 @@ import subprocess
 import sys
 
 HOME = os.path.expanduser("~")
-CLIS = ["claude", "codex", "gemini", "opencode"]
+CLIS = ["claude", "codex", "gemini", "opencode", "cursor-agent", "copilot", "qwen", "amp", "droid", "goose", "crush", "kimi"]
 # A numbered menu stays readable up to this many; past it, a model is typed by name.
 MENU_MAX = 40
 # The kit's default first (agent-turn.sh runs it when AC_MODEL is unset), then
@@ -41,6 +43,16 @@ def _load(*path):
             return json.load(f)
     except Exception:
         return None
+
+
+def _run(cmd, timeout=20):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL).stdout
+    except Exception:
+        return ""
+
+
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def options(cli):
@@ -99,7 +111,86 @@ def options(cli):
                     rows.append((names[key], what))
         except Exception:
             rows = []
-    return rows, default, yours
+    elif cli == "cursor-agent":
+        # "<id> - <name> (current, default)", one a line, for this account.
+        for line in ANSI.sub("", _run(["cursor-agent", "models"])).splitlines():
+            m = re.match(r"^([A-Za-z0-9][\w.:/\[\]=,-]*)(?: - (.*?))?(?: \(([^)]*)\))?\s*$", line.strip())
+            if not m or line.strip().startswith(("Available models", "Tip:", "No models")):
+                continue
+            rows.append((m.group(1), m.group(2) or ""))
+            if "current" in (m.group(3) or ""):
+                yours = m.group(1)
+            if "default" in (m.group(3) or "") and default is None:
+                default = m.group(1)
+        default = yours or default
+    elif cli == "copilot":
+        # Its models come from GitHub with each session; auto lets it pick.
+        rows = [("auto", "Copilot picks for each turn")]
+        mine = os.environ.get("COPILOT_MODEL") or str((_load(".copilot", "config.json") or {}).get("model") or "")
+        if mine and mine != "auto":
+            rows.insert(0, (mine, ""))
+            yours = mine
+        default = yours
+    elif cli == "qwen":
+        s = (_load(".qwen", "settings.json") or {}).get("model")
+        mine = os.environ.get("OPENAI_MODEL") or (s.get("name") if isinstance(s, dict) else s) or ""
+        if mine:
+            rows, yours, default = [(str(mine), "")], str(mine), str(mine)
+    elif cli == "amp":
+        # Amp picks the model by its mode.
+        rows = [("low", "lightest"), ("medium", ""), ("high", ""), ("ultra", "strongest")]
+    elif cli == "droid":
+        text = ANSI.sub("", _run(["droid", "exec", "--help"]))
+        section = None
+        for line in text.splitlines():
+            if re.match(r"^(Available|Custom) Models:", line):
+                section = line
+                continue
+            m = re.match(r"^  ([A-Za-z0-9][\w.:/-]*)\s{2,}(.*)$", line) if section else None
+            if not m:
+                if section and line.strip() and not line.startswith("  "):
+                    section = None
+                continue
+            name = m.group(2).strip()
+            if "(default)" in name:
+                default = m.group(1)
+            rows.append((m.group(1), name.replace("(default)", "").strip()))
+    elif cli == "goose":
+        try:
+            with open(os.path.join(HOME, ".config", "goose", "config.yaml"), encoding="utf-8") as f:
+                for line in f:
+                    m = re.match(r"^GOOSE_MODEL:\s*['\"]?([^'\"\s]+)", line)
+                    if m:
+                        yours = m.group(1)
+        except Exception:
+            pass
+        yours = os.environ.get("GOOSE_MODEL") or yours
+        if yours:
+            rows, default = [(yours, "")], yours
+    elif cli == "crush":
+        cfg = _load(".config", "crush", "crush.json") or {}
+        for pid, p in (cfg.get("providers") or {}).items():
+            for m in (p or {}).get("models") or []:
+                if isinstance(m, dict) and m.get("id"):
+                    rows.append((f"{pid}/{m['id']}", str(m.get("name") or "")))
+        large = ((cfg.get("models") or {}).get("large") or {})
+        if large.get("model"):
+            yours = f"{large.get('provider')}/{large['model']}" if large.get("provider") else large["model"]
+            if yours not in [r[0] for r in rows]:
+                rows.insert(0, (yours, ""))
+        default = yours
+    elif cli == "kimi":
+        try:
+            with open(os.path.join(HOME, ".kimi-code", "config.toml"), encoding="utf-8") as f:
+                text = f.read()
+            for m in re.finditer(r'^\[models\.(?:"([^"]+)"|([A-Za-z0-9_.-]+))\]', text, re.M):
+                rows.append((m.group(1) or m.group(2), ""))
+            m = re.search(r'^default_model\s*=\s*"([^"]+)"', text, re.M)
+            yours = m.group(1) if m else None
+        except Exception:
+            pass
+        default = yours
+    return rows[:MENU_MAX], default, yours
 
 
 def gpus_available():
@@ -148,4 +239,4 @@ if __name__ == "__main__":
     elif len(sys.argv) == 2 and sys.argv[1] in CLIS:
         numbered(sys.argv[1])
     else:
-        sys.exit("usage: models.py <claude|codex|gemini|opencode> | --json")
+        sys.exit("usage: models.py <" + "|".join(CLIS) + "> | --json")

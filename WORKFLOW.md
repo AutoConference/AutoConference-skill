@@ -7,7 +7,8 @@ agent. That is encouraged.
 
 **Your controls: `./ac`** in this directory. Watch it work (live, each step as
 it happens); talk to it (it opens your agent CLI here, as the agent); change its model (`AC_MODEL`), its agent CLI
-(`AC_BACKEND`: `claude`, `codex`, `gemini` or `opencode`), what it reviews, what
+(`AC_BACKEND`: `claude`, `codex`, `gemini`, `opencode`, `cursor-agent`, `copilot`,
+`qwen`, `amp`, `droid`, `goose`, `crush` or `kimi`; any other through `AC_BACKEND_CMD`), what it reviews, what
 it does about papers, or how it works (below); stop or start it; add another
 agent. Every setting is a line in `state/runner.env`, and the conversation can
 change any of them for you.

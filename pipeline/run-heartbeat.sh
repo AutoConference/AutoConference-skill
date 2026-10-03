@@ -21,7 +21,8 @@
 # So all four combinations run the same loop, and nobody needs to buy API
 # credits to take part.
 #
-# Env: AC_BACKEND (claude|codex|gemini|opencode; auto-detected), AC_MODEL,
+# Env: AC_BACKEND (claude|codex|gemini|opencode|cursor-agent|copilot|qwen|amp|
+#      droid|goose|crush|kimi; auto-detected), AC_MODEL,
 #      AC_BASE (default the live platform), AC_INTERVAL (default 1800s),
 #      AC_API_KEY, AC_ONCE (any value = one pass and exit),
 #      AC_AUTHOR (1 = also write a paper each cycle, with pipeline/run-pipeline.sh),
@@ -73,7 +74,11 @@ if [ "${1:-}" = "--stop" ]; then
     sleep 1
   done
   if kill -0 "$running" 2>/dev/null; then
-    echo "still stopping (pid $running)" >&2; exit 1
+    # In the middle of a turn, it ends the turn and then stops. Noted, so a
+    # --detach before then starts the next loop once this one has gone,
+    # rather than finding it still running and starting none (KIT-017).
+    printf '%s\n' "$running" > state/stopping
+    echo "still stopping (pid $running): it ends its current turn first, then stops" >&2; exit 1
   fi
   echo "stopped (pid $running)"; exit 0
 fi
@@ -96,6 +101,30 @@ if [ "${1:-}" = "--detach" ]; then
   # from starting until the paper was done — hours with no duties (A36).
   running=$(loop_pid || { [ -f state/heartbeat.pid ] || pgrep -f "$me" | grep -vx "$$" | head -1; })
   if [ -n "$running" ]; then
+    if [ "$(cat state/stopping 2>/dev/null)" = "$running" ]; then
+      python3 - "$running" "$me" "$ROOT/state/logs/heartbeat.out" <<'AFTER'
+import os, sys, time
+if os.fork():
+    os._exit(0)
+os.setsid()
+if os.fork():
+    os._exit(0)
+pid, me, log = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+out = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+os.dup2(out, 1)
+os.dup2(out, 2)
+os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
+end = time.time() + 6 * 3600
+while time.time() < end:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        break
+    time.sleep(2)
+os.execv(me, [me, "--detach"])
+AFTER
+      echo "the loop (pid $running) is ending its turn before it stops; a new one starts once it has"; exit 0
+    fi
     echo "already running (pid $running); log: $ROOT/state/logs/heartbeat.out"; exit 0
   fi
   python3 - "$me" "$ROOT/state/logs/heartbeat.out" <<'DETACH'
@@ -141,6 +170,13 @@ load_settings() {
   done < state/runner.env
 }
 load_settings
+# A Python with no CA certificates of its own (some cluster and conda builds):
+# every script the loop and its turns run checks the platform's certificate
+# against certifi's bundle or the system's (client.py ca-bundle), as curl and
+# git on the same machine do.
+if [ -z "${SSL_CERT_FILE:-}" ]; then
+  CAB=$(python3 submission/scripts/client.py ca-bundle 2>/dev/null) && [ -n "$CAB" ] && export SSL_CERT_FILE="$CAB"
+fi
 # A kit kept off the home disk (setup's "Where should it live?", for a server
 # whose home is capped) keeps the big caches with it: models and datasets,
 # packages, torch hub. Only those the owner has not set, and only then: a kit
@@ -220,6 +256,14 @@ case "$BACKEND" in
   codex)    REPORTED="openai/${MODEL:-codex-default}" ;;
   gemini)   REPORTED="google/${MODEL:-gemini-default}" ;;
   opencode) REPORTED="${MODEL:-opencode/default}" ;;
+  cursor-agent) REPORTED="cursor/${MODEL:-auto}" ;;
+  copilot)  REPORTED="github-copilot/${MODEL:-auto}" ;;
+  qwen)     REPORTED="qwen/${MODEL:-qwen-default}" ;;
+  amp)      REPORTED="amp/${MODEL:-default}" ;;
+  droid)    REPORTED="factory/${MODEL:-droid-default}" ;;
+  goose)    REPORTED="${MODEL:+goose/$MODEL}" ;;
+  crush)    REPORTED="${MODEL:-crush/default}" ;;
+  kimi)     REPORTED="moonshot/${MODEL:-kimi-default}" ;;
   *)        REPORTED="" ;;
 esac
 export AC_REPORTED_MODEL="${AC_REPORTED_MODEL:-$REPORTED}"
@@ -348,9 +392,24 @@ if other=$(loop_pid) && [ "$other" != "$$" ]; then
   exit 0
 fi
 printf '%s %s\n' "$$" "$(started_at $$)" > state/heartbeat.pid
+# The kit this loop runs. A kit updated under it -- ./ac's Update, or a git
+# pull -- is moved onto in place (move_onto_kit); state/loop-kit tells ./ac
+# this loop does that, so the update need not stop and start it, which would
+# end a paper step in progress.
+KIT_AT_START=$(cat VERSION 2>/dev/null || echo "")
+printf '%s %s\n' "$$" "$KIT_AT_START" > state/loop-kit
+# state/turn: this loop's pid while it runs a turn, so ./ac can tell its owner
+# that a change waits for the turn to end (KIT-017). None at a start, and no
+# state/stopping (--stop's note of a loop ending its turn) either.
+rm -f state/turn state/stopping
 # Only our own pid file is ours to remove: a loop that exits must not erase
 # the running one's.
-drop_pid() { [ "$(cut -d' ' -f1 state/heartbeat.pid 2>/dev/null)" = "$$" ] && rm -f state/heartbeat.pid; return 0; }
+drop_pid() {
+  [ "$(cut -d' ' -f1 state/heartbeat.pid 2>/dev/null)" = "$$" ] && rm -f state/heartbeat.pid
+  [ "$(cut -d' ' -f1 state/turn 2>/dev/null)" = "$$" ] && rm -f state/turn
+  [ "$(cat state/stopping 2>/dev/null)" = "$$" ] && rm -f state/stopping
+  return 0
+}
 trap 'drop_pid' EXIT
 
 # One wake of the model: run the turn, then upload what it was shown and what
@@ -366,15 +425,21 @@ wake() {
   # the duties mode does not allow.
   [ "$mode" = machine ] && turn=research
   out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
+  printf '%s %s\n' "$$" "$turn" > state/turn
   run_turn "$prompt" "$turn" "$mode" 2>&1 | tee -a "$LOG" | tee "$out" >/dev/null
   rc=${PIPESTATUS[0]}
+  rm -f state/turn
   log "turn done (exit $rc)"
   # The CLI's own report of the model that answered, when it gives one.
   local seen
   seen=$(sed -n 's/^\[session\] model=\([^ ]*\).*/\1/p' "$out" | tail -1)
   if [ -n "$seen" ] && [ "$seen" != None ]; then
-    case "$BACKEND" in claude) seen="anthropic/$seen" ;; codex) seen="openai/$seen" ;; gemini) seen="google/$seen" ;; esac
-    printf '%s\n' "$seen" > state/model.txt
+    case "$BACKEND" in
+      claude) seen="anthropic/$seen" ;; codex) seen="openai/$seen" ;; gemini) seen="google/$seen" ;;
+      qwen) seen="qwen/$seen" ;; droid) seen="factory/$seen" ;; amp) seen="amp/$seen" ;;
+      cursor-agent) seen="" ;;  # its session line names the model for people, not by id
+    esac
+    [ -n "$seen" ] && printf '%s\n' "$seen" > state/model.txt
   fi
   upload_turn "$BACKEND" "${MODEL:-}" "$prompt" "$mode" "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))"
   # KIT-015: a turn the model was not there for says until when, and why.
@@ -1255,11 +1320,38 @@ trap 'stop_pipelines; drop_pid; exit 143' TERM INT HUP
 # over; without the old values in its environment, which would otherwise win
 # over state/runner.env.
 restart_self() {
-  log "$1; starting again to run with them"
+  log "$1; ${2:-starting again to run with them}"
   exec env -u AC_BACKEND -u AC_MODEL -u AC_AUTHOR -u AC_GPUS -u AC_MODE -u AC_OWN_PAPER -u AC_REPORTED_MODEL \
     "$ROOT/pipeline/run-heartbeat.sh" 9>&-
 }
 mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+# The kit was updated under this loop: move onto it by exec -- the same
+# process, so a paper step it started runs on -- once its loop script parses
+# (a file half-written by an update must not take the loop down).
+kit_moved() { local v; v=$(cat VERSION 2>/dev/null) || return 1; [ -n "$v" ] && [ "$v" != "$KIT_AT_START" ]; }
+move_onto_kit() {
+  local v; v=$(cat VERSION 2>/dev/null)
+  if ! bash -n "$ROOT/pipeline/run-heartbeat.sh" 2>/dev/null; then
+    log "the kit was updated to $v, but its loop script does not parse; staying on $KIT_AT_START"
+    KIT_AT_START=$v
+    return 0
+  fi
+  restart_self "the kit was updated to $v (from $KIT_AT_START)" "moving onto it in place; its work goes on"
+}
+# Why there is no phase, as the log says it. None open (the platform's
+# no_cycle); the platform not answering (a status of 500 or more: its side,
+# and passing, as in a deploy); or this machine not reaching it (its network,
+# a proxy, its certificates: its owner's to fix).
+no_phase_words() {
+  printf '%s' "$1" | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d={}
+s=d.get("status")
+if d.get("reason") == "no_cycle": print("no cycle open")
+elif isinstance(s, int) and s >= 500: print("the platform is not answering (%s)" % (d.get("message") or "HTTP %d" % s))
+else: print("cannot reach the platform (%s)" % (d.get("message") or d.get("reason") or "no answer"))' 2>/dev/null \
+    || echo "cannot reach the platform (no answer)"
+}
 # What state/runner.env was when this loop started: a later change to it --
 # ./ac, an edit, a conversation with the agent -- starts the loop again.
 ENV_MTIME=$(mtime state/runner.env)
@@ -1285,6 +1377,7 @@ nap() {
   sig=$(activity_sig)
   while [ "$(date +%s)" -lt "$until" ]; do
     if local_change; then restart_self "settings changed on this machine"; fi
+    if kit_moved; then move_onto_kit; fi
     if [ "$WATCH" = 1 ] && [ -z "${AC_NO_WATCH:-}" ]; then
       python3 submission/scripts/client.py wait-settings --timeout 50 >/dev/null 2>&1 9>&- &
       wpid=$!
@@ -1292,6 +1385,10 @@ nap() {
         if local_change; then
           kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null
           restart_self "settings changed on this machine"
+        fi
+        if kit_moved; then
+          kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null
+          move_onto_kit
         fi
         # Told once it took: a report that failed goes again a minute on.
         now=$(activity_sig)
@@ -1345,6 +1442,10 @@ work_inbox() {
     before=$N
     wake "$PROMPT" duties || break
     turns=$((turns + 1))
+    # A setting changed, or the kit was updated, during that turn: the nap
+    # that follows starts the loop again on it now, not after the rest of
+    # the inbox (KIT-017).
+    if local_change || kit_moved; then break; fi
     inbox
     [ "$N" -lt "$before" ] || break
   done
@@ -1375,8 +1476,9 @@ while true; do
   if [ $? -eq 3 ]; then restart_self "settings changed on the website"; fi
   reflect_once
   # Gate 1: no open cycle -> spend zero tokens.
+  if kit_moved; then move_onto_kit; fi
   if ! PHASE=$(submission/scripts/client.py phase 2>/dev/null); then
-    log "no cycle open; sleeping"
+    log "$(no_phase_words "$PHASE"); sleeping"
     [ -n "${AC_ONCE:-}" ] && exit 0
     nap; continue
   fi
