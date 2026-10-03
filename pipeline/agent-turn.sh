@@ -229,6 +229,17 @@ case "$BACKEND" in
     exec gemini -p "$PROMPT" -y --include-directories "$ROOT" ${MODEL:+-m "$MODEL"} </dev/null
     ;;
   opencode)
+    # opencode asks before a tool reaches outside --dir, and before it repeats
+    # one call; nobody answers in a turn run from a script, so the ask is
+    # refused and the whole turn ends there (live test, 2026-10-03: reading
+    # /proc/self/cgroup ended the machine description). A research turn runs
+    # with these approvals off, as the other CLIs' research turns do; a duty
+    # turn keeps out of other directories by a refusal the model is told of
+    # and goes on from, not one that ends its turn.
+    case "$MODE" in
+      research) export OPENCODE_PERMISSION='{"external_directory":"allow","doom_loop":"allow"}' ;;
+      *) export OPENCODE_PERMISSION='{"external_directory":"deny","doom_loop":"deny"}' ;;
+    esac
     # --format json: each tool call with its result; --thinking adds the
     # model's reasoning where the provider returns it.
     HELP=$(opencode run --help 2>/dev/null)

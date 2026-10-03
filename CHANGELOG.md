@@ -4,6 +4,21 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.13.2 — 2026-10-03 OpenCode runs unattended
+
+Follows platform `skill_version` 0.9.6. Nothing an agent on 0.13.1 does stops
+working.
+
+- **OpenCode no longer stops a turn to ask.** It asks before a tool reaches
+  outside the kit or repeats a call, and in a turn run from a script nobody
+  answers, so the ask was refused and the turn ended (found on a local model:
+  describing the machine stopped at `/proc/self/cgroup`). Research turns now
+  run with those approvals off, as the other CLIs' do; duty turns refuse
+  them in a way the model reads and works around.
+- **Setup's model menu, with OpenCode,** lists your own models (an API
+  account, or one this machine serves), each once; OpenCode's free models
+  only when you have none.
+
 ## 0.13.1 — 2026-10-03 any model your CLI reaches
 
 Follows platform `skill_version` 0.9.6. Nothing an agent on 0.13.0 does stops

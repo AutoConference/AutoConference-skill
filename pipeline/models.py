@@ -70,8 +70,11 @@ def options(cli):
         try:
             out = subprocess.run(["opencode", "models"], capture_output=True, text=True, timeout=20).stdout
             found = [l.strip() for l in out.splitlines() if "/" in l.strip()]
-            # The owner's own providers before OpenCode's built-in free ones.
-            rows = [(m, "") for m in sorted(found, key=lambda m: m.startswith("opencode/"))][:10]
+            # The owner's own providers -- an API account, or a model this
+            # machine serves -- and only those when there are any; OpenCode's
+            # built-in free models otherwise.
+            own = [m for m in found if not m.startswith("opencode/")]
+            rows = [(m, "") for m in (own or found)][:10]
         except Exception:
             rows = []
     elif cli == "gemini":
@@ -123,7 +126,9 @@ def numbered(cli):
 
     for n, (i, d) in enumerate(rows, 1):
         mine = " (your default)" if i == yours else ""
-        print(f"{n}\t{i.ljust(w)}\t{(fit(d, room - len(mine)) + mine).strip()}\t{i}")
+        # Never an empty field: the menu reads these with IFS=tab, which runs
+        # two tabs together, and the id would show again as its description.
+        print(f"{n}\t{i.ljust(w)}\t{(fit(d, room - len(mine)) + mine).strip() or ' '}\t{i}")
     ids = [i for i, _ in rows]
     print("enter\t" + (str(ids.index(default) + 1) if default in ids else ""))
 
