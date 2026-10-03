@@ -851,6 +851,24 @@ def _setting(key: str) -> str:
     return os.environ.get(key) or _runner_env(key)
 
 
+def model_blocked() -> dict | None:
+    """KIT-015: the model is not there until `until` (state/model_blocked,
+    written by the loop): its usage limit, no credit, its server down, the
+    connection gone, or its CLI signed out. None when it is there. `until` is
+    when it should be back (the block's 4th field), not the loop's next try."""
+    try:
+        retry, why, since, back = (open(os.path.join(STATE, "model_blocked")).read().split() + ["", "", "", ""])[:4]
+        retry, since = int(retry), int(since or 0)
+        back = int(back) if back else retry
+    except (OSError, ValueError):
+        return None
+    if retry <= time.time():
+        return None
+    iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+    return {"until": iso(max(back, retry)), "reason": why if why in ("limit", "credit", "server", "connection", "signin") else "unknown",
+            "since": iso(since) if since else None}
+
+
 def machine_report(applied: int, fresh: bool = False) -> dict:
     """This machine as the website shows it. `fresh` reads the settings file
     only, for the report sent right after a change is applied there."""
@@ -878,6 +896,7 @@ def machine_report(applied: int, fresh: bool = False) -> dict:
         "research_mtokens": int(cap) if cap.isdigit() and 0 < int(cap) <= 100000 else None,
         "activity": activity(),
         "questions": questions(),
+        "model_blocked": model_blocked(),
         "applied_version": applied,
     }
 

@@ -62,6 +62,18 @@ if [ -f "$ROOT/state/runner.env" ]; then
   done < "$ROOT/state/runner.env"
 fi
 
+# CLIs the kit keeps for itself (the ChatGPT desktop app's codex, linked by
+# setup) and those the official installers put where an older terminal does
+# not look, run on their own too, not only under the loop.
+export PATH="$ROOT/state/bin:$PATH"
+[ -d "$HOME/.local/bin" ] && case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$PATH:$HOME/.local/bin" ;; esac
+
+# Each step of the turn, for its owner to watch live (render_stream.py writes
+# it, pipeline/watch.py shows it): the loop names the file and what the turn
+# is for; run on its own, a turn still shows up there.
+export AC_LIVE_FILE=${AC_LIVE_FILE-$ROOT/state/logs/live.jsonl}
+export AC_LIVE_LABEL=${AC_LIVE_LABEL:-$MODE}
+
 BACKEND=${AC_BACKEND:-}
 if [ -n "${AC_BACKEND_CMD:-}" ]; then
   BACKEND=custom
@@ -76,7 +88,7 @@ No agent CLI found. Install one and sign it in: a subscription or an API key
 works the same, with no cap unless you set one. A model this machine serves
 (Ollama, LM Studio, vLLM) runs through opencode or codex.
 
-  Claude Code  https://claude.com/claude-code   then: claude login
+  Claude Code  https://claude.com/claude-code   then: claude auth login
   Codex        npm i -g @openai/codex           then: codex login
   Gemini CLI   npm i -g @google/gemini-cli      then: gemini
   opencode     https://opencode.ai              then: opencode auth login

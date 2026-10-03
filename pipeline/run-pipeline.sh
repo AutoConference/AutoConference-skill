@@ -301,11 +301,22 @@ step_timeout() {
 # paper, with the job still running unobserved (a live test, 2026-09-29: step
 # 4's calibration). Said once, in front of every step.
 turn_note() {
-  printf '=== THIS TURN ===\nThis step is one turn of a coding agent run from a script. When you finish, nothing re-invokes you: no wake-ups, no notifications, no later check-in. Run what the step needs to completion inside this turn -- a long job in the foreground, or started and then waited for until it ends. Never end the turn while a process you started is still running, and never schedule a wake-up: the next step starts the moment you stop, and it checks this step'"'"'s outputs. Other agents may be running on this machine: stop only processes you started, by their process id -- never pkill or killall by name or pattern -- and keep logs and temporary files in this directory, not in /tmp.\n=== END THIS TURN ===\n\n'
+  printf '=== THIS TURN ===\nThis step is one turn of a coding agent run from a script. When you finish, nothing re-invokes you: no wake-ups, no notifications, no later check-in. Run what the step needs to completion inside this turn -- a long job in the foreground, or started and then waited for until it ends. Never end the turn while a process you started is still running, and never schedule a wake-up: the next step starts the moment you stop, and it checks this step'"'"'s outputs. Other agents may be running on this machine: stop only processes you started, by their process id -- never pkill or killall by name or pattern -- and keep logs and temporary files in this directory, not in /tmp.\nNobody answers questions during this turn. Where a skill says to ask the user or wait for a confirmation, decide as a careful researcher would, from the plan, these files and your owner'"'"'s instructions below; write the decision and why in refine-logs/DECISIONS.md and go on. Stop only for what this machine cannot do or a rule you cannot keep, and then say exactly what is needed.\n=== END THIS TURN ===\n\n'
+}
+# A step trying again after it failed (run-heartbeat.sh) is told what went
+# wrong the last time, ahead of everything else.
+retry_note() {
+  local n base f
+  n=${1%%/*}; base=$(printf '%s' "$n" | tr -dc '0-9')
+  f="$W/refine-logs/RETRY-step-$base.md"
+  [ -n "$base" ] && [ -s "$f" ] || return 0
+  printf '=== THE LAST ATTEMPT AT THIS STEP FAILED (refine-logs/RETRY-step-%s.md) ===\n' "$base"
+  tail -c 6000 "$f"
+  printf '\n=== END ===\nRead that first: fix what went wrong, or reach the step'"'"'s goal another way that cannot fail like that. A step that ran out of time did too much in one go: do less in it, or split the work. Never lower a check'"'"'s bar, or change a check, to get past it.\n\n'
 }
 skill(){ local label=$1 prompt=$2 tmo
          tmo=$(step_timeout "${3:-7200}")
-         prompt="$(turn_note)$(deadline_note)$(owner_context "$label")$prompt"
+         prompt="$(turn_note)$(retry_note "$label")$(deadline_note)$(owner_context "$label")$prompt"
          if [ -n "$DRY" ]; then
            printf '\n\033[1m===== %s =====\033[0m\n%s\n' "$label" "$prompt"
            printf '\033[2m[%s chars]\033[0m\n' "$(printf '%s' "$prompt" | wc -c)"

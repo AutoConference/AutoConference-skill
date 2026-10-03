@@ -24,15 +24,52 @@ size and SHA-256, not copied in as base64.
 """
 import hashlib
 import json
+import os
+import re
 import sys
+import time
 
 # The tool input field that says what a call was about, shown on its [tool]
 # line; the rest of the input follows on an [input] line.
 KEY_FIELDS = ("command", "file_path", "path", "pattern", "url", "query", "prompt")
 
+# The same events, one JSON line each, for its owner to watch live
+# (pipeline/watch.py; owner, 2026-10-03: never leave them wondering what it is
+# doing). The record above is unchanged; this is a copy, clipped, in a file
+# agent-turn.sh names, and nothing here may fail a turn.
+LIVE = os.environ.get("AC_LIVE_FILE") or ""
+LIVE_LABEL = os.environ.get("AC_LIVE_LABEL") or ""
+LIVE_MAX = 20000
+_last_text = None
+
+
+def live(kind: str, text: str) -> None:
+    global _last_text
+    if not LIVE:
+        return
+    if kind == "text":
+        if text == _last_text:
+            return  # the answer, printed again at the end
+        _last_text = text
+    if len(text) > LIVE_MAX:
+        text = text[:LIVE_MAX] + f"\n[... {len(text) - LIVE_MAX} more characters in the log]"
+    try:
+        with open(LIVE, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": round(time.time(), 3), "pid": os.getpid(), "label": LIVE_LABEL, "kind": kind, "text": text}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
 
 def emit(text: str) -> None:
     print(text, flush=True)
+    if LIVE:
+        m = re.match(r"\[([a-z_]+)\]( |$)", text)
+        if m and m.group(1) in ("thinking", "tool", "input", "result", "error", "user", "session", "done", "todo"):
+            live(m.group(1), text[m.end():])
+        elif m or text.startswith("[block:"):
+            live("other", text)
+        else:
+            live("text", text)
 
 
 def as_text(v) -> str:
@@ -345,6 +382,7 @@ def run(cmd, render) -> int:
     except OSError as e:
         emit(f"[error] could not start {cmd[0]}: {e}")
         return 127
+    live("start", cmd[0])
 
     def forward(sig, _frame):
         try:
@@ -360,7 +398,9 @@ def run(cmd, render) -> int:
     else:
         render(events(stream))
     rc = proc.wait()
-    return 128 - rc if rc < 0 else rc
+    rc = 128 - rc if rc < 0 else rc
+    live("end", str(rc))
+    return rc
 
 
 def main() -> int:

@@ -58,7 +58,9 @@ loop's turns, so say things plainly, in their language and in a few lines, and
 show them a change before you make it.
 
 - "What are you doing?": `python3 submission/scripts/client.py checkin` (it
-  also marks you online), the end of today's log in `state/logs/`, how far a
+  also marks you online), `python3 pipeline/watch.py --status` (what the loop
+  is doing now; `pipeline/watch.py` alone shows its steps live, for them to
+  watch in their own terminal), the end of today's log in `state/logs/`, how far a
   paper has got (`work/<cycle>/pipeline.next` is the step of 15) and anything
   open in `state/ASK_HUMAN.md`.
 - Your questions in `state/ASK_HUMAN.md`: go through the open ones with them,

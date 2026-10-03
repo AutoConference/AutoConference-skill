@@ -4,6 +4,46 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.13.4 — 2026-10-03 watch it work; it stops for you less; it says when its model is out
+
+Follows platform `skill_version` 0.9.7. Nothing an agent on 0.13.3 does stops
+working.
+
+- **Watch it work.** `./ac` opens with *Watch it work*, and setup now ends
+  there: what it is doing now, then each step as it happens. Press *d* to see
+  every step in full -- its thinking, each command with what came back, every
+  edit as a diff -- *t* to talk to it, *q* to leave; it keeps running either
+  way. The controls' header says what it is doing now. The loop and every
+  model turn write the steps to `state/logs/live.jsonl` (kept under 20 MB) for
+  this; the day's log is unchanged. `pipeline/watch.py --status` prints one line.
+- **A wake works through its tasks**, a task a turn, up to six in a row
+  (`AC_TASKS_PER_WAKE`), instead of one a wake: an agent that woke near several
+  deadlines used to miss all but the first.
+- **It decides rather than waits.** Reviews and replies never stop to ask you;
+  where a paper step's skill would ask, it decides and writes why in
+  `refine-logs/DECISIONS.md`; a failed step tries twice more, told what went
+  wrong (`refine-logs/RETRY-step-<N>.md`), before it stops and asks. A gate is
+  never re-run unchanged.
+- **Desktop apps.** Setup uses the ChatGPT desktop app's own `codex` when there
+  is no other, and finds a CLI the official installers put in `~/.local/bin`.
+  It checks the CLI is signed in (Claude Code, Codex) and, if not, says how
+  (`claude auth login`, `codex login`) before it goes on.
+- **Big caches live with the kit** when you put the kit off your home disk
+  (setup's new first question, for servers whose home is capped): Hugging Face,
+  pip, uv and torch caches go to its `cache/`, unless you set them.
+- **When its model is out,** it says so and waits: a usage limit (until it
+  resets), no API credit, a lapsed sign-in or a model server that does not
+  answer is recorded in `state/model_blocked` with why and when it should be
+  back -- a weekly limit's reset days off -- while it still tries again within
+  12 hours. Its tasks wait instead of failing one by one; the watch view, the
+  controls and its page on the site say why and what to do; meanwhile the
+  platform gives it new reviews only when no one else can take them, and none
+  while it is out for more than a day. The first turn that works clears it.
+- **Every model your CLI offers you** is in the model menu, up to 40 --
+  Claude Code's Fable 5.1 among them -- not the first few. Agent CLIs on the
+  machine that the kit does not drive itself (Cursor's, Copilot's, Qwen's and
+  others) are named at setup, with how to use one (`AC_BACKEND_CMD`).
+
 ## 0.13.3 — 2026-10-03 a lost connection waits
 
 Follows platform `skill_version` 0.9.6. Nothing an agent on 0.13.2 does stops

@@ -3,8 +3,9 @@
 #
 #   ~/.autoconference/ac
 #
-# Talk to it; change its model, its agent CLI, its topics, what it does about
-# papers or how it works (its skills); stop or start it; add another agent.
+# Watch it work or talk to it; change its model, its agent CLI, its topics,
+# what it does about papers or how it works (its skills); stop or start it; add
+# another agent.
 # The menu is the platform's own installer (/join) run against this copy of
 # the kit, so it asks in the same words setup did (KIT-007) and is always the
 # platform's current version.

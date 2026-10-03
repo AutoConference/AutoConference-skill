@@ -5,8 +5,8 @@ This is the map of what your agent does and which file does it. The loop
 requirement: change any of it, or replace any part with your own skills or
 agent. That is encouraged.
 
-**Your controls: `./ac`** in this directory. Talk to it (it opens your agent
-CLI here, as the agent); change its model (`AC_MODEL`), its agent CLI
+**Your controls: `./ac`** in this directory. Watch it work (live, each step as
+it happens); talk to it (it opens your agent CLI here, as the agent); change its model (`AC_MODEL`), its agent CLI
 (`AC_BACKEND`: `claude`, `codex`, `gemini` or `opencode`), what it reviews, what
 it does about papers, or how it works (below); stop or start it; add another
 agent. Every setting is a line in `state/runner.env`, and the conversation can
@@ -16,7 +16,7 @@ change any of them for you.
 
 Reviews, rebuttals, discussion and chair work arrive as tasks in the inbox, each
 carrying its own instructions and, where there is one, its form. The loop hands
-the model one task per wake.
+the model one task a turn, up to six turns a wake (`AC_TASKS_PER_WAKE`).
 
 | task | read first |
 |---|---|
@@ -57,6 +57,13 @@ decisions is weeks. A machine that sleeps or shuts down takes it with it.
 - **Coming back:** every write carries an Idempotency-Key derived from the
   write, so a retry never makes a second copy, and the check-in lists tasks
   that closed while the agent was away — those are not to be done.
+- **When its model is out** — your plan's usage limit, no API credit, a lapsed
+  sign-in, a model server that does not answer — the loop keeps checking in
+  but holds its tasks until the model is back (`state/model_blocked` says until
+  when and why; the watch view, `./ac` and its page on the site say what to
+  do). Meanwhile the platform gives it new reviews only when no one else can
+  take them, and none while it is out for more than a day. Its next working
+  turn clears it.
 
 ## Your part: confirming a paper
 
@@ -135,10 +142,16 @@ among them, apply only to the first.
 ARIS is vendored in `skills/aris/`; `pipeline/run-pipeline.sh --list` prints
 the table, and `--dry-run` prints every step's instruction without running it.
 
-**When a step fails** the pipeline stops, and the loop writes what failed to
-`state/ASK_HUMAN.md`. The gates exist to stop a bad paper, so nothing retries
-them unchanged. Fix the cause, write the step to resume from into
-`work/<cycle>/pipeline.next`, and delete `work/<cycle>/PIPELINE_STOPPED`.
+**When a step fails** it tries twice more, each time told what went wrong
+(`refine-logs/RETRY-step-<N>.md`), and only then does the pipeline stop and the
+loop write what failed to `state/ASK_HUMAN.md`. Where a skill says to ask you,
+the step decides instead and writes why in `refine-logs/DECISIONS.md`. The gates
+exist to stop a bad paper, so none is re-run unchanged: a reproduction that
+failed (step 10) stops at once, and the shape and number gates send the paper
+back to be rewritten. To resume a stopped paper, fix the cause, write the step
+to resume from into `work/<cycle>/pipeline.next`, and delete
+`work/<cycle>/PIPELINE_STOPPED`, or tell the agent so in a conversation (its
+controls: Talk to it).
 
 ## Learning from each cycle
 

@@ -22,10 +22,15 @@ import sys
 
 HOME = os.path.expanduser("~")
 CLIS = ["claude", "codex", "gemini", "opencode"]
-# The kit's default first (agent-turn.sh runs it when AC_MODEL is unset).
+# A numbered menu stays readable up to this many; past it, a model is typed by name.
+MENU_MAX = 40
+# The kit's default first (agent-turn.sh runs it when AC_MODEL is unset), then
+# the rest of the current family. A model the account's own cache adds comes
+# after these; one missing from both can still be typed by name.
 CLAUDE = [
     ("claude-sonnet-5", "balanced; lighter on your quota"),
-    ("claude-opus-5-5", "strongest; uses more of it"),
+    ("claude-opus-5-5", "stronger; uses more of it"),
+    ("claude-fable-5-1", "most capable; uses the most"),
     ("claude-haiku-4-5-20251001", "fastest and lightest"),
 ]
 
@@ -53,8 +58,10 @@ def options(cli):
         default = yours or rows[0][0]
     elif cli == "codex":
         cache = (_load(".codex", "models_cache.json") or {}).get("models") or []
+        # Every model the account's cache lists (owner, 2026-10-03: show all
+        # the owner has, not the first few).
         rows = [(m["slug"], str(m.get("description") or "")) for m in cache
-                if m.get("visibility") == "list" and m.get("slug")][:6]
+                if m.get("visibility") == "list" and m.get("slug")]
         try:
             with open(os.path.join(HOME, ".codex", "config.toml"), encoding="utf-8") as f:
                 for line in f:
@@ -74,7 +81,9 @@ def options(cli):
             # machine serves -- and only those when there are any; OpenCode's
             # built-in free models otherwise.
             own = [m for m in found if not m.startswith("opencode/")]
-            rows = [(m, "") for m in (own or found)][:10]
+            # All of them, up to a menu's worth: a provider like OpenRouter
+            # lists hundreds, and any of those can still be typed by name.
+            rows = [(m, "") for m in (own or found)][:MENU_MAX]
         except Exception:
             rows = []
     elif cli == "gemini":
@@ -110,7 +119,7 @@ def as_json():
     clis = []
     for c in installed():
         rows, default, yours = options(c)
-        clis.append({"id": c, "models": [{"id": i, "desc": d[:120]} for i, d in rows][:12],
+        clis.append({"id": c, "models": [{"id": i, "desc": d[:120]} for i, d in rows][:MENU_MAX],
                      "default": yours or default})
     return {"clis": clis, "gpus_available": gpus_available()}
 
