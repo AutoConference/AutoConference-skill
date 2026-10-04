@@ -59,14 +59,34 @@ loop_pid() {
   [ -n "$t" ] && [ "$(started_at "$p")" = "$t" ] || return 1
   echo "$p"
 }
+# A loop older than the pid file, found by its command line (in OLDER) --
+# never this process or a shell it forked. A $(...) around pgrep forks a copy
+# of this process, command line and all, and on Linux pgrep -f found that copy:
+# a first start by full path (setup's), or a start after a clean stop, said
+# "already running" and started nothing (KIT-030, found 2026-10-04). So pgrep
+# runs as this shell's own child, before anything else is forked, and writes
+# a file.
+older_loop() {
+  local p f="state/.older.$$"
+  OLDER=""
+  pgrep -f "$ROOT/pipeline/run-heartbeat.sh" > "$f" 2>/dev/null
+  while read -r p; do
+    if [ "$p" != "$$" ]; then OLDER=$p; break; fi
+  done < "$f"
+  rm -f "$f"
+  [ -n "$OLDER" ]
+}
 
 # --stop: end this install's loop. Its TERM trap stops any paper step it
 # started (each runs in a process group of its own), and the paper resumes from
 # that step on the next start. Found by the pid file, never by name: another
-# agent's loop on this machine is not this one's to stop.
+# agent's loop on this machine is not this one's to stop. Stopped by its
+# owner, it stays stopped when the computer starts again (state/.owner-stopped,
+# which the start with the computer reads, KIT-030) until a start here.
 if [ "${1:-}" = "--stop" ]; then
-  me="$ROOT/pipeline/run-heartbeat.sh"
-  running=$(loop_pid || { [ -f state/heartbeat.pid ] || pgrep -f "$me" | grep -vx "$$" | head -1; })
+  mkdir -p state && touch state/.owner-stopped
+  running=$(loop_pid) || running=""
+  if [ -z "$running" ] && [ ! -f state/heartbeat.pid ] && older_loop; then running=$OLDER; fi
   if [ -z "$running" ]; then
     echo "not running"; exit 0
   fi
@@ -95,13 +115,15 @@ fi
 # python3 does the forking because macOS has no setsid(1).
 if [ "${1:-}" = "--detach" ]; then
   mkdir -p state/logs
+  rm -f state/.owner-stopped
   me="$ROOT/pipeline/run-heartbeat.sh"
   # The pid file is the answer whenever this install has one. Looking for the
   # script by name is only for a loop older than the file: a paper's pipeline
   # runs in a copy of the loop's process with the same command line, and after
   # the loop itself was killed that copy would pass for it and keep a new loop
   # from starting until the paper was done — hours with no duties (A36).
-  running=$(loop_pid || { [ -f state/heartbeat.pid ] || pgrep -f "$me" | grep -vx "$$" | head -1; })
+  running=$(loop_pid) || running=""
+  if [ -z "$running" ] && [ ! -f state/heartbeat.pid ] && older_loop; then running=$OLDER; fi
   if [ -n "$running" ]; then
     if [ "$(cat state/stopping 2>/dev/null)" = "$running" ]; then
       python3 - "$running" "$me" "$ROOT/state/logs/heartbeat.out" <<'AFTER'
@@ -143,8 +165,12 @@ os.dup2(out, 2)
 os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
 os.execv("/bin/bash", ["/bin/bash", script])
 DETACH
-  sleep 2
-  pid=$(loop_pid)
+  # Its pid file says it runs: up to 20 s, for a machine just started.
+  pid=""
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    sleep 1
+    pid=$(loop_pid) && break
+  done
   if [ -n "$pid" ]; then
     echo "running in the background (pid $pid); log: $ROOT/state/logs/heartbeat.out"
     echo "stop it with: $me --stop"
@@ -466,12 +492,6 @@ Do not download a model or run a benchmark to fill a field. Leave out any
 number you did not measure, and say so in a note.
 PROMPT_END
 
-log "heartbeat up (backend=$BACKEND model=${MODEL:-<cli default>} base=${AC_BASE:-live} interval=${INTERVAL}s writing=$([ "$AUTHOR" = 1 ] && echo on || echo off)${AC_OWN_PAPER:+ own-paper=$AC_OWN_PAPER})"
-
-# Resuming, not starting over (A03): the same agent as before the reboot or
-# the lost session, and what became of its tasks while it was away.
-python3 submission/scripts/client.py checkin 2>&1 | sed 's/^/  /' | tee -a "$LOG"
-
 exec 9>state/heartbeat.lock
 if ! flock -n 9 2>/dev/null; then
   # macOS has no flock(1). One loop per checkout is a convention there rather
@@ -480,12 +500,20 @@ if ! flock -n 9 2>/dev/null; then
   command -v flock >/dev/null 2>&1 && { echo "another heartbeat holds the lock; exiting" >&2; exit 0; }
 fi
 # One loop per checkout, on macOS too: the pid file is the lock flock cannot
-# be there. Two loops would work every task twice.
+# be there. Two loops would work every task twice. Written before anything
+# reaches the network: a start with the computer, before its network is up,
+# is a running loop at once, not one --detach gave up on (KIT-030).
 if other=$(loop_pid) && [ "$other" != "$$" ]; then
   log "another loop is already running here (pid $other); exiting"
   exit 0
 fi
 printf '%s %s\n' "$$" "$(started_at $$)" > state/heartbeat.pid
+
+log "heartbeat up (backend=$BACKEND model=${MODEL:-<cli default>} base=${AC_BASE:-live} interval=${INTERVAL}s writing=$([ "$AUTHOR" = 1 ] && echo on || echo off)${AC_OWN_PAPER:+ own-paper=$AC_OWN_PAPER})"
+
+# Resuming, not starting over (A03): the same agent as before the reboot or
+# the lost session, and what became of its tasks while it was away.
+python3 submission/scripts/client.py checkin 2>&1 9>&- | sed 's/^/  /' | tee -a "$LOG"
 # The kit this loop runs. A kit updated under it -- ./ac's Update, or a git
 # pull -- is moved onto in place (move_onto_kit); state/loop-kit tells ./ac
 # this loop does that, so the update need not stop and start it, which would
@@ -1192,8 +1220,19 @@ print(("owner\t"+r) if r else ("own\t"+", ".join(d.get("research_interests") or 
   local mode=${AC_MODE:-}
   [ -z "$mode" ] && { [ -n "$steered" ] && mode=owner_direction || mode=autonomous; }
   if [ -z "$dir" ] && [ -z "$seed" ]; then
-    log "paper $cyc: writing is on but there is no direction and no seed paper (AC_DIRECTION or AC_SEED_PAPER in state/runner.env)"; return
+    log "paper $cyc: writing is on but there is no direction and no seed paper (AC_DIRECTION or AC_SEED_PAPER in state/runner.env)"
+    # Said to its owner too, once, where they look -- the website shows these
+    # notes -- rather than only in this log (owner, 2026-10-04: "用户一句话都不
+    # 说他怎么知道topic"). Reviewing goes on meanwhile.
+    if [ ! -f state/.no-subject-noted ]; then
+      printf '\n## %s — it writes papers, but has nothing to write about yet\n\nGive it a research direction (one sentence: Settings on its page on the website) or a few topics (Topics in its controls, ~/.autoconference/ac). It reviews meanwhile, and starts a paper at its next look once it has either.\n' \
+        "$(date +%Y-%m-%dT%H:%M:%S%z)" >> state/ASK_HUMAN.md
+      touch state/.no-subject-noted
+    fi
+    return
   fi
+  # Something to write about now: a later loss of it is said again.
+  rm -f state/.no-subject-noted
   log "paper $cyc: starting the pipeline (seed ${seed:-none}; direction: ${dir:-from the seed}) in the background; output in $ws/pipeline.out"
   # What the paper started from, kept with it: its Human participation
   # statement and the survey on it are written from these (pipeline/statements.py,
@@ -1541,7 +1580,7 @@ paper_waits_over() {
   return 1
 }
 nap() {
-  local until=$(( $(date +%s) + $(jitter) )) wpid rc sig now retry_at=0 began stopped why
+  local until=$(( $(date +%s) + ${1:-$(jitter)} )) wpid rc sig now retry_at=0 began stopped why
   began=$(date +%s)
   stopped=$(ls work/*/PIPELINE_STOPPED state/own-paper/STOPPED 2>/dev/null | tr '\n' ' ')
   live_event nap "$until"
@@ -1772,10 +1811,16 @@ while true; do
   # Gate 1: no open cycle -> spend zero tokens.
   if kit_moved; then move_onto_kit; fi
   if ! PHASE=$(submission/scripts/client.py phase 2>/dev/null); then
-    log "$(no_phase_words "$PHASE"); sleeping"
+    NO_PHASE=$(no_phase_words "$PHASE")
+    log "$NO_PHASE; sleeping"
     activity_report
     [ -n "${AC_ONCE:-}" ] && exit 0
-    nap; continue
+    # Not reached -- this machine's network, as in the first minute after the
+    # computer starts (KIT-030), or the platform restarting: it looks again in
+    # five minutes, not two hours, so duties waiting since before it went off
+    # are not left that long.
+    if [ "$NO_PHASE" = "no cycle open" ]; then nap; else nap 300; fi
+    continue
   fi
   PH_SIG=$(printf '%s' "$PHASE" | python3 -c 'import json,sys
 try: d=json.load(sys.stdin); d.pop("server_time", None); print(json.dumps(d, sort_keys=True))
