@@ -17,8 +17,12 @@ What each part is read from:
            CLI reported (state/model.txt), and every id the workspace's turn
            log names ([session] model=... lines in pipeline.out)
   agent    this kit's VERSION and the CLI AC_BACKEND names
-  compute  AC_GPUS and state/machine.json (the GPUs, by name and count), the
-           plan's estimated hours (FEASIBILITY.json), or that nothing ran
+  compute  AC_GPUS and state/machine.json (the GPUs, by name and count, as the
+           machine reports them), and time MEASURED: how long the reproduction
+           gate took to re-run the experiments (runs/REPRO_GATE.json) and how
+           long this paper's turns took by the loop's clock (the ledger's "ms").
+           The plan's estimated hours (FEASIBILITY.json) only when nothing was
+           measured, and then called an estimate; or that nothing ran
   data     the datasets the experiment plan and the run manifests name
            (refine-logs/EXPERIMENT_PLAN.md, runs/MANIFEST.json,
            runs/REPLAY_MANIFEST.json), else a pointer to the paper's own
@@ -136,7 +140,25 @@ def ran_anything(ws: str) -> bool:
         return False
 
 
-def compute_line(ws: str, own: bool) -> str:
+def hours_text(seconds: float) -> str:
+    if seconds < 3600:
+        return f"{max(1, round(seconds / 60))} minutes"
+    h = seconds / 3600
+    return f"{h:.1f} hours" if h < 10 else f"{round(h)} hours"
+
+
+def measured_rerun(ws: str):
+    """(experiments, seconds): how long the reproduction gate took to re-run
+    the paper's experiments on this machine (runs/REPRO_GATE.json), or None."""
+    g = load_json(os.path.join(ws, "runs", "REPRO_GATE.json"))
+    exps = g.get("experiments") if isinstance(g, dict) else None
+    if not isinstance(exps, list):
+        return None
+    secs = [e["rerun_wall_s"] for e in exps if isinstance(e, dict) and isinstance(e.get("rerun_wall_s"), (int, float))]
+    return (len(secs), float(sum(secs))) if secs else None
+
+
+def compute_line(ws: str, own: bool, cycle=None, created: float = 0) -> str:
     if own:
         return ("The experiments are the owner's own, run before the paper reached this agent; the agent used "
                 "no compute beyond the model's API to convert, package and submit the paper.")
@@ -160,12 +182,23 @@ def compute_line(ws: str, own: bool) -> str:
     cont = machine.get("container") if isinstance(machine, dict) else None
     if isinstance(cont, dict) and cont.get("cpu_cores") and parts[0] != "none beyond the model's API":
         parts[0] += f", {cont['cpu_cores']} CPU cores" + (f" and {cont['ram_gib']:g} GiB RAM" if isinstance(cont.get("ram_gib"), (int, float)) else "")
-    feas = sorted(glob.glob(os.path.join(ws, "**", "FEASIBILITY.json"), recursive=True), key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0)
-    if feas:
-        f = load_json(feas[-1]) or {}
-        h = f.get("est_wallclock_hours")
-        if isinstance(h, (int, float)):
-            parts.append(f"about {h:g} hours of experiments estimated by the plan's feasibility check")
+    # Time, measured: the re-run of every experiment by the reproduction gate,
+    # and this paper's turns by the loop's own clock.
+    rerun = measured_rerun(ws)
+    if rerun:
+        n, secs = rerun
+        parts.append(f"re-running its {n} experiment{'' if n == 1 else 's'} took {hours_text(secs)} there (measured by the reproduction gate)")
+    turns = sum(int(r.get("ms") or 0) for r in paper_lines(cycle, created, own) if isinstance(r.get("ms"), (int, float))) / 1000
+    if turns > 0:
+        parts.append(f"the agent's turns on this paper took {hours_text(turns)} in all (measured by the kit's clock)")
+    if not rerun and turns <= 0:
+        # Nothing measured (a ledger from before 0.15.2): the plan's estimate, said to be one.
+        feas = sorted(glob.glob(os.path.join(ws, "**", "FEASIBILITY.json"), recursive=True), key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0)
+        if feas:
+            f = load_json(feas[-1]) or {}
+            h = f.get("est_wallclock_hours")
+            if isinstance(h, (int, float)):
+                parts.append(f"about {h:g} hours of experiments estimated by the plan's feasibility check (not measured)")
     notes = scrub(pf.runner_env("AC_COMPUTE_NOTES"))
     if notes:
         parts.append("the owner notes: " + notes[:300])
@@ -221,12 +254,12 @@ def data_line(ws: str, own: bool) -> str:
     return "none: no experiment ran on this machine; the data, if any, is described in the paper's experiments section."
 
 
-def tokens_used(cycle, created: float, own: bool) -> dict:
-    """{"input", "output"} summed from state/usage.jsonl for this paper, or
-    {"note"} when nothing was recorded for it."""
+def paper_lines(cycle, created: float, own: bool) -> list:
+    """This paper's lines of state/usage.jsonl: those the loop marked with its
+    conference, and, from before it did, its mode's lines since its workspace
+    was made."""
     modes = ("own-paper", "own-paper-submit") if own else ("writing",)
-    tin = tout = 0
-    seen = False
+    out = []
     try:
         with open(os.path.join(STATE, "usage.jsonl"), encoding="utf-8") as f:
             for line in f:
@@ -240,13 +273,22 @@ def tokens_used(cycle, created: float, own: bool) -> dict:
                     mine = cycle is not None and r.get("paper") == cycle
                 else:
                     mine = r.get("mode") in modes and created and float(r.get("at") or 0) >= created
-                if not mine:
-                    continue
-                seen = True
-                tin += int(r.get("in") or 0)
-                tout += int(r.get("out") or 0)
+                if mine:
+                    out.append(r)
     except OSError:
         pass
+    return out
+
+
+def tokens_used(cycle, created: float, own: bool) -> dict:
+    """{"input", "output"} summed from state/usage.jsonl for this paper, or
+    {"note"} when nothing was recorded for it."""
+    tin = tout = 0
+    seen = False
+    for r in paper_lines(cycle, created, own):
+        seen = True
+        tin += int(r.get("in") or 0)
+        tout += int(r.get("out") or 0)
     if seen and (tin or tout):
         return {"input": tin, "output": tout}
     if seen:
@@ -320,7 +362,7 @@ def statements(ws: str, own: bool = False) -> dict:
         "resource_statement": {
             "models": models_used(ws, cli),
             "agent": agent_line(cli),
-            "compute": compute_line(ws, own),
+            "compute": compute_line(ws, own, f.get("cycle"), float(f.get("workspace_created_at") or 0)),
             "data": data_line(ws, own),
             "tokens": tokens_used(f.get("cycle"), float(f.get("workspace_created_at") or 0), own),
         },

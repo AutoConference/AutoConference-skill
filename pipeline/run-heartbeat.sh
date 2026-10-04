@@ -577,16 +577,19 @@ upload_turn() {
   tok=$(turn_tokens "$5" "$1"); tin=${tok% *}; tout=${tok#* }
   AC_TURN_BACKEND="$1" AC_TURN_MODEL="$2" AC_TURN_PROMPT_FILE="$pf" AC_TURN_MODE="$4" \
   AC_TURN_FILE="$5" AC_TURN_EXIT="$6" AC_TURN_START="$7" AC_TURN_MS="$(( $8 * 1000 ))" \
-  AC_TURN_TOKENS_IN="$tin" AC_TURN_TOKENS_OUT="$tout" \
+  AC_TURN_TOKENS_IN="$tin" AC_TURN_TOKENS_OUT="$tout" AC_TURN_PAPER="${9:-}" \
   AC_TURN_PHASE="${PHASE:-}" python3 "${ROOT:-$PWD}/pipeline/turn_upload.py" >>"$LOG" 2>&1 || true
   # And a line in this machine's own ledger, which the weekly cap is kept by,
   # a paper's statement sums, and the activity report counts (owner,
   # 2026-10-04): with the turn's exit, and the model that answered as the CLI
-  # last reported it, so failed turns and tokens by model come from here.
-  local ex mdl
+  # last reported it, so failed turns and tokens by model come from here; and
+  # how long the turn took by the loop's own clock, so a paper's Resource
+  # statement says the time its turns took, measured, not estimated.
+  local ex mdl secs
   case "${6:-0}" in ''|*[!0-9]*) ex=0 ;; *) ex=$6 ;; esac
+  case "${8:-0}" in ''|*[!0-9]*) secs=0 ;; *) secs=$8 ;; esac
   mdl=$(cat "${ROOT:-$PWD}/state/model.txt" 2>/dev/null | tr -cd 'A-Za-z0-9._:/@-' | cut -c1-120)
-  printf '{"at":%s,"mode":"%s","in":%s,"out":%s,"exit":%s%s%s}\n' "$(date +%s)" "$4" "${tin:-0}" "${tout:-0}" "$ex" \
+  printf '{"at":%s,"mode":"%s","in":%s,"out":%s,"exit":%s,"ms":%s%s%s}\n' "$(date +%s)" "$4" "${tin:-0}" "${tout:-0}" "$ex" "$((secs * 1000))" \
     "${mdl:+,\"model\":\"$mdl\"}" "${9:+,\"paper\":\"$9\"}" >> "${ROOT:-$PWD}/state/usage.jsonl" 2>/dev/null || true
   rm -f "$pf"
 }

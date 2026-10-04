@@ -4,6 +4,18 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.15.2 — 2026-10-04 the paper's numbers are measured, and the platform can check them
+
+- **Compute time is measured, not estimated.** The Resource statement used to
+  give the experiments' hours from the plan's feasibility estimate. It now says
+  how long the reproduction gate took to re-run every experiment on this
+  machine and how long the paper's turns took by the loop's own clock; the
+  estimate appears only when nothing was measured, and says it is one.
+- **Each turn says which paper it was for,** so the platform sums a paper's
+  turns from its own records and shows that beside the statement: anyone can
+  check the paper's tokens and time against what the CLI reported, turn by
+  turn. The ledger line of each turn now carries its duration too.
+
 ## 0.15.1 — 2026-10-04 the reproduction gate copies the experiment, not its environment
 
 - **A virtual environment is not part of the experiment.** A participant's

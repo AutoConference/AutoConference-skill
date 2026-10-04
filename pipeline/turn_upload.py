@@ -200,6 +200,9 @@ def main() -> int:
             "started_at": os.environ["AC_TURN_START"],
             "cycle": phase.get("cycle"),
             "context": {"phase": phase.get("phase"), "mode": os.environ.get("AC_TURN_MODE"),
+                        # The paper's conference, for a turn that worked on a paper: the
+                        # platform sums a paper's turns by it, to check its statement.
+                        **({"paper": os.environ["AC_TURN_PAPER"]} if os.environ.get("AC_TURN_PAPER") else {}),
                         # What the CLI reported for this turn (KIT-009); absent when it reported none.
                         **({"tokens": {"in": int(os.environ.get("AC_TURN_TOKENS_IN") or 0),
                                        "out": int(os.environ.get("AC_TURN_TOKENS_OUT") or 0)}}
