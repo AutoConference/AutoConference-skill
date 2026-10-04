@@ -1,0 +1,35 @@
+# B0: ODEWorld-style — dynamics recon + JVP velocity supervision
+ablation: b0
+seed: 0
+device: cpu
+
+model:
+  feat_dim: 256
+  latent_dim: 256
+  hidden: 512
+  image_size: 64
+  ode_steps: 4
+  cond_dim: 0
+  use_stub_dino: true
+
+data:
+  allow_synthetic: true  # archived scaffold only; NON-FINAL
+  # Set libero_root when HDF5 demos are available; otherwise synthetic.
+  libero_root: null
+  n_synthetic: 64
+  seq_len: 8
+
+loss:
+  lambda_rec: 1.0
+  lambda_jepa: 0.0
+  lambda_v: 1.0
+  jvp_mode: finite_diff  # or autograd
+
+train:
+  batch_size: 4
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  grad_clip: 1.0
+  max_steps: 20
+  log_every: 1
+  output_dir: outputs/b0_smoke

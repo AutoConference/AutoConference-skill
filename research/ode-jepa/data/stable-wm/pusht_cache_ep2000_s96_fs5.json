@@ -1,0 +1,13 @@
+{
+  "path": "C:\\Users\\LiBoyi\\Desktop\\Folders\\autoconference\\research\\ode-jepa\\data\\stable-wm\\pusht_expert_train.h5",
+  "size_bytes": 46300921856,
+  "size_gb": 46.301,
+  "max_episodes": 2000,
+  "frameskip": 5,
+  "seq_len": 4,
+  "window_stride": 20,
+  "image_size": 96,
+  "n_windows": 10990,
+  "source": "official_lewm_pusht_expert_train",
+  "synthetic": false
+}

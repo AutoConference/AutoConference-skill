@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+data/stable-wm/*.h5
+data/stable-wm/*.pt
+data/stable-wm/hf_pusht/
+outputs/**/*.pt
+outputs/**/*.log
+*.h5
+*.h5.zst

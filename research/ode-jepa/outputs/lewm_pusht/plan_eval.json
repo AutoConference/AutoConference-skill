@@ -1,0 +1,33 @@
+{
+  "ckpt": "outputs\\lewm_pusht\\ode_jepa_sigreg_last.pt",
+  "protocol": "LeWM-style CEM planning (real data only)",
+  "note": "Prior synthetic phase1 metrics are non-final and not used.",
+  "env_eval": {
+    "status": "ok",
+    "num_eval": 20,
+    "successes": 0,
+    "success_rate": 0.0,
+    "mean_return": 2.999175317388256,
+    "seconds": 116.5,
+    "backend": "gym_env",
+    "env_name": "gym_pusht/PushT-v0",
+    "obs_type": "pixels"
+  },
+  "h5_proxy_eval": {
+    "status": "ok",
+    "backend": "h5_latent_proxy",
+    "h5_meta": {
+      "path": "C:\\Users\\LiBoyi\\Desktop\\Folders\\autoconference\\research\\ode-jepa\\data\\stable-wm\\pusht_expert_train.h5",
+      "size_bytes": 46300921856,
+      "size_gb": 46.301
+    },
+    "num_eval": 20,
+    "success_rate": 1.0,
+    "mean_plan_cost": 5.171566826334128e-07,
+    "seconds": 5.06,
+    "definition": "success if CEM plan latent cost <= 1.25x expert-action cost to same goal frame"
+  },
+  "primary_success_rate": 0.0,
+  "primary_backend": "env",
+  "collapse_warning": "If train SIGReg plateaus and JEPA~0, latent-proxy success is non-informative; prefer gym_pusht env success_rate."
+}

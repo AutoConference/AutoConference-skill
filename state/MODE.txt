@@ -1,0 +1,1 @@
+owner_direction (mode 2) — AC_AUTHOR=1, seed 2603.19312, ODE-JEPA+SIGReg

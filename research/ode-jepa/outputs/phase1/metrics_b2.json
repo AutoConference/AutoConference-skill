@@ -1,0 +1,103 @@
+{
+  "ablation": "b2",
+  "steps": 250,
+  "device": "cuda:0",
+  "data_source": "synthetic",
+  "protocol_note": "Synthetic stand-in for LIBERO subset \u2014 LIBERO HDF5 not present on machine and loader not wired. Longer sequences / more steps than smoke for phase-1 comparison of collapse and open-loop drift.\n",
+  "seq_len": 16,
+  "n_synthetic": 256,
+  "seconds": 95.539,
+  "checkpoint": "outputs\\phase1\\b2_phase1.pt",
+  "first_losses": {
+    "loss/rec": 0.005486359354108572,
+    "loss/jepa": 0.0008536027744412422,
+    "loss/jepa_cos": 0.3283127546310425,
+    "loss/jvp": 0.0010049021802842617,
+    "loss/total": 0.007344864308834076
+  },
+  "last_losses": {
+    "loss/rec": 1.3528390354622388e-06,
+    "loss/jepa": 1.841265473423448e-10,
+    "loss/jepa_cos": 3.725290298461914e-08,
+    "loss/jvp": 1.7051939721346443e-11,
+    "loss/total": 1.353040261165006e-06
+  },
+  "metrics": {
+    "collapse/var_mean": 3.139846799227186e-09,
+    "collapse/var_min": 1.2823850141507886e-10,
+    "collapse/var_max": 1.8269293411421472e-08,
+    "collapse/active_frac": 0.03955078125,
+    "collapse/pair_cos_mean": 0.9999988898634911,
+    "collapse/pair_cos_std": 9.505985865132516e-07,
+    "smooth/path_length": 5.748060721089132e-05,
+    "smooth/hf_energy": 5.774844623829267e-06,
+    "smooth/pca_path_proxy": 1.6755382944211306e-05,
+    "recon/feature_mse": 1.4697569739041683e-06,
+    "recon/pixel_stub_mse": 1.513651298523655e-06,
+    "recon/feature_psnr_proxy": 45.64101696014404,
+    "collapse/pred_enc_cos": 0.9999999552965164,
+    "collapse/pred_enc_mse": 3.0630167196024627e-10,
+    "drift/mse_mean": 6.690220470773056e-05,
+    "drift/mse_mid": 6.68970978949801e-05,
+    "drift/mse_end": 3.06301656347735e-10,
+    "drift/rel_mse": 0.025186530081555247,
+    "drift/growth": 0.0002648554664119729
+  },
+  "history_tail": [
+    {
+      "step": 200,
+      "eval": true,
+      "collapse/var_mean": 3.133743375904885e-09,
+      "collapse/var_min": 1.2848553991584577e-10,
+      "collapse/var_max": 1.836626506435124e-08,
+      "collapse/active_frac": 0.0400390625,
+      "collapse/pair_cos_mean": 0.9999988824129105,
+      "collapse/pair_cos_std": 9.511465677292108e-07,
+      "smooth/path_length": 5.762296132161282e-05,
+      "smooth/hf_energy": 5.807487411857437e-06,
+      "smooth/pca_path_proxy": 1.6664506347296992e-05,
+      "recon/feature_mse": 1.4773132619438911e-06,
+      "recon/pixel_stub_mse": 1.5238887129953582e-06,
+      "recon/feature_psnr_proxy": 45.49581003189087,
+      "collapse/pred_enc_cos": 0.9999999478459358,
+      "collapse/pred_enc_mse": 2.940593862160723e-10,
+      "drift/mse_mean": 6.689995461783838e-05,
+      "drift/mse_mid": 6.689561269013211e-05,
+      "drift/mse_end": 2.9405938274662535e-10,
+      "drift/rel_mse": 0.025180280907079577,
+      "drift/growth": 0.0002542886850278592
+    },
+    {
+      "step": 210,
+      "loss/rec": 1.4227896372176474e-06,
+      "loss/jepa": 3.3785513275930157e-10,
+      "loss/jepa_cos": 5.960464477539063e-08,
+      "loss/jvp": 1.5343358528152606e-11,
+      "loss/total": 1.4231428622224485e-06
+    },
+    {
+      "step": 220,
+      "loss/rec": 1.5248374438669998e-06,
+      "loss/jepa": 1.0932432042976004e-10,
+      "loss/jepa_cos": 2.2351741790771484e-08,
+      "loss/jvp": 1.5183528045970007e-11,
+      "loss/total": 1.5249620446411427e-06
+    },
+    {
+      "step": 230,
+      "loss/rec": 9.093594144360395e-07,
+      "loss/jepa": 1.8870262297188134e-10,
+      "loss/jepa_cos": 2.9802322387695312e-08,
+      "loss/jvp": 1.7559153783763826e-11,
+      "loss/total": 9.095656992030854e-07
+    },
+    {
+      "step": 240,
+      "loss/rec": 1.3528390354622388e-06,
+      "loss/jepa": 1.841265473423448e-10,
+      "loss/jepa_cos": 3.725290298461914e-08,
+      "loss/jvp": 1.7051939721346443e-11,
+      "loss/total": 1.353040261165006e-06
+    }
+  ]
+}

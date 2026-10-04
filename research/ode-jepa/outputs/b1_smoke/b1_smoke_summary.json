@@ -1,0 +1,21 @@
+{
+  "ablation": "b1",
+  "steps": 10,
+  "device": "cuda",
+  "data_source": "synthetic",
+  "seconds": 4.055,
+  "checkpoint": "outputs\\b1_smoke\\b1_smoke.pt",
+  "last_logs": {
+    "step": 9,
+    "loss/rec": 0.00396406464278698,
+    "loss/jepa": 0.0002059488178929314,
+    "loss/jepa_cos": 0.11987626552581787,
+    "loss/total": 0.004170013591647148,
+    "collapse/var_mean": 5.611058284671344e-10,
+    "collapse/var_min": 1.890449602415245e-11,
+    "collapse/var_max": 3.0234588166422327e-09,
+    "collapse/active_frac": 0.0,
+    "collapse/pair_cos_mean": 0.999999463558197,
+    "collapse/pair_cos_std": 4.424086057497334e-07
+  }
+}

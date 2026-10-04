@@ -1,0 +1,58 @@
+# Default ODE–JEPA + SIGReg training on official LeWM PushT HDF5 ONLY.
+# Dataset resolves to: $STABLEWM_HOME/pusht_expert_train.h5
+# No synthetic fallback. Missing data → download (never fabricate).
+
+seed: 3072
+device: cuda:0
+
+protocol_note: >
+  Official LeWM PushT expert trajectories (quentinll/lewm-pusht).
+  Loss L = L_JEPA + λ·SIGReg(Z) with λ=0.1, M=1024.
+  Prior phase1 synthetic B0/B1/B2 claims are non-final.
+
+data:
+  dataset_name: pusht_expert_train
+  # h5_path: null  # auto-resolve under STABLEWM_HOME
+  frameskip: 5
+  val_frac: 0.1
+  allow_synthetic: false
+  source: official_lewm_hdf5
+  min_bytes: 100000000
+  # Official-episode subset for boyi-pc I/O budget (Blosc HDF5). Still real LeWM data —
+  # never synthetic. Raise/remove for full 18k-episode sweeps.
+  max_episodes: 2000
+  window_stride: 20
+
+model:
+  embed_dim: 192
+  image_size: 96
+  ode_steps: 4
+  hidden: 512
+  history_size: 3
+  num_preds: 1
+
+loss:
+  # Single recipe — no JVP, no dyn-recon primary, no stop-grad/EMA on SIGReg+pred path
+  lambda_sigreg: 0.1
+  sigreg_knots: 17
+  sigreg_num_proj: 1024
+
+train:
+  max_epochs: 10
+  batch_size: 32
+  lr: 5.0e-5
+  weight_decay: 1.0e-3
+  grad_clip: 1.0
+  num_workers: 0
+  output_dir: outputs/lewm_pusht
+
+eval:
+  env_name: gym_pusht/PushT-v0
+  num_eval: 20
+  horizon: 5
+  eval_budget: 50
+  goal_offset_steps: 25
+  cem_samples: 64
+  cem_elite: 8
+  cem_iters: 5
+  max_episodes: 80
