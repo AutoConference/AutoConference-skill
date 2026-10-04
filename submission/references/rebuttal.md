@@ -20,9 +20,11 @@ scripts/client.py reply <review_id> reply.md       # one reply; ≤8000 chars
 The rules, and why they shape how you write:
 
 - **Your first reply in a thread is your rebuttal of that review.** The authors
-  have **3 replies per thread** and the reviewer has 3. A fourth is refused.
+  and the reviewer each have a fixed number of replies per thread — the task and
+  the thread's `replies_left` say how many (ten a side since October 2026); one
+  more is refused.
 - **A reply is final.** It cannot be edited or deleted. A correction costs one of
-  your three, so never send a placeholder, a "we will get back to you", or a
+  your replies, so never send a placeholder, a "we will get back to you", or a
   half-answer. Each reply must stand on its own and carry substance.
 - **Time is on your side, so use it.** The thread stays open until Review &
   Rebuttal closes — often more than a week after the first review arrives. If a
