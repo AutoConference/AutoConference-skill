@@ -1,0 +1,17 @@
+{
+  "files": {
+    "AGENTS.md": "4bd8792edce9c4552b98d57ad0192ed2d81868475929a87071d11a99cd147f55",
+    "pipeline/activity.py": "caf3c52a5bc85d2408e58dd5ddba3ba87e1341cdb244b7c1ab4e2c5a30fb973c",
+    "pipeline/agent-turn.sh": "728f5111b79288b638d05624b04c470377fccbcab17ebb2091a081db62413d48",
+    "pipeline/locked.py": "b2a6fef734d39dca3c2625e7dda99b6c414b5fa7fd5ebb9471b005793e1d1f1f",
+    "pipeline/paper_facts.py": "8b4da7c34d2869db844ec9e2f006550a306822681dd72e21c4d989d9a951ade6",
+    "pipeline/render_stream.py": "355bbdfce49c2dedb222943841d5ce6c5ef88d1c50b3259ced19148a2022a698",
+    "pipeline/run-heartbeat.sh": "90aab52fd0172b382a08f42c9389b67f9708ce7c6ca0a7a6a5830db79cc38f4a",
+    "pipeline/statements.py": "fe57f243c7edcb04f5961877eab1e01b7ee589074a4e13c7e352a9b5bdb22e4a",
+    "pipeline/submit-paper.sh": "57adea03d694728bfde33feb7b66f9cc4921ea5ce438e87b816325e4d82124d6",
+    "pipeline/turn_upload.py": "0cbb053cf50828e04f7f817c5142fbf648f6c36779fe3700e21ffe5e4e47dc25",
+    "submission/references/survey.md": "478f09916cc4dcf415a3311fa781433a144bb5ce187e1b2f984b242cf3e528d2",
+    "submission/scripts/client.py": "b7c36a223c22a4e3cb429cb792946c70c017e30c179053b7495161fc000cb2bb"
+  },
+  "version": 1
+}

@@ -231,7 +231,8 @@ DEADLINE
 #   AC_COMPUTE_NOTES=...    anything else: a cluster, its queue, its limits
 #   AC_BUDGET_NOTES=...     the owner's budget, in tokens, hours or money
 #   state/strategy/*.md     its research strategy, rewritten after each cycle
-#   custom/all.md           the owner's instructions for every step, and
+#   custom/all.md           the owner's instructions for every step,
+#   custom/website.md       those they wrote on the website (KIT-008), and
 #   custom/step-<N>.md      for step N; custom/ is theirs, and `git pull`
 #                           never touches it
 owner_context() {
@@ -271,7 +272,16 @@ owner_context() {
 
 '
   done
-  for f in "$ROOT/custom/all.md" "$ROOT/custom/step-$base.md" "$ROOT/custom/step-$n.md"; do
+  # The owner's answers to its questions, given on the website (KIT-009):
+  # the latest of them, before their standing instructions.
+  if [ -s "$ROOT/state/answers.md" ]; then
+    printf '=== YOUR OWNER'"'"'S ANSWERS TO YOUR QUESTIONS (state/answers.md) ===\n'
+    tail -c 6000 "$ROOT/state/answers.md"
+    printf '\n=== END ===\n\n'
+  fi
+  # custom/website.md: what the owner wrote on the agent's page on the
+  # website (KIT-008), kept there by client.py sync.
+  for f in "$ROOT/custom/all.md" "$ROOT/custom/website.md" "$ROOT/custom/step-$base.md" "$ROOT/custom/step-$n.md"; do
     [ -s "$f" ] || continue
     printf '=== YOUR OWNER'"'"'S INSTRUCTIONS (%s) ===
 ' "${f#$ROOT/}"
@@ -282,6 +292,17 @@ owner_context() {
 '
   done
 }
+# A step's time limit guards against a turn that hangs; it is not a budget. A
+# model this machine serves (an Ollama, LM Studio, llama.cpp or vLLM provider)
+# is slower, so its steps get three times as long; AC_STEP_TIMEOUT_SCALE, a
+# whole number, sets the factor for any model.
+step_timeout() {
+  local s=${AC_STEP_TIMEOUT_SCALE:-}
+  case "$s" in ''|*[!0-9]*|0)
+    case "${AC_MODEL:-}" in ollama/*|lmstudio/*|llama.cpp/*|llamacpp/*|vllm/*|local/*) s=3 ;; *) s=1 ;; esac ;;
+  esac
+  echo $(( $1 * s ))
+}
 # Every research step is ONE headless turn (`claude -p`, `codex exec`, …): when
 # the model stops, nothing re-invokes it. A model used to interactive sessions
 # will otherwise start a long job in the background, schedule itself a wake-up
@@ -289,10 +310,22 @@ owner_context() {
 # paper, with the job still running unobserved (a live test, 2026-09-29: step
 # 4's calibration). Said once, in front of every step.
 turn_note() {
-  printf '=== THIS TURN ===\nThis step is one turn of a coding agent run from a script. When you finish, nothing re-invokes you: no wake-ups, no notifications, no later check-in. Run what the step needs to completion inside this turn -- a long job in the foreground, or started and then waited for until it ends. Never end the turn while a process you started is still running, and never schedule a wake-up: the next step starts the moment you stop, and it checks this step'"'"'s outputs. Other agents may be running on this machine: stop only processes you started, by their process id -- never pkill or killall by name or pattern -- and keep logs and temporary files in this directory, not in /tmp.\n=== END THIS TURN ===\n\n'
+  printf '=== THIS TURN ===\nThis step is one turn of a coding agent run from a script. When you finish, nothing re-invokes you: no wake-ups, no notifications, no later check-in. Run what the step needs to completion inside this turn -- a long job in the foreground, or started and then waited for until it ends. Never end the turn while a process you started is still running, and never schedule a wake-up: the next step starts the moment you stop, and it checks this step'"'"'s outputs. Other agents may be running on this machine: stop only processes you started, by their process id -- never pkill or killall by name or pattern -- and keep logs and temporary files in this directory, not in /tmp.\nNobody answers questions during this turn. Where a skill says to ask the user or wait for a confirmation, decide as a careful researcher would, from the plan, these files and your owner'"'"'s instructions below; write the decision and why in refine-logs/DECISIONS.md and go on. Stop only for what this machine cannot do or a rule you cannot keep, and then say exactly what is needed.\n=== END THIS TURN ===\n\n'
 }
-skill(){ local label=$1 prompt=$2 tmo=${3:-7200}
-         prompt="$(turn_note)$(deadline_note)$(owner_context "$label")$prompt"
+# A step trying again after it failed (run-heartbeat.sh) is told what went
+# wrong the last time, ahead of everything else.
+retry_note() {
+  local n base f
+  n=${1%%/*}; base=$(printf '%s' "$n" | tr -dc '0-9')
+  f="$W/refine-logs/RETRY-step-$base.md"
+  [ -n "$base" ] && [ -s "$f" ] || return 0
+  printf '=== THE LAST ATTEMPT AT THIS STEP FAILED (refine-logs/RETRY-step-%s.md) ===\n' "$base"
+  tail -c 6000 "$f"
+  printf '\n=== END ===\nRead that first: fix what went wrong, or reach the step'"'"'s goal another way that cannot fail like that. A step that ran out of time did too much in one go: do less in it, or split the work. Never lower a check'"'"'s bar, or change a check, to get past it.\n\n'
+}
+skill(){ local label=$1 prompt=$2 tmo
+         tmo=$(step_timeout "${3:-7200}")
+         prompt="$(turn_note)$(retry_note "$label")$(deadline_note)$(owner_context "$label")$prompt"
          if [ -n "$DRY" ]; then
            printf '\n\033[1m===== %s =====\033[0m\n%s\n' "$label" "$prompt"
            printf '\033[2m[%s chars]\033[0m\n' "$(printf '%s' "$prompt" | wc -c)"
@@ -363,6 +396,30 @@ seed changes nothing and reporting it as a spread would be fabricated), at least
 \$(jq -r .token_budget.max_truncation_rate_per_cell $QUALITY) of any cell truncated."
 QBAR=$(eval "printf '%s' \"$QBAR\"")
 
+# No reviewer backend on this machine, and no person to ask (a live user,
+# 2026-10-04: "every so often a manual-review page opens"). `— reviewer:
+# manual` is what keeps ARIS off Codex MCP, which cannot be installed here --
+# but it routes every review to a manual-review MCP server that opens a
+# browser page for a person to paste the prompt into another model, and a
+# research turn, with every permission, once installed that server itself.
+# Of the directives ARIS offers (codex, oracle-pro, agy, manual) none
+# degrades to the executor: each names a backend, the first three fall back
+# to Codex, and manual stops when its server is missing. So the directive
+# stays, the server's tools are kept out of reach (agent-turn.sh), and every
+# step that passes it is told this, in the same words:
+NO_REVIEWER=$(cat <<'TXT'
+There is no external reviewer on this machine and no person to ask. Where
+the skill routes a review to a reviewer backend (Codex MCP, Oracle, the agy or
+manual-review MCP), or says a reviewer MCP is not installed and to stop: do
+not stop, and do not install anything. Do that review yourself, as a separate,
+adversarial pass over the artifact, say in its report that it is a self-review
+by the executor (never cross-model acceptance), and continue the skill. Never
+install, add or configure an MCP server, a plugin or a CLI setting (no `claude
+mcp add`, nothing under ~/.claude, ~/.codex or ~/.config), never open a
+browser, and never wait for a person.
+TXT
+)
+
 say "workspace $W   (paper=${PAPER:-none} backend=$("$ROOT/pipeline/agent-turn.sh" --which 2>/dev/null || echo none) kind=${KIND:-undecided} pilot=${AC_PILOT:-0})"
 
 # ── 1 ─ ARIS: paper -> ideas -> plan ─────────────────────────────────────────
@@ -373,6 +430,8 @@ say "workspace $W   (paper=${PAPER:-none} backend=$("$ROOT/pipeline/agent-turn.s
 if want 1; then
   skill "1/15 idea-discovery (ARIS)" \
 "/idea-discovery \"${DIRECTION:-the direction implied by the reference paper}\"${PAPER:+ — ref paper: $PAPER}${ARIS_REVIEWER_ARG} — effort: balanced — assurance: submission — auto proceed: true — render html: false
+
+$NO_REVIEWER
 
 $QBAR
 
@@ -469,6 +528,8 @@ elif want 4; then
   skill "4/15 calibrate the token budget (ARIS experiment-bridge, calibration only)" \
 "/experiment-bridge refine-logs/EXPERIMENT_PLAN.md — gpu: local${ARIS_REVIEWER_ARG} — effort: lite
 
+$NO_REVIEWER
+
 CALIBRATION ONLY. Do not run the sweep.
 
 RUN IT, do not just write it. This step is not finished when the calibration
@@ -549,8 +610,8 @@ peer review exists to catch."
   * Greedy decoding. Variance comes from the instance seed, not from sampling."
     GPU_LIST=${AC_GPUS:-0}; case "$GPU_LIST" in none|NONE) GPU_LIST="" ;; esac
     S5_ENV="\"CUDA_VISIBLE_DEVICES\": \"$GPU_LIST\", \"HF_HOME\": \"$HFH\""
-    S5_TAIL="Greedy decoding on fixed instance seeds is bit-for-bit reproducible
-here, so accuracy-like fields belong in \`exact\`; only wall-clock is \`tolerant\`."
+    S5_TAIL="Greedy decoding on fixed instance seeds reproduces here, so accuracy-like
+fields belong in \`exact\`; wall-clock time and throughput go in \`timing\`."
   else
     if [ "$KIND" = theory ]; then
       S5_HEAD="This study's contribution is its derivations. The experiments are the numerical
@@ -579,11 +640,16 @@ partial run reported as a complete one is the thing peer review exists to catch.
   * Fix every seed and record it; the spread you report comes from seeds you
     name, never from uncontrolled randomness."
     S5_ENV=""
-    S5_TAIL="A computation with fixed seeds is bit-for-bit reproducible, so its outputs
-belong in \`exact\`; only timings are \`tolerant\`."
+    S5_TAIL="A computation with fixed seeds reproduces, so its outputs belong in
+\`exact\` (a float is compared to floating-point precision, so a process pool
+summing in another order is fine). A result that really varies from run to run
+-- a nondeterministic GPU kernel, thread timing -- goes in \`tolerant\` with the
+band you saw across two runs; wall-clock time and throughput go in \`timing\`."
   fi
   skill "5/15 experiment-bridge (ARIS)" \
 "/experiment-bridge refine-logs/EXPERIMENT_PLAN.md — gpu: local${ARIS_REVIEWER_ARG} — effort: balanced
+
+$NO_REVIEWER
 
 $S5_HEAD
 
@@ -603,13 +669,16 @@ is separate from any run-provenance manifest you may also want to write:
    \"experiments\": [{\"script\": \"<path, relative to runs/ or to the workspace>\",
                      \"output\": \"<results file it writes, relative to runs/>\",
                      \"args\": [], \"timeout_s\": 7200,
-                     \"exact\": [\"field names that must reproduce bit for bit\"],
-                     \"tolerant\": {\"wall_s\": 0.3}}]}
+                     \"exact\": [\"field names that must come out the same\"],
+                     \"tolerant\": {\"<a field that varies run to run>\": 0.05},
+                     \"timing\": [\"wall_s\"]}]}
 
-Every leaf number in your results must be named in \`exact\` or \`tolerant\`.
-research/scripts/check_reproduction.py re-runs each script from a clean copy and FAILS on any number
-that is in neither, because an unclassified number is one nobody decided was
-reproducible. $S5_TAIL$PILOT" 25200 || exit 1
+Every leaf number in your results must be named in \`exact\`, \`tolerant\` or
+\`timing\`. research/scripts/check_reproduction.py re-runs each script from a
+clean copy and FAILS on any number that is in none of them, because an
+unclassified number is one nobody decided was reproducible. \`timing\` fields
+measure the machine, so they are re-measured and never compared; report them in
+the paper as approximate, with the hardware. $S5_TAIL$PILOT" 25200 || exit 1
 fi
 
 # ── 6 ─ ARIS: statistics, then what the numbers support ─────────────────────
@@ -957,6 +1026,8 @@ fi
 if want 13; then
   skill "13/15 kill-argument (ARIS)" \
 "/kill-argument submission.json${ARIS_REVIEWER_ARG} — effort: balanced
+
+$NO_REVIEWER
 
 Write the strongest rejection memo you can against this paper, then adjudicate
 each attack: which land, which do not, and which are fixable before submission.

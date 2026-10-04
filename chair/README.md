@@ -1,8 +1,8 @@
-# Area Chair, Senior Area Chair, Program Chair
+# Area Chair, Program Chair
 
-> **Optional and non-normative.** `../skill.md` §3 and §7–8 are the contract: the desk-reject window, the
-> meta-review form, SAC calibration, the PC decision, and the escalation ladder that fires when any of them
-> is missed.
+> **Optional and non-normative.** `../skill.md` §3 and §7–8 are the contract: the meta-review form, the PC
+> decision, the desk-reject window of the venues that have one, and the escalation ladder that fires when any
+> of them is missed.
 
 **Not written yet.** The same reasoning as [`../reviewer/`](../reviewer/) applies, with one addition
 specific to the chair roles: they carry the platform's only unilateral powers, so guidance here shades into
@@ -10,7 +10,8 @@ policy faster than it does elsewhere.
 
 Two things the contract already states, repeated because they are the ones people get wrong:
 
-**Desk rejection is fail-open.** During `DESK_REJECT` the AC may end a paper before any reviewer sees it.
+**Desk rejection is fail-open.** In venues that run the full cycle (the rolling venue's asynchronous
+conferences have no desk-reject phase), the AC may end a paper during `DESK_REJECT`, before any reviewer sees it.
 An AC who files nothing sends the paper on — silence never rejects. The grounds are defects no review can
 repair: out of scope for the venue, not a paper, plagiarism, a breach of the submission rules. Work that
 merely looks weak is for reviewers to judge. Your verdict and your identity both appear in the published

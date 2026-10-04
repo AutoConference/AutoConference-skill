@@ -5,6 +5,13 @@
     codex exec --json ...                              | render_stream.py --format codex
     gemini -p ... -o stream-json                        | render_stream.py --format gemini
     opencode run --format json ...                      | render_stream.py --format opencode
+    cursor-agent -p --output-format stream-json ...     | render_stream.py --format cursor
+    copilot --output-format json ...                    | render_stream.py --format copilot
+    goose run --output-format stream-json ...           | render_stream.py --format goose
+    droid exec -o stream-json ...                       | render_stream.py --format droid
+    kimi -p ... --output-format stream-json             | render_stream.py --format kimi
+(Qwen Code and Amp print Claude Code's own stream-json; Crush prints text,
+which goes through as it came.)
 
 A CLI's plain output says what the agent concluded and little about how, so the
 turn the runner uploads (consent §4A) would hold the answer and not the path to
@@ -24,15 +31,52 @@ size and SHA-256, not copied in as base64.
 """
 import hashlib
 import json
+import os
+import re
 import sys
+import time
 
 # The tool input field that says what a call was about, shown on its [tool]
 # line; the rest of the input follows on an [input] line.
 KEY_FIELDS = ("command", "file_path", "path", "pattern", "url", "query", "prompt")
 
+# The same events, one JSON line each, for its owner to watch live
+# (pipeline/watch.py; owner, 2026-10-03: never leave them wondering what it is
+# doing). The record above is unchanged; this is a copy, clipped, in a file
+# agent-turn.sh names, and nothing here may fail a turn.
+LIVE = os.environ.get("AC_LIVE_FILE") or ""
+LIVE_LABEL = os.environ.get("AC_LIVE_LABEL") or ""
+LIVE_MAX = 20000
+_last_text = None
+
+
+def live(kind: str, text: str) -> None:
+    global _last_text
+    if not LIVE:
+        return
+    if kind == "text":
+        if text == _last_text:
+            return  # the answer, printed again at the end
+        _last_text = text
+    if len(text) > LIVE_MAX:
+        text = text[:LIVE_MAX] + f"\n[... {len(text) - LIVE_MAX} more characters in the log]"
+    try:
+        with open(LIVE, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": round(time.time(), 3), "pid": os.getpid(), "label": LIVE_LABEL, "kind": kind, "text": text}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
 
 def emit(text: str) -> None:
     print(text, flush=True)
+    if LIVE:
+        m = re.match(r"\[([a-z_]+)\]( |$)", text)
+        if m and m.group(1) in ("thinking", "tool", "input", "result", "error", "user", "session", "done", "todo"):
+            live(m.group(1), text[m.end():])
+        elif m or text.startswith("[block:"):
+            live("other", text)
+        else:
+            live("text", text)
 
 
 def as_text(v) -> str:
@@ -121,6 +165,8 @@ def claude(events) -> int:
                     unknown(block, "block")
         elif kind == "result":
             final = ev
+        elif kind == "stream_event":
+            continue  # progress only (Qwen Code's goal state, Claude Code's partial messages)
         else:
             unknown(ev)
     if final is not None:
@@ -251,7 +297,7 @@ def gemini(events) -> int:
             emit(f"[error] {ev.get('message')}")
         elif kind == "result":
             s = ev.get("stats") or {}
-            tok = "".join(f" {k}={s[k]}" for k in ("duration_ms", "input_tokens", "output_tokens", "total_tokens", "tool_calls") if k in s)
+            tok = "".join(f" {k}={s[k]}" for k in ("duration_ms", "input_tokens", "output_tokens", "total_tokens", "cached", "tool_calls") if k in s)
             emit(f"[done] status={ev.get('status')}{tok}")
             if ev.get("error"):
                 emit(f"[error] {(ev.get('error') or {}).get('message')}")
@@ -308,6 +354,275 @@ def opencode(events) -> int:
     return 0
 
 
+# ── Cursor's CLI: -p --output-format stream-json ───────────────────────────
+def _cursor_call(tc: dict):
+    """(name, call) of a Cursor tool call: {"shellToolCall": {"args", "result"}}
+    as printed, or the message form {"tool": {"case", "value"}}."""
+    if isinstance(tc.get("tool"), dict) and "case" in tc["tool"]:
+        name, call = tc["tool"].get("case") or "tool", tc["tool"].get("value")
+    else:
+        key = next((k for k in tc if k.endswith("ToolCall")), None)
+        name, call = (key, tc.get(key)) if key else ("tool", tc)
+    if name == "function" or (isinstance(call, dict) and "arguments" in call and "name" in call):
+        fn = call if isinstance(call, dict) else {}
+        args = fn.get("arguments")
+        try:
+            args = json.loads(args) if isinstance(args, str) else args
+        except ValueError:
+            pass
+        return str(fn.get("name") or "tool"), {"args": args, "result": fn.get("result")}
+    name = name[: -len("ToolCall")] if name.endswith("ToolCall") else name
+    return name, call if isinstance(call, dict) else {}
+
+
+def _cursor_result(r) -> str:
+    if not isinstance(r, dict):
+        return as_text(r)
+    out = []
+    for k in ("stdout", "content", "output", "text", "markdown", "message"):
+        if isinstance(r.get(k), str) and r[k]:
+            out.append(r[k])
+    if isinstance(r.get("stderr"), str) and r["stderr"].strip():
+        out.append(r["stderr"])
+    return "\n".join(out) if out else json.dumps(r, ensure_ascii=False)
+
+
+def cursor(events) -> int:
+    final = None
+    thought: list = []
+    for ev in events:
+        kind = ev.get("type")
+        if kind == "system":
+            if ev.get("subtype") == "init":
+                emit(f"[session] model={ev.get('model')} cwd={ev.get('cwd')}")
+            else:
+                unknown(ev, "system")
+        elif kind == "user":
+            continue  # the instruction: the record's prompt holds it
+        elif kind == "assistant":
+            for block in (ev.get("message") or {}).get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    if (block.get("text") or "").strip():
+                        emit(block["text"])
+                else:
+                    unknown(block, "block")
+        elif kind == "thinking":
+            if ev.get("subtype") == "delta":
+                thought.append(ev.get("text") or "")
+            elif "".join(thought).strip():
+                emit(f"[thinking] {''.join(thought).strip()}")
+                thought.clear()
+        elif kind == "tool_call":
+            name, call = _cursor_call(ev.get("tool_call") or {})
+            if ev.get("subtype") == "started":
+                tool_lines(name, call.get("args"))
+            elif ev.get("subtype") == "completed":
+                res = call.get("result") or {}
+                if isinstance(res, dict) and "success" in res:
+                    emit(f"[result] {_cursor_result(res['success'])}")
+                elif res:
+                    bad = next((res[k] for k in ("failure", "error", "rejected") if isinstance(res, dict) and k in res), res)
+                    emit(f"[error] {_cursor_result(bad)}")
+        elif kind == "result":
+            final = ev
+        else:
+            unknown(ev)
+    if final is not None:
+        u = final.get("usage") or {}
+        tok = ""
+        if isinstance(u, dict) and u:
+            tin = int(u.get("inputTokens") or u.get("input_tokens") or 0)
+            tout = int(u.get("outputTokens") or u.get("output_tokens") or 0)
+            cache = int(u.get("cacheReadTokens") or u.get("cache_read_input_tokens") or 0)
+            tok = f" tokens_in={tin + cache} tokens_out={tout} cache_read={cache}"
+        emit(f"[done] duration_ms={final.get('duration_ms')}{tok}")
+        if final.get("result"):
+            emit(final["result"])
+        return 1 if final.get("is_error") else 0
+    return 0
+
+
+# ── GitHub Copilot CLI: --output-format json ──────────────────────────────
+def copilot(events) -> int:
+    answer = None
+    tin = tout = cache = 0
+    for ev in events:
+        kind = ev.get("type")
+        d = ev.get("data") or {}
+        if kind == "assistant.message":
+            if (d.get("content") or "").strip():
+                emit(d["content"])
+                answer = d["content"]
+            # Its tool requests show as they run (tool.execution_start).
+        elif kind == "assistant.reasoning":
+            text = d.get("content") or d.get("text") or ""
+            if text.strip():
+                emit(f"[thinking] {text}")
+        elif kind == "tool.execution_start":
+            tool_lines(d.get("toolName"), d.get("arguments"))
+        elif kind == "tool.execution_complete":
+            r = d.get("result")
+            text = result_text(r.get("content")) if isinstance(r, dict) and "content" in r else as_text(r or "")
+            code = (d.get("shellExecution") or {}).get("exitCode")
+            if d.get("success") is False or code not in (0, None):
+                emit(f"[error]{f' exit {code}:' if code not in (0, None) else ''} {text or as_text(d.get('error') or '')}")
+            else:
+                emit(f"[result] {text}")
+        elif kind == "assistant.usage":
+            tin += int(d.get("inputTokens") or 0)
+            tout += int(d.get("outputTokens") or 0)
+            cache += int(d.get("cacheReadTokens") or 0)
+        elif kind == "session.error":
+            emit(f"[error] {d.get('message') or json.dumps(d, ensure_ascii=False)}")
+        elif ev.get("ephemeral") or kind in ("user.message", "assistant.turn_start", "assistant.turn_end", "result"):
+            continue  # the stream's own progress, and the instruction itself
+        else:
+            unknown(ev)
+    if tin or tout:
+        emit(f"[done] tokens_in={tin} tokens_out={tout} cache_read={cache}")
+    if answer:
+        emit(answer)
+    return 0
+
+
+# ── Goose: run --output-format stream-json ────────────────────────────────
+def goose(events) -> int:
+    buf: list = []
+    answer = None
+
+    def flush():
+        nonlocal answer
+        text = "".join(buf)
+        buf.clear()
+        if text.strip():
+            emit(text)
+            answer = text
+
+    for ev in events:
+        kind = ev.get("type")
+        if kind == "message":
+            m = ev.get("message") or {}
+            for c in m.get("content") or []:
+                t = c.get("type") if isinstance(c, dict) else None
+                if t == "text" and m.get("role") == "assistant":
+                    buf.append(c.get("text") or "")
+                    continue
+                flush()
+                if t in ("thinking", "reasoning"):
+                    text = c.get("thinking") or c.get("text") or ""
+                    if text.strip():
+                        emit(f"[thinking] {text}")
+                elif t == "toolRequest":
+                    call = (c.get("toolCall") or {}).get("value") or {}
+                    tool_lines(call.get("name"), call.get("arguments"))
+                elif t == "toolResponse":
+                    r = c.get("toolResult") or {}
+                    v = r.get("value")
+                    text = result_text(v.get("content")) if isinstance(v, dict) and "content" in v else as_text(v or r.get("error") or "")
+                    bad = r.get("status") == "error" or (isinstance(v, dict) and v.get("isError"))
+                    emit(f"{'[error]' if bad else '[result]'} {text}")
+                elif t == "text":
+                    continue  # the instruction
+                else:
+                    unknown(c, f"block:{t}")
+        elif kind == "complete":
+            flush()
+            cache = int(ev.get("cache_read_input_tokens") or 0)
+            emit(f"[done] tokens_in={int(ev.get('input_tokens') or 0)} tokens_out={int(ev.get('output_tokens') or 0)} cache_read={cache}")
+        elif kind == "error":
+            flush()
+            emit(f"[error] {ev.get('error') or ev.get('message') or json.dumps(ev, ensure_ascii=False)}")
+        else:
+            flush()
+            unknown(ev)
+    flush()
+    if answer:
+        emit(answer)
+    return 0
+
+
+# ── Factory's Droid: exec -o stream-json ──────────────────────────────────
+def droid(events) -> int:
+    answer = None
+    for ev in events:
+        kind = ev.get("type")
+        if kind == "system":
+            if ev.get("subtype") == "init":
+                emit(f"[session] model={ev.get('model')} cwd={ev.get('cwd')}")
+            else:
+                unknown(ev, "system")
+        elif kind == "message":
+            if ev.get("role") == "assistant" and (ev.get("text") or "").strip():
+                emit(ev["text"])
+                answer = ev["text"]
+            # The user's message is the instruction: the record's prompt holds it.
+        elif kind in ("reasoning", "thinking"):
+            text = ev.get("text") or ev.get("thinking") or ""
+            if text.strip():
+                emit(f"[thinking] {text}")
+        elif kind == "tool_call":
+            tool_lines(ev.get("toolName") or ev.get("toolId"), ev.get("parameters"))
+        elif kind == "tool_result":
+            emit(f"{'[error]' if ev.get('isError') else '[result]'} {as_text(ev.get('value') or '')}")
+        elif kind == "completion":
+            u = ev.get("usage") or {}
+            cache = int(u.get("cache_read_input_tokens") or u.get("cacheReadTokens") or 0)
+            emit(f"[done] turns={ev.get('numTurns')} duration_ms={ev.get('durationMs')}"
+                 f" tokens_in={int(u.get('input_tokens') or u.get('inputTokens') or 0)}"
+                 f" tokens_out={int(u.get('output_tokens') or u.get('outputTokens') or 0)} cache_read={cache}")
+            answer = ev.get("finalText") or answer
+        elif kind == "error":
+            emit(f"[error] {ev.get('message') or json.dumps(ev, ensure_ascii=False)}")
+        else:
+            unknown(ev)
+    if answer:
+        emit(answer)
+    return 0
+
+
+# ── Kimi Code: -p --output-format stream-json ─────────────────────────────
+def kimi(events) -> int:
+    answer = None
+    for ev in events:
+        role = ev.get("role")
+        if role == "meta":
+            continue  # its version, and how to resume the session
+        if role == "assistant":
+            content = ev.get("content")
+            parts = content if isinstance(content, list) else [{"type": "text", "text": content or ""}]
+            think = ev.get("reasoning_content") or ""
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") in ("think", "thinking"):
+                    think += part.get("think") or part.get("thinking") or part.get("text") or ""
+                elif part.get("type") == "text" and (part.get("text") or "").strip():
+                    if think.strip():
+                        emit(f"[thinking] {think.strip()}")
+                        think = ""
+                    emit(part["text"])
+                    answer = part["text"]
+            if think.strip():
+                emit(f"[thinking] {think.strip()}")
+            for tc in ev.get("tool_calls") or []:
+                fn = (tc or {}).get("function") or {}
+                args = fn.get("arguments")
+                try:
+                    args = json.loads(args) if isinstance(args, str) else args
+                except ValueError:
+                    pass
+                tool_lines(fn.get("name"), args)
+        elif role == "tool":
+            emit(f"[result] {result_text(ev.get('content'))}")
+        elif role == "user":
+            continue  # the instruction
+        else:
+            unknown(ev)
+    if answer:
+        emit(answer)
+    return 0
+
+
 def events(stream):
     """JSON events from the stream; any other line goes straight through."""
     for raw in stream:
@@ -345,6 +660,7 @@ def run(cmd, render) -> int:
     except OSError as e:
         emit(f"[error] could not start {cmd[0]}: {e}")
         return 127
+    live("start", cmd[0])
 
     def forward(sig, _frame):
         try:
@@ -360,7 +676,15 @@ def run(cmd, render) -> int:
     else:
         render(events(stream))
     rc = proc.wait()
-    return 128 - rc if rc < 0 else rc
+    rc = 128 - rc if rc < 0 else rc
+    live("end", str(rc))
+    # A file the turn was given (Droid reads its instruction from one) goes with it.
+    if os.environ.get("AC_TURN_CLEANUP"):
+        try:
+            os.remove(os.environ["AC_TURN_CLEANUP"])
+        except OSError:
+            pass
+    return rc
 
 
 def main() -> int:
@@ -372,7 +696,8 @@ def main() -> int:
     args = sys.argv[1:]
     if len(args) >= 2 and args[0] == "--format":
         fmt, args = args[1], args[2:]
-    render = {"claude": claude, "codex": codex, "gemini": gemini, "opencode": opencode}.get(fmt)
+    render = {"claude": claude, "codex": codex, "gemini": gemini, "opencode": opencode, "cursor": cursor,
+              "copilot": copilot, "goose": goose, "droid": droid, "kimi": kimi}.get(fmt)
     if args[:1] == ["--"] and len(args) > 1:
         return run(args[1:], render)
     if render is None:
