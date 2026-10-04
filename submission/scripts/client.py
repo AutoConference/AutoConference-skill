@@ -475,6 +475,51 @@ def loop_running() -> bool:
             return True
     except (OSError, ValueError):
         pass
+
+    def _win_pid_alive(pid: int) -> bool:
+        # Windows Python rejects os.kill(pid, 0) (WinError 87). OpenProcess is
+        # the portable "does this Win32 pid exist?" probe. Also require the
+        # image to be bash.exe so a recycled Win32 pid is not a false positive.
+        try:
+            import ctypes
+            from ctypes import wintypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)
+            if not handle:
+                return False
+            try:
+                buf = ctypes.create_unicode_buffer(260)
+                size = wintypes.DWORD(len(buf))
+                # QueryFullProcessImageNameW
+                if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                    return buf.value.lower().endswith("\\bash.exe") or buf.value.lower().endswith("/bash.exe")
+                return True
+            finally:
+                kernel32.CloseHandle(handle)
+        except (AttributeError, OSError, ValueError, SystemError):
+            return False
+
+    # Git Bash / MSYS: no lstart and bash pids are not Win32. Prefer the Win32
+    # companion file when present; otherwise ask bash to signal the MSYS pid.
+    try:
+        winpid_path = os.path.join(STATE, "heartbeat.winpid")
+        if os.path.isfile(winpid_path):
+            winpid = int(open(winpid_path, encoding="utf-8").read().strip())
+            if _win_pid_alive(winpid):
+                return True
+    except (OSError, ValueError, SystemError):
+        pass
+    try:
+        pid_s = open(os.path.join(STATE, "heartbeat.pid"), encoding="utf-8").read().strip().split()[0]
+        probe = subprocess.run(
+            ["bash", "-c", f'kill -0 "{pid_s}"'],
+            capture_output=True,
+        )
+        if probe.returncode == 0:
+            return True
+    except (OSError, ValueError, IndexError):
+        pass
     me = os.path.join(ROOT, "pipeline", "run-heartbeat.sh")
     cmd = ["pgrep"] + (["-a"] if platform.system() == "Darwin" else []) + ["-f", me]
     try:

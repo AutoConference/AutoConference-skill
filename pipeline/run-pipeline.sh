@@ -97,6 +97,15 @@ done
 PAPER="${POS[0]:-}"
 DIRECTION="${POS[1]:-}"
 
+# ARIS cross-model reviewer backend (from state/runner.env via heartbeat export).
+# empty|auto|automatic|none → omit directive → Codex MCP default (automatic review).
+# manual → HITL manual-review MCP. Other values passed through (codex|oracle-pro|agy|…).
+_aris_rev=$(printf '%s' "${AC_ARIS_REVIEWER:-}" | tr '[:upper:]' '[:lower:]')
+case "$_aris_rev" in
+  ''|auto|automatic|none) ARIS_REVIEWER_ARG="" ;;
+  *) ARIS_REVIEWER_ARG=" — reviewer: ${AC_ARIS_REVIEWER}" ;;
+esac
+
 STEPS=(
   "1|idea-discovery|ARIS|paper -> ideas -> EXPERIMENT_PLAN.md"
   "2|ablation-planner|ARIS|force baselines and ablations into the plan"
@@ -363,7 +372,7 @@ say "workspace $W   (paper=${PAPER:-none} backend=$("$ROOT/pipeline/agent-turn.s
 # a silently skipped audit is how the first run shipped without a single equation.
 if want 1; then
   skill "1/15 idea-discovery (ARIS)" \
-"/idea-discovery \"${DIRECTION:-the direction implied by the reference paper}\"${PAPER:+ — ref paper: $PAPER} — reviewer: manual — effort: balanced — assurance: submission — auto proceed: true — render html: false
+"/idea-discovery \"${DIRECTION:-the direction implied by the reference paper}\"${PAPER:+ — ref paper: $PAPER}${ARIS_REVIEWER_ARG} — effort: balanced — assurance: submission — auto proceed: true — render html: false
 
 $QBAR
 
@@ -458,7 +467,7 @@ if want 4 && [ "$KIND" != llm-generation ]; then
   say "4/15 token-budget calibration: not a $KIND study's instrument; skipped"
 elif want 4; then
   skill "4/15 calibrate the token budget (ARIS experiment-bridge, calibration only)" \
-"/experiment-bridge refine-logs/EXPERIMENT_PLAN.md — gpu: local — reviewer: manual — effort: lite
+"/experiment-bridge refine-logs/EXPERIMENT_PLAN.md — gpu: local${ARIS_REVIEWER_ARG} — effort: lite
 
 CALIBRATION ONLY. Do not run the sweep.
 
@@ -574,7 +583,7 @@ partial run reported as a complete one is the thing peer review exists to catch.
 belong in \`exact\`; only timings are \`tolerant\`."
   fi
   skill "5/15 experiment-bridge (ARIS)" \
-"/experiment-bridge refine-logs/EXPERIMENT_PLAN.md — gpu: local — reviewer: manual — effort: balanced
+"/experiment-bridge refine-logs/EXPERIMENT_PLAN.md — gpu: local${ARIS_REVIEWER_ARG} — effort: balanced
 
 $S5_HEAD
 
@@ -947,7 +956,7 @@ fi
 # ── 13 ─ ARIS: try to kill it before a reviewer does ────────────────────────
 if want 13; then
   skill "13/15 kill-argument (ARIS)" \
-"/kill-argument submission.json — reviewer: manual — effort: balanced
+"/kill-argument submission.json${ARIS_REVIEWER_ARG} — effort: balanced
 
 Write the strongest rejection memo you can against this paper, then adjudicate
 each attack: which land, which do not, and which are fixable before submission.

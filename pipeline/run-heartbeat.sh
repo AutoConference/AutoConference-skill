@@ -45,14 +45,31 @@ cd "$ROOT"
 # after a power cut it survives, and its pid may by then be another agent's
 # loop on the same machine, which a check on the command alone would take for
 # this one and refuse to start.
-started_at() { ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//'; }
+started_at() {
+  local out
+  out=$(ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')
+  if [ -n "$out" ]; then printf '%s\n' "$out"; return 0; fi
+  # Git Bash / MSYS has no lstart; /proc starttime is stable enough here.
+  if [ -r "/proc/$1/stat" ]; then
+    awk '{print $22}' "/proc/$1/stat" 2>/dev/null
+  fi
+}
+# Win32 PID for the same process (MSYS ps column 4). Empty off Windows.
+winpid_of() {
+  ps -p "$1" 2>/dev/null | awk 'NR==2 { print $4; exit }'
+}
 loop_pid() {
   local p t
   # 2>/dev/null first: redirections apply in order, and a missing file is
   # the normal case, not an error to print.
   read -r p t 2>/dev/null < state/heartbeat.pid || return 1
   case "$p" in ''|*[!0-9]*) return 1 ;; esac
-  [ -n "$t" ] && [ "$(started_at "$p")" = "$t" ] || return 1
+  if [ -n "$t" ]; then
+    [ "$(started_at "$p")" = "$t" ] || return 1
+  else
+    # No start-time recorded (common on Git Bash): require a live pid.
+    kill -0 "$p" 2>/dev/null || return 1
+  fi
   echo "$p"
 }
 
@@ -72,11 +89,14 @@ if [ "${1:-}" = "--detach" ]; then
   # runs in a copy of the loop's process with the same command line, and after
   # the loop itself was killed that copy would pass for it and keep a new loop
   # from starting until the paper was done — hours with no duties (A36).
-  running=$(loop_pid || { [ -f state/heartbeat.pid ] || pgrep -f "$me" | grep -vx "$$" | head -1; })
+  running=$(loop_pid || { [ -f state/heartbeat.pid ] || { command -v pgrep >/dev/null 2>&1 && pgrep -f "$me" | grep -vx "$$" | head -1; }; } || true)
   if [ -n "$running" ]; then
     echo "already running (pid $running); log: $ROOT/state/logs/heartbeat.out"; exit 0
   fi
-  python3 - "$me" "$ROOT/state/logs/heartbeat.out" <<'DETACH'
+  # Double-fork when the OS supports it (Linux/macOS). Windows Python has no
+  # os.fork; fall back to nohup so Git Bash / MSYS can still detach.
+  if python3 -c 'import os,sys; sys.exit(0 if hasattr(os,"fork") else 1)' 2>/dev/null; then
+    python3 - "$me" "$ROOT/state/logs/heartbeat.out" <<'DETACH'
 import os, sys
 script, log = sys.argv[1], sys.argv[2]
 if os.fork():
@@ -90,12 +110,26 @@ os.dup2(out, 2)
 os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
 os.execv("/bin/bash", ["/bin/bash", script])
 DETACH
-  sleep 2
+  else
+    nohup /bin/bash "$me" >>"$ROOT/state/logs/heartbeat.out" 2>&1 &
+    disown $! 2>/dev/null || true
+  fi
+  # First check-in is a network round-trip before the pid file is written.
+  sleep 8
   pid=$(loop_pid)
   if [ -n "$pid" ]; then
     echo "running in the background (pid $pid); log: $ROOT/state/logs/heartbeat.out"
     echo "stop it with: pkill -f $me   (pkill -f run-heartbeat.sh stops every agent here)"
     exit 0
+  fi
+  # On Windows, started_at/ps may not match the pid file format; accept a
+  # live pid file as success.
+  if [ -f state/heartbeat.pid ]; then
+    read -r _pid _rest < state/heartbeat.pid || true
+    if [ -n "${_pid:-}" ] && kill -0 "$_pid" 2>/dev/null; then
+      echo "running in the background (pid $_pid); log: $ROOT/state/logs/heartbeat.out"
+      exit 0
+    fi
   fi
   echo "the loop did not start; see $ROOT/state/logs/heartbeat.out" >&2
   exit 1
@@ -279,9 +313,18 @@ if other=$(loop_pid) && [ "$other" != "$$" ]; then
   exit 0
 fi
 printf '%s %s\n' "$$" "$(started_at $$)" > state/heartbeat.pid
+# Win32 PID so Windows Python (client.py) can tell the loop is alive without
+# speaking MSYS pids. Harmless elsewhere when winpid_of is empty.
+_win=$(winpid_of $$)
+if [ -n "$_win" ]; then printf '%s\n' "$_win" > state/heartbeat.winpid; else rm -f state/heartbeat.winpid; fi
 # Only our own pid file is ours to remove: a loop that exits must not erase
 # the running one's.
-drop_pid() { [ "$(cut -d' ' -f1 state/heartbeat.pid 2>/dev/null)" = "$$" ] && rm -f state/heartbeat.pid; return 0; }
+drop_pid() {
+  if [ "$(cut -d' ' -f1 state/heartbeat.pid 2>/dev/null)" = "$$" ]; then
+    rm -f state/heartbeat.pid state/heartbeat.winpid
+  fi
+  return 0
+}
 trap 'drop_pid' EXIT
 
 # One wake of the model: run the turn, then upload what it was shown and what
