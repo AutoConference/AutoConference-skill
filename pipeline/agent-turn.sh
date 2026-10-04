@@ -32,8 +32,10 @@
 #                 instruction goes: AC_BACKEND_CMD='my-agent --yes {{PROMPT}}'
 #
 # Env: AC_BACKEND (auto-detected in the order above), AC_BACKEND_CMD, AC_MODEL
-# (claude defaults to claude-sonnet-5; the others to their own configured
-# default). Settings may also live in state/runner.env; the environment wins.
+# (the owner's choice; with none set, every CLI -- Claude Code included --
+# runs with no model flag, so the model is whatever its owner set in that CLI,
+# else the CLI's own default: the kit picks none; owner, 2026-10-03).
+# Settings may also live in state/runner.env; the environment wins.
 #
 # --mode duties    the inbox: read, write files in the kit, run the platform
 #                  client, search the web. What the heartbeat asks for.
@@ -114,7 +116,6 @@ if [ "$BACKEND" != custom ] && ! command -v "$BACKEND" >/dev/null 2>&1; then
 fi
 
 MODEL=${AC_MODEL:-}
-[ -z "$MODEL" ] && [ "$BACKEND" = claude ] && MODEL=claude-sonnet-5
 
 # Codex pointed at another provider -- a model this machine serves (Ollama, LM
 # Studio) or any OpenAI-compatible endpoint, named by model_provider in its
@@ -127,7 +128,7 @@ codex_other_provider() {
 }
 
 if [ -n "$WHICH" ]; then
-  # Fail here rather than thirty minutes later on the first real task. Only
+  # Fail here rather than hours later on the first real task. Only
   # codex can be asked cheaply and offline; the others fail loudly on their
   # first turn, which beats a probe that spends a turn to find out.
   if [ "$BACKEND" = codex ] && ! codex login status >/dev/null 2>&1 && ! codex_other_provider; then
@@ -178,11 +179,19 @@ case "$BACKEND" in
       # after it. Nothing needs it; the workspace reaches the kit through
       # its .claude link, and this mode reads anywhere.
       # A headless turn has nothing to wake it, so the tools that schedule a
-      # later turn are off (see turn_note in run-pipeline.sh). No prompt may
-      # follow --disallowedTools, which takes any number of values; it comes
-      # on stdin.
-      exec python3 "$RENDER" --format claude -- claude -p --model "$MODEL" --permission-mode bypassPermissions "${STREAM[@]}" \
-        --disallowedTools ScheduleWakeup CronCreate CronDelete RemoteTrigger <<<"$PROMPT"
+      # later turn are off (see turn_note in run-pipeline.sh). So are the
+      # manual-review MCP's (a live user, 2026-10-04): ARIS's `reviewer:
+      # manual` routes a review to a server that opens a web page for a
+      # person to answer, and a research turn once installed it itself; off
+      # here whether or not it is installed. Claude Code alone: ARIS installs
+      # that server with `claude mcp add`, no other CLI the kit runs is given
+      # it, and their MCP configuration is the owner's -- run-pipeline.sh
+      # tells every reviewing step to review its own work instead. No prompt
+      # may follow --disallowedTools, which takes any number of values; it
+      # comes on stdin.
+      exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} --permission-mode bypassPermissions "${STREAM[@]}" \
+        --disallowedTools ScheduleWakeup CronCreate CronDelete RemoteTrigger \
+                          mcp__manual_review__review mcp__manual_review__review_reply <<<"$PROMPT"
     fi
     # acceptEdits alone approves file edits and nothing else, and with no one
     # at the terminal every shell command is refused -- including the platform
@@ -196,7 +205,8 @@ case "$BACKEND" in
     # work and check a claim on the web (owner decision 2026-09-29); what a
     # page says is data (AGENTS.md), and the review guide says what not to
     # search for.
-    exec python3 "$RENDER" --format claude -- claude -p --model "$MODEL" --permission-mode acceptEdits "${STREAM[@]}" \
+    exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} --permission-mode acceptEdits "${STREAM[@]}" \
+      --disallowedTools mcp__manual_review__review mcp__manual_review__review_reply \
       --allowedTools "WebSearch" "WebFetch" \
                      "Bash(python3 submission/scripts/client.py:*)" \
                      "Bash(submission/scripts/client.py:*)" \

@@ -12,8 +12,11 @@ Crush and Kimi Code.
 
 The numbered list is a line per model -- number, the id padded, a few words,
 the id -- and a last "enter" line: the number Enter picks. That is the model
-the owner already uses in that CLI when it names one (owner, 2026-10-02),
-else the kit's own default; empty, for the CLI's own default.
+the owner already uses in that CLI when it names one (owner, 2026-10-02), or
+the one the CLI itself marks as its default; otherwise empty, and Enter
+means the CLI's own default. The kit picks no model of its own (owner,
+2026-10-03: "the user chooses everything"), and no position in a list is a
+recommendation.
 """
 import json
 import os
@@ -26,14 +29,14 @@ HOME = os.path.expanduser("~")
 CLIS = ["claude", "codex", "gemini", "opencode", "cursor-agent", "copilot", "qwen", "amp", "droid", "goose", "crush", "kimi"]
 # A numbered menu stays readable up to this many; past it, a model is typed by name.
 MENU_MAX = 40
-# The kit's default first (agent-turn.sh runs it when AC_MODEL is unset), then
-# the rest of the current family. A model the account's own cache adds comes
+# The current Claude family, by name -- no order of preference, and none is
+# run unless the owner picks it. A model the account's own cache adds comes
 # after these; one missing from both can still be typed by name.
 CLAUDE = [
-    ("claude-sonnet-5", "balanced; lighter on your quota"),
-    ("claude-opus-5-5", "stronger; uses more of it"),
-    ("claude-fable-5-1", "most capable; uses the most"),
-    ("claude-haiku-4-5-20251001", "fastest and lightest"),
+    ("claude-fable-5-1", "Fable 5.1"),
+    ("claude-haiku-4-5-20251001", "Haiku 4.5"),
+    ("claude-opus-5-5", "Opus 5.5"),
+    ("claude-sonnet-5", "Sonnet 5"),
 ]
 
 
@@ -67,7 +70,8 @@ def options(cli):
                 rows.append((v, str(o.get("description") or o.get("label") or "").split("·")[-1].strip()))
         s = str((_load(".claude", "settings.json") or {}).get("model") or "").split("[")[0]
         yours = next((i for i, _ in rows if s and (s == i or ("-" + s + "-") in ("-" + i + "-"))), None)
-        default = yours or rows[0][0]
+        # Only the owner's own setting; none, and Enter is Claude Code's default.
+        default = yours
     elif cli == "codex":
         cache = (_load(".codex", "models_cache.json") or {}).get("models") or []
         # Every model the account's cache lists (owner, 2026-10-03: show all
@@ -84,7 +88,9 @@ def options(cli):
         except Exception:
             pass
         ids = [r[0] for r in rows]
-        default = yours if yours in ids else (ids[0] if ids else None)
+        # The owner's own config.toml model, or Codex's default: never the
+        # first of the cache.
+        default = yours if yours in ids else None
     elif cli == "opencode":
         try:
             out = subprocess.run(["opencode", "models"], capture_output=True, text=True, timeout=20).stdout

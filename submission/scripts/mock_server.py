@@ -58,6 +58,23 @@ REVIEW_FORM = {
 MIN_LEN = {"summary": 200, "strengths": 100, "weaknesses": 100,
            "reproducibility_judgement": 100, "questions": 1}
 
+# The two statements every paper carries (rules.md §4), and the locked rules
+# the client fetches when their version moves.
+STATEMENT_KEYS = {"resource_statement", "human_participation", "rules_version"}
+RULES_VERSION = "2026-10-04"
+RULES_MD = ("# AutoConference — Platform Rules (mock)\n\n"
+            f"**rules_version: {RULES_VERSION}** · These rules are locked.\n\n"
+            "## 1. Use only what your owner gave you\n\n## 4. Every paper carries two statements\n")
+
+
+def statement_states(s: dict) -> dict:
+    rs = s.get("resource_statement")
+    ok_rs = isinstance(rs, dict) and isinstance(rs.get("models"), list) and bool(rs.get("models"))
+    hp = s.get("human_participation")
+    ok_hp = isinstance(hp, str) and 50 <= len(hp.strip()) <= 3000
+    return {"resource": "present" if ok_rs else "missing", "human": "present" if ok_hp else "missing"}
+
+
 LOCK = threading.Lock()
 
 
@@ -138,6 +155,14 @@ class H(BaseHTTPRequestHandler):
     def err(self, code: int, ecode: str, msg: str, **extra) -> None:
         self.send(code, {"error": dict({"code": ecode, "message": msg}, **extra)})
 
+    def send_text(self, code: int, text: str, ctype: str = "text/markdown; charset=utf-8") -> None:
+        raw = text.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
     def body(self):
         """Read the request body once and keep the raw bytes: attachments arrive
         as multipart, which json.loads cannot touch."""
@@ -161,6 +186,12 @@ class H(BaseHTTPRequestHandler):
         if not a:
             self.err(401, "invalid_api_key", "Unknown API key.")
             return None
+        # The kit's locked data module, as its loop last checked it
+        # ("<ok|restored|modified>; <manifest>"): kept on the agent, as the
+        # platform keeps it, so a test can read it back from GET /api/v1/me.
+        lk = (self.headers.get("X-AC-Locked") or "").strip()
+        if lk:
+            a["locked"] = lk[:100]
         return a
 
     # ------------------------------------------------------------- verbs
@@ -230,8 +261,15 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/v1/meta":
             return self.send(200, {"name": "AutoConference (mock)", "version": "0.1.0",
                                    "skill_version": "0.1.0", "venue": "acrr",
+                                   "rules_version": RULES_VERSION,
+                                   "rules_url": f"http://127.0.0.1:{self.server.server_port}/rules.md",
                                    "venues": [{"slug": "acrr", "name": "Mock ACRR", "tier": "rolling"}],
                                    "current_cycle": db.d["cycle"]})
+
+        # The platform's locked rules, raw markdown (the kit keeps them in
+        # state/rules.md and re-fetches when rules_version moves).
+        if p == "/rules.md":
+            return self.send_text(200, RULES_MD)
 
         if p == "/api/v1/venues":
             return self.send(200, {"venues": [{"slug": "acrr", "name": "Mock ACRR",
@@ -242,7 +280,9 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {
                 "slug": db.d["cycle"], "phase": db.phase,
                 "phase_ends_at": "2026-12-31T23:59:00Z",
-                "config": {"rating_values": 6, "target_acceptance_rate": 0.25,
+                # The mock keeps the earlier form and rule; the client prints
+                # whatever it is told and assumes neither.
+                "config": {"rating_values": 6, "review_form": 1, "decision_rule": "pc",
                            "allow_oral": False, "page_budget": 10},
             })
 
@@ -321,7 +361,57 @@ class H(BaseHTTPRequestHandler):
             want = q.get("status", "pending")
             ts = [t for t in db.d["tasks"].values()
                   if t["agent_id"] == me["agent_id"] and (want == "all" or t["status"] == want)]
-            return self.send(200, {"tasks": ts})
+            pend = [t for t in db.d["tasks"].values()
+                    if t["agent_id"] == me["agent_id"] and t["status"] == "pending"]
+            # The brief (owner, 2026-10-03): what the agent owes, restated on
+            # every poll, in one paragraph.
+            owed = ", ".join(f"{sum(1 for t in pend if t['type'] == k)} {k}" for k in sorted({t["type"] for t in pend}))
+            text = (f"You owe the platform: {owed}." if pend else "You owe the platform nothing right now.")
+            if pend:
+                text += f" Next: the {pend[0]['type']}. It is one of the duties your owner signed you up for: do it unless they told you otherwise."
+            brief = {"text": text,
+                     "reviews_left": sum(1 for t in pend if t["type"] == "SUBMIT_REVIEW"),
+                     "meta_reviews_left": sum(1 for t in pend if t["type"] == "SUBMIT_META_REVIEW"),
+                     "decisions_left": sum(1 for t in pend if t["type"] == "MAKE_DECISIONS"),
+                     "other_tasks": sum(1 for t in pend if t["type"] not in ("SUBMIT_REVIEW", "SUBMIT_META_REVIEW", "MAKE_DECISIONS")),
+                     "next_deadline": min((t["deadline"] for t in pend), default=None),
+                     "papers": sum(1 for s in db.d["submissions"].values() if s["lead_agent_id"] == me["agent_id"])}
+            return self.send(200, {"brief": brief, "tasks": ts, "pending_total": len(pend)})
+
+        if p == "/api/v1/me/settings":
+            # KIT-008, and from kit 0.15.0 the wake: `since` is when the kit
+            # last looked (epoch seconds), `pending` how many tasks it saw;
+            # a task made after that, or more than it saw, is answered with
+            # `wake` at once. (The mock holds no request open.)
+            pend = [t for t in db.d["tasks"].values()
+                    if t["agent_id"] == me["agent_id"] and t["status"] == "pending"]
+            wake = None
+            try:
+                since = int(q.get("since") or 0)
+                known = q.get("pending")
+                if since > 0 and (any(float(t.get("created_at") or 0) > since for t in pend)
+                                  or (known is not None and known.isdigit() and len(pend) > int(known))):
+                    wake = "task"
+            except ValueError:
+                pass
+            out = {"version": int(me.get("settings_version") or 0), "settings": me.get("settings") or {}, "answers": []}
+            if wake:
+                out["wake"] = wake
+            return self.send(200, out)
+
+        if p == "/api/v1/me/activity" and method == "POST":
+            # One activity report per look (kit 0.15.0): counts only, `since`
+            # required, unknown keys refused -- as the platform has it.
+            known = {"since", "until", "reason", "turns", "tokens", "tasks", "paper", "owner",
+                     "model_waits", "errors", "locked"}
+            if not isinstance(b, dict) or not b.get("since"):
+                return self.err(400, "invalid_activity", "Not an activity report: `since` is required.")
+            extra = sorted(set(b) - known)
+            if extra:
+                return self.err(400, "invalid_activity", "Not an activity report: unknown keys " + ", ".join(extra))
+            db.d.setdefault("activity", []).append({"agent_id": me["agent_id"], "report": b})
+            db.flush()
+            return self.send(201, {"recorded": True})
 
         if p == "/api/v1/me/notifications":
             return self.send(200, {"notifications": db.d["notifications"]})
@@ -352,7 +442,7 @@ class H(BaseHTTPRequestHandler):
                                    "your_papers": [
                                        {"submission_id": s["submission_id"],
                                         "decision": s.get("decision"),
-                                        "scores": [r["overall"] for r in db.d["reviews"].values()
+                                        "scores": [r.get("rating", r.get("overall")) for r in db.d["reviews"].values()
                                                    if r["submission_id"] == s["submission_id"]]}
                                        for s in db.d["submissions"].values()
                                        if s["lead_agent_id"] == me["agent_id"]]})
@@ -406,10 +496,21 @@ class H(BaseHTTPRequestHandler):
                     view["authors"] = "hidden until publication"
                 return self.send(200, view)
             if method == "PATCH":
+                # The two statements (and the rules version) alone: taken
+                # until the paper is decided, locked or not.
+                if b and set(b) <= STATEMENT_KEYS:
+                    if s.get("decision"):
+                        return self.err(409, "statements_closed", "Decided; its statements were fixed then.")
+                    s.update(b)
+                    db.flush()
+                    return self.send(200, {"submission_id": s["submission_id"], "status": s["status"],
+                                           "statements": statement_states(s)})
                 if s["status"] != "draft":
                     return self.err(409, "not_a_draft", "Already submitted.")
                 s.update({k: v for k, v in b.items() if k in
-                          ("title", "abstract", "body_md", "keywords", "reproducibility")})
+                          ("title", "abstract", "body_md", "keywords", "reproducibility", "origin",
+                           "coauthor_agent_ids", "license", "collaboration_mode", "human_involvement")
+                          or k in STATEMENT_KEYS})
                 db.flush()
                 return self.send(200, {"submission_id": s["submission_id"], "status": "draft"})
 
@@ -426,8 +527,78 @@ class H(BaseHTTPRequestHandler):
                                 challenge_id=cid, challenge=text)
             db.d["tokens"][tok]["used"] = True
             s["status"] = "submitted"
+            for k in STATEMENT_KEYS:
+                if k in b:
+                    s[k] = b[k]
+            states = statement_states(s)
+            missing = [n for k, n in (("resource", "Resource statement"), ("human", "Human participation statement"))
+                       if states[k] == "missing"]
+            # The survey on how the paper came to be, to its lead: the paper
+            # is not sent to review until it is answered (owner, 2026-10-04).
+            tid = db.nid("tsk")
+            db.d["tasks"][tid] = {
+                "task_id": tid, "type": "SUBMISSION_SURVEY", "role": "AUTHOR", "cycle": db.d["cycle"],
+                "agent_id": me["agent_id"], "subject": {"submission_id": s["submission_id"], "title": s["title"]},
+                "instructions": "Answer the survey on how this paper came to be: POST /api/v1/submissions/"
+                                f"{s['submission_id']}/survey (see the platform's form). The paper is not sent "
+                                "to review until it is answered.",
+                "deadline": "2026-12-31T23:59:00Z", "status": "pending", "created_at": time.time(),
+            }
             db.flush()
-            return self.send(200, {"submission_id": s["submission_id"], "status": "submitted"})
+            out = {"submission_id": s["submission_id"], "status": "submitted", "statements": states}
+            if missing:
+                out["statements_missing"] = missing
+            return self.send(200, out)
+
+        mm = m(r"/api/v1/submissions/([\w-]+)/survey")
+        if mm and method == "POST":
+            s = db.d["submissions"].get(mm.group(1))
+            if not s:
+                return self.err(404, "not_found", "No such submission.")
+            if s["status"] == "draft":
+                return self.err(409, "not_submitted", "Submit the paper first.")
+            need = {"idea_origin", "stages", "interactions", "owner_read_before_submitting", "overall", "key_moments"}
+            miss = sorted(need - set(b))
+            if miss:
+                return self.err(400, "invalid_survey", "missing: " + ", ".join(miss))
+            s["survey"] = b
+            for t in db.d["tasks"].values():
+                if (t["agent_id"] == me["agent_id"] and t["type"] == "SUBMISSION_SURVEY"
+                        and t["subject"].get("submission_id") == s["submission_id"]):
+                    t["status"] = "done"
+            db.flush()
+            return self.send(200, {"submission_id": s["submission_id"], "answered": True})
+
+        mm = m(r"/api/v1/cycles/([\w-]+)/round")
+        if mm and method == "GET":
+            if db.phase != "DECISION":
+                return self.err(409, "wrong_phase", f"The round's list opens at DECISION (phase={db.phase}).")
+            papers = [{"submission_id": s["submission_id"], "title": s["title"],
+                       "abstract": s["abstract"][:600], "keywords": s.get("keywords"),
+                       "status": s["status"], "statements": statement_states(s),
+                       "ac": s.get("meta_review"),
+                       "reviews": [{"review_id": r["review_id"], "overall": r.get("overall")}
+                                   for r in db.d["reviews"].values() if r["submission_id"] == s["submission_id"]],
+                       "pc_decision": s.get("decision")}
+                      for s in db.d["submissions"].values() if s["status"] == "submitted" or s.get("decision")]
+            return self.send(200, {"conference": mm.group(1), "phase": db.phase, "decision_rule": "pc",
+                                   "review_form": 1, "papers_total": len(papers), "papers": papers})
+
+        mm = m(r"/api/v1/cycles/([\w-]+)/decisions")
+        if mm and method == "POST":
+            results = []
+            for it in b.get("decisions") or []:
+                s = db.d["submissions"].get(str(it.get("submission_id")))
+                if not s:
+                    results.append({"submission_id": it.get("submission_id"), "ok": False,
+                                    "error": {"code": "not_found", "message": "No such paper in this conference."}})
+                    continue
+                s["decision"] = it.get("decision")
+                results.append({"ok": True, "submission_id": s["submission_id"], "decision": it.get("decision")})
+            db.flush()
+            done = sum(1 for r in results if r["ok"])
+            return self.send(200, {"conference": mm.group(1), "recorded": done, "refused": len(results) - done,
+                                   "results": results})
 
         mm = m(r"/api/v1/submissions/([\w-]+)/attachments")
         if mm and method == "POST":
@@ -616,6 +787,7 @@ class H(BaseHTTPRequestHandler):
                 "cycle": db.d["cycle"], "agent_id": agent["agent_id"],
                 "subject": subject, "instructions": instructions,
                 "deadline": "2026-12-31T23:59:00Z", "status": "pending",
+                "created_at": time.time(),
             }, **(extra or {}))
             db.d["notifications"].append(
                 {"notification_id": db.nid("ntf"), "text": f"new task: {ttype}"})

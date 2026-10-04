@@ -17,18 +17,31 @@ Convention -- work/<cycle>/runs/manifest.json:
           "output": "results/collapse.json",
           "args": ["--seeds", "3"],
           "exact":     ["accuracy", "n_solved", "collapse_point"],
-          "tolerant":  {"wall_s": 0.30, "tok_per_s": 0.30},
+          "tolerant":  {"loss": 0.01},
+          "timing":    ["wall_s", "tok_per_s"],
           "timeout_s": 3600
         }
       ]
     }
 
-`exact` fields must match bit for bit -- these are the numbers a paper may
-claim. `tolerant` fields are allowed to drift by the given relative amount;
-they are wall-clock measurements, and a paper should report them as ranges.
-Anything in the recorded output that is listed in neither is reported as
-UNCLASSIFIED and fails the gate: an unlabelled number is one nobody decided
-was reproducible.
+`exact` fields must come out the same -- these are the numbers a paper may
+claim. An integer or a string must match exactly; a float must match to
+floating-point precision (relative 1e-9): a sum taken in another order -- a
+process pool, a threaded or GPU reduction -- moves the last bits (about 1e-16
+of the value), and that is the same number, not a failed reproduction (a
+participant's report, 2026-10-03: six fields differing in the 16th digit
+failed a paper three times). `tolerant` fields are results that genuinely vary
+from run to run (a nondeterministic GPU kernel, thread timing) and may drift
+by the given relative amount. `timing` fields measure the machine, not the
+result -- wall-clock time, throughput: they are re-measured and reported,
+never compared, since a busy machine is not an unreproducible experiment (the
+same report: 5.52 s then 7.29 s failed the gate); a paper reports them as
+approximate, with the hardware. A `tolerant` field named like a timing
+(`wall_s`, `elapsed`, `tok_per_s`, ...) is read as `timing`, so a manifest
+written before `timing` existed is judged the same way.
+Anything in the recorded output that is listed in none of the three is
+reported as UNCLASSIFIED and fails the gate: an unlabelled number is one
+nobody decided was reproducible.
 
 Exit 0 = PASS, 1 = FAIL, 2 = the manifest or layout is wrong.
 """
@@ -36,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -210,16 +224,50 @@ def flatten(obj, prefix=""):
     return out
 
 
-def classify(key: str, exact: list, tolerant: dict):
+# A field named like a measurement of the machine: wall-clock time, a rate per
+# second, latency. Only ever applied to fields the manifest already called
+# `tolerant` -- never to an `exact` one -- so a result is never let off by its
+# name.
+TIMING_NAME = re.compile(
+    r"^(?:wall|wall_?time|wall_?clock|elapsed|runtime|run_?time|duration|latency|"
+    r"throughput|seconds|secs|time)$"
+    r"|^(?:wall|elapsed|runtime|duration|latency|throughput)_"
+    r"|(?:_s|_sec|_secs|_seconds|_ms|_us|_ns|_min|_mins|_minutes|_hours|_time|"
+    r"_per_s|_per_sec|_per_second|_latency|_throughput)$", re.I)
+
+# Floating-point precision for an `exact` float: far above summation-order
+# noise (~1e-16), far below any digit a paper prints.
+FLOAT_REL = 1e-9
+FLOAT_ABS = 1e-12
+
+
+def classify(key: str, exact: list, tolerant: dict, timing: list = ()):
     """Match a dotted path against the manifest's field names."""
     leaf = key.split(".")[-1].split("[")[0]
     for name in exact:
         if leaf == name or key == name:
             return "exact", None
+    for name in timing:
+        if leaf == name or key == name:
+            return "timing", None
     for name, tol in tolerant.items():
         if leaf == name or key == name:
-            return "tolerant", tol
+            return ("timing", None) if TIMING_NAME.search(leaf) else ("tolerant", tol)
     return "unclassified", None
+
+
+def same_number(a, b) -> tuple:
+    """(equal, only_to_float_precision) for an `exact` field: an integer must
+    be equal; a float, equal to floating-point precision. Two NaNs are the
+    same result."""
+    if a == b:
+        return True, False
+    if isinstance(a, float) or isinstance(b, float):
+        if math.isnan(a) and math.isnan(b):
+            return True, False
+        if math.isclose(a, b, rel_tol=FLOAT_REL, abs_tol=FLOAT_ABS):
+            return True, True
+    return False, False
 
 
 def run_one(runs: str, exp: dict, env: dict, report: list) -> bool:
@@ -296,7 +344,11 @@ def run_one(runs: str, exp: dict, env: dict, report: list) -> bool:
     old, new = flatten(recorded), flatten(fresh)
     exact = exp.get("exact", [])
     tolerant = exp.get("tolerant", {})
-    problems, checked = [], {"exact": 0, "tolerant": 0}
+    timing = exp.get("timing", [])
+    if isinstance(timing, dict):
+        timing = list(timing)
+    problems, checked = [], {"exact": 0, "tolerant": 0, "timing": 0}
+    measured, float_noise = [], 0
 
     missing = sorted(set(old) - set(new))
     added = sorted(set(new) - set(old))
@@ -306,13 +358,21 @@ def run_one(runs: str, exp: dict, env: dict, report: list) -> bool:
         problems.append({"kind": "appeared", "keys": added[:20]})
 
     for k in sorted(set(old) & set(new)):
-        kind, tol = classify(k, exact, tolerant)
+        kind, tol = classify(k, exact, tolerant, timing)
         a, b = old[k], new[k]
         if kind == "exact":
             checked["exact"] += 1
-            if a != b:
+            equal, noise = same_number(a, b)
+            float_noise += noise
+            if not equal:
                 problems.append({"kind": "exact_mismatch", "key": k,
                                  "recorded": a, "rerun": b})
+        elif kind == "timing":
+            # Re-measured and reported, never compared.
+            checked["timing"] += 1
+            denom = abs(a) if a else 1.0
+            measured.append({"key": k, "recorded": a, "rerun": b,
+                             "drift": round(abs(b - a) / denom, 4)})
         elif kind == "tolerant":
             checked["tolerant"] += 1
             denom = abs(a) if a else 1.0
@@ -325,8 +385,13 @@ def run_one(runs: str, exp: dict, env: dict, report: list) -> bool:
             problems.append({"kind": "unclassified", "key": k, "value": a})
 
     verdict = "PASS" if not problems else "FAIL"
-    report.append({"script": script, "verdict": verdict, "rerun_wall_s": round(dt, 1),
-                   "checked": checked, "problems": problems})
+    entry = {"script": script, "verdict": verdict, "rerun_wall_s": round(dt, 1),
+             "checked": checked, "problems": problems}
+    if float_noise:
+        entry["float_precision_matches"] = float_noise
+    if measured:
+        entry["timing"] = measured[:20]
+    report.append(entry)
     return verdict == "PASS"
 
 
@@ -384,15 +449,14 @@ def main() -> None:
         for exp in exps:
             print(f"repro-gate: re-running {exp['script']} ...", flush=True)
             ok = run_one(runs, exp, man.get("env", {}), report)
-            # A replay whose only problem is timing -- every exact field matched,
-            # only `tolerant` (wall-clock) fields drifted past their bound -- runs
-            # once more before it fails. On a machine other agents share, one load
-            # spike is the usual cause: in a live test a paper failed twice, on a
-            # different timing field each time, with every number equal.
+            # A replay whose only problem is drift -- every exact field matched,
+            # only `tolerant` fields moved past their bound -- runs once more
+            # before it fails: a result that varies run to run can land outside
+            # its band once. (Timing no longer fails at all: see `timing`.)
             last = report[-1] if report else {}
             if not ok and last.get("problems") and \
                     all(p.get("kind") == "outside_tolerance" for p in last["problems"]):
-                print(f"repro-gate: only timing drifted; running {exp['script']} once more", flush=True)
+                print(f"repro-gate: only tolerant fields drifted; running {exp['script']} once more", flush=True)
                 first = report.pop()
                 ok = run_one(runs, exp, man.get("env", {}), report)
                 report[-1]["first_attempt"] = {"verdict": first["verdict"], "problems": first["problems"]}
@@ -428,8 +492,10 @@ def main() -> None:
         "experiments": report,
         "evidence_check": evidence,
         "note": ("Every number a paper claims must appear under an `exact` field "
-                 "that matched, or a `tolerant` field within its band. "
-                 "UNCLASSIFIED means nobody decided whether it reproduces."),
+                 "that matched (a float to floating-point precision), or a "
+                 "`tolerant` field within its band. `timing` fields are re-measured "
+                 "and reported, never compared. UNCLASSIFIED means nobody decided "
+                 "whether it reproduces."),
     }
     out = os.path.join(runs, "REPRO_GATE.json")
     # --claims-only performs no execution replay, so its `experiments` list is

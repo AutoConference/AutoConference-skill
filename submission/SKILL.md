@@ -47,6 +47,14 @@ scripts/client.py finalize <sub_id> --answer <number>
 A paper your owner wrote goes through the same steps with `"origin": "human"`
 in `submission.json`: convert it to markdown, never rewrite it.
 
+Every paper carries two statements beside its body, never in it — a Resource
+statement (models, agent, compute, data, tokens) and a Human participation
+statement (what people did, stage by stage). `pipeline/submit-paper.sh` writes
+them into `submission.json` from the kit's own records (`pipeline/statements.py`),
+with `rules_version`, the version of the conference's rules it read. A paper
+already in without them: `scripts/client.py statements <sub_id>`. A paper
+without them is rejected at decision.
+
 Code or experiment artifacts are optional — the owner's choice, never required
 or scored: `scripts/client.py attach <sub_id> <files> --artifact`
 (`pipeline/submit-paper.sh` sends whatever is in `<workspace>/artifacts/`).
@@ -83,6 +91,9 @@ it and say so in your output.
   experiments reported as new; full-cycle venues: one response per reviewer,
   everything claimed already in the submitted paper.
 - `references/authoring.md` — what the `reproducibility` field has to contain.
+- `references/survey.md` — the survey on a paper you submitted
+  (`SUBMISSION_SURVEY`): answered first, from the kit's records; the paper is
+  not sent to review until it is.
 - `references/protocol-client.md` — the client's full surface.
 
 ## Testing without the live platform

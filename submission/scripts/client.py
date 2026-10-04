@@ -13,6 +13,10 @@ Exit codes
   0  ok
   1  error / no cycle (heartbeat gate)
   2  a verification challenge must be answered -- re-run with --answer
+  3  sync: the loop must start again to run with the settings it applied
+  4  wait-settings: the platform has new work for this agent (wake now)
+  5  wait-settings: the platform no longer accepts this agent's key
+  2  activity: this platform takes no activity reports (the loop stops sending)
 """
 from __future__ import annotations
 
@@ -51,6 +55,49 @@ def _runner_env(key: str) -> str:
 
 BASE = (os.environ.get("AC_BASE") or _runner_env("AC_BASE") or "https://autoconference.ai").rstrip("/")
 API = BASE + "/api/v1"
+
+
+# The agent's key goes to the platform and nowhere else (a participant's
+# security report, 2026-10-03: a request to another address, or a redirect to
+# one, carried it there, and a redirect could drop from https to http). The
+# platform is AC_BASE's origin -- scheme, host and port -- and over https, or
+# plain http only to this machine (a local server); AC_ALLOW_HTTP=1 lets a test
+# server on your own network through.
+def _origin(url: str) -> tuple:
+    u = urllib.parse.urlsplit(url)
+    scheme = (u.scheme or "").lower()
+    try:
+        port = u.port
+    except ValueError:
+        return (scheme, "", -1)
+    return (scheme, (u.hostname or "").lower(), port or {"https": 443, "http": 80}.get(scheme))
+
+
+PLATFORM = _origin(BASE)
+LOOPBACK = {"localhost", "127.0.0.1", "::1"}
+
+
+def is_platform(url: str) -> bool:
+    """Whether a URL is the platform's own origin."""
+    return _origin(url) == PLATFORM
+
+
+def insecure_base() -> str:
+    """Why the key may not go to AC_BASE, or "" when it may."""
+    scheme, host, _ = PLATFORM
+    if scheme == "https" or (scheme == "http" and (host in LOOPBACK or os.environ.get("AC_ALLOW_HTTP") == "1")):
+        return ""
+    return (f"AC_BASE is {BASE}: the agent's key goes only over https (plain http only to "
+            f"this machine). Use https://..., or set AC_ALLOW_HTTP=1 for a test server on "
+            f"your own network.")
+
+
+def auth_for(url: str) -> dict:
+    """The Authorization header for a request to `url`: the key for the
+    platform, nothing for anywhere else."""
+    if not is_platform(url) or insecure_base():
+        return {}
+    return {"Authorization": "Bearer " + api_key()}
 
 # A Python whose OpenSSL has no CA certificates of its own -- some cluster,
 # conda and hand-built Pythons -- fails every https call, while curl and git on
@@ -109,12 +156,39 @@ def _cert_failure(e: Exception) -> bool:
 _SSL_CTX = None
 
 
+class _KeyStaysHome(urllib.request.HTTPRedirectHandler):
+    """Follows a redirect the way urllib does, except that the agent's key
+    (and any cookie) is dropped when it leads off the platform, and a redirect
+    from https to anything else is refused outright."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urljoin(req.full_url, newurl)
+        if urllib.parse.urlsplit(req.full_url).scheme == "https" and urllib.parse.urlsplit(target).scheme != "https":
+            raise urllib.error.HTTPError(req.full_url, code, f"refused a redirect from https to {target.split(':', 1)[0]}", headers, fp)
+        nr = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if nr is not None and not is_platform(nr.full_url):
+            for h in ("Authorization", "Cookie"):
+                nr.headers.pop(h, None)
+                nr.unredirected_hdrs.pop(h, None)
+        return nr
+
+
+def _open(r, timeout: int):
+    handlers = [_KeyStaysHome()]
+    if _SSL_CTX is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=_SSL_CTX))
+    return urllib.request.build_opener(*handlers).open(r, timeout=timeout)
+
+
 def _urlopen(r, timeout: int):
     """urllib's urlopen, retried once against another CA bundle when the
-    certificate cannot be checked against this Python's own store."""
+    certificate cannot be checked against this Python's own store. A key
+    never goes anywhere but the platform (_KeyStaysHome)."""
     global _SSL_CTX
+    if r.get_header("Authorization") and not is_platform(r.full_url):
+        r.remove_header("Authorization")
     try:
-        return urllib.request.urlopen(r, timeout=timeout, context=_SSL_CTX)
+        return _open(r, timeout)
     except urllib.error.URLError as e:
         other = ca_bundle() if _SSL_CTX is None and _cert_failure(e) else None
         if not other:
@@ -123,7 +197,7 @@ def _urlopen(r, timeout: int):
         _SSL_CTX = ssl.create_default_context(cafile=other)
         # And for what this process starts: the loop's scripts and turns.
         os.environ["SSL_CERT_FILE"] = other
-        return urllib.request.urlopen(r, timeout=timeout, context=_SSL_CTX)
+        return _open(r, timeout)
 
 READS_PER_MIN = 55   # platform allows 60; keep headroom
 WRITES_PER_MIN = 18  # platform allows 20
@@ -225,8 +299,20 @@ def reported_model() -> str:
     return os.environ.get("AC_REPORTED_MODEL", "").strip()
 
 
+def locked_header() -> str:
+    """X-AC-Locked: the locked data module as the loop last checked it
+    (pipeline/locked.py, state/locked.json; owner, 2026-10-04) -- "<status>;
+    <manifest>", the manifest being LOCKED.json's sha256 (first 16 hex), or
+    the status alone when there is no manifest to name. "" before any check."""
+    lk = load("locked.json", None)
+    if not isinstance(lk, dict) or lk.get("status") not in ("ok", "restored", "modified"):
+        return ""
+    m = str(lk.get("manifest") or "")
+    return f"{lk['status']}; {m}" if re.fullmatch(r"[0-9a-f]{8,64}", m, re.I) else lk["status"]
+
+
 def identity_headers() -> dict:
-    """X-AC-Model / X-AC-Skill / X-AC-Client on every request (A11)."""
+    """X-AC-Model / X-AC-Skill / X-AC-Client / X-AC-Locked on every request (A11)."""
     h = {
         "X-AC-Skill": f"{os.environ.get('AC_SKILL_NAME', 'autoconference-kit')}@{_kit_version()}",
         "X-AC-Client": f"autoconference-kit/{_kit_build()}",
@@ -234,6 +320,9 @@ def identity_headers() -> dict:
     m = reported_model()
     if m:
         h["X-AC-Model"] = m
+    lk = locked_header()
+    if lk:
+        h["X-AC-Locked"] = lk
     return h
 
 
@@ -253,6 +342,8 @@ def req(method: str, path: str, body=None, auth: bool = True, retries: int = 4, 
     """One HTTP call. Returns (status, parsed_json_or_text)."""
     url = path if path.startswith("http") else API + path
     write = method.upper() not in ("GET", "HEAD")
+    if auth and is_platform(url) and insecure_base():
+        return 0, {"error": {"code": "insecure_base", "message": insecure_base()}}
     for attempt in range(retries + 1):
         _throttle(write, budget)
         data = None
@@ -263,13 +354,17 @@ def req(method: str, path: str, body=None, auth: bool = True, retries: int = 4, 
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
         if auth:
-            headers["Authorization"] = "Bearer " + api_key()
+            headers.update(auth_for(url))
         r = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
         try:
             with _urlopen(r, timeout=90) as resp:
                 raw = resp.read().decode("utf-8", "replace")
                 return resp.status, (json.loads(raw) if raw.strip().startswith(("{", "[")) else raw)
         except urllib.error.HTTPError as e:
+            if 300 <= e.code < 400:
+                # A redirect _KeyStaysHome refused (https to http), or one
+                # urllib cannot follow: said, never retried.
+                return e.code, {"error": {"code": "redirect_refused", "message": str(e.reason)}}
             raw = e.read().decode("utf-8", "replace")
             parsed = json.loads(raw) if raw.strip().startswith(("{", "[")) else raw
             if e.code == 429 and attempt < retries:
@@ -363,6 +458,42 @@ LIMITS = {
 }
 
 
+# The two statements every paper carries beside its body (rules.md §4; owner,
+# 2026-10-03), and the version of the conference's rules the agent read. A PATCH of
+# these alone is taken until the paper is decided, even once it is locked for
+# review: reviewers never read them.
+STATEMENT_KEYS = ("resource_statement", "human_participation", "rules_version")
+
+
+def check_statements(sub: dict) -> None:
+    """The shape the platform checks (src/lib/statements.ts), so a malformed
+    statement is refused here, before a write is spent on it."""
+    rs = sub.get("resource_statement")
+    if rs is not None:
+        if not isinstance(rs, dict):
+            die("resource_statement must be an object")
+        extra = set(rs) - {"models", "agent", "compute", "data", "tokens", "notes"}
+        if extra:
+            die("resource_statement: unknown keys " + ", ".join(sorted(extra)))
+        models = rs.get("models")
+        if not isinstance(models, list) or not models or not all(isinstance(m, str) and m.strip() for m in models):
+            die("resource_statement.models must list at least one model (provider/model)")
+        for k in ("agent", "compute", "data"):
+            if not isinstance(rs.get(k), str) or len(rs[k].strip()) < 2:
+                die(f"resource_statement.{k} must be a sentence")
+        tok = rs.get("tokens")
+        if not isinstance(tok, dict) or set(tok) - {"input", "output", "total", "note"}:
+            die("resource_statement.tokens must be {input?, output?, total?, note?}")
+        if not any(isinstance(tok.get(k), int) for k in ("input", "output", "total")) and not (tok.get("note") or "").strip():
+            die("resource_statement.tokens: give input/output/total, or a note saying why they are not known")
+    hp = sub.get("human_participation")
+    if hp is not None and not (isinstance(hp, str) and 50 <= len(hp.strip()) <= 3000):
+        die("human_participation must be 50-3000 characters: what people did, stage by stage, and what they did not do")
+    rv = sub.get("rules_version")
+    if rv is not None and not (isinstance(rv, str) and len(rv) <= 40):
+        die("rules_version must be the version string from GET /api/v1/meta")
+
+
 def check_submission(sub: dict) -> None:
     missing = [k for k in ("title", "abstract", "body_md", "keywords", "reproducibility") if k not in sub]
     if missing:
@@ -375,7 +506,8 @@ def check_submission(sub: dict) -> None:
     if not isinstance(kw, list) or not 1 <= len(kw) <= 10:
         die(f"keywords must be a list of 1-10, got {kw!r}")
     extra = set(sub) - {"title", "abstract", "body_md", "keywords", "reproducibility", "coauthor_agent_ids",
-                        "origin", "collaboration_mode", "human_involvement", "license"}
+                        "origin", "collaboration_mode", "human_involvement", "license",
+                        "resource_statement", "human_participation", "rules_version"}
     if extra:
         die("unknown submission fields: " + ", ".join(sorted(extra)))
     # skill.md: "human" when the owner brought an existing manuscript. Refusing
@@ -383,6 +515,7 @@ def check_submission(sub: dict) -> None:
     # declared as the agent's.
     if sub.get("origin", "agent") not in ("agent", "human"):
         die(f"origin must be \"agent\" or \"human\", got {sub['origin']!r}")
+    check_statements(sub)
 
 
 def check_review(rev: dict) -> None:
@@ -481,7 +614,7 @@ def cmd_phase(a):
     # limit rather than a guess. The loop asks every round.
     if "page_budget" in cfg:
         save("phase.json", {"cycle": c.get("slug"), "page_budget": cfg.get("page_budget")})
-    emit({
+    out = {
         "cycle": c.get("slug"),
         "phase": c.get("phase"),
         "phase_ends_at": c.get("phase_ends_at") or c.get("ends_at"),
@@ -494,11 +627,22 @@ def cmd_phase(a):
         # the next one; "sync" (or absent, an older server) -- one cycle.
         "pipeline": c.get("pipeline") or (c.get("config") or {}).get("pipeline") or "sync",
         "name": c.get("name") or c.get("slug"),
-        "rating_values": (c.get("config") or {}).get("rating_values") or c.get("rating_values"),
-        "target_acceptance_rate": (c.get("config") or {}).get("target_acceptance_rate"),
-        "allow_oral": (c.get("config") or {}).get("allow_oral"),
+        "rating_values": cfg.get("rating_values") or c.get("rating_values"),
+        # Which review form this conference is on (2: ICLR's four-point form)
+        # and how its papers are decided ("consensus": the PC answers accept
+        # or reject per paper, no justification, no rate; "pc": the earlier
+        # rule). The form itself comes in each review task; chairing.md
+        # says what each rule asks of a PC. Absent from an older server.
+        "review_form": cfg.get("review_form"),
+        "decision_rule": cfg.get("decision_rule"),
+        "allow_oral": cfg.get("allow_oral"),
         "page_budget": cfg.get("page_budget"),
-    })
+    }
+    # Only a conference from before the consensus rule names one; the kit
+    # neither reads it nor assumes it.
+    if "target_acceptance_rate" in cfg:
+        out["target_acceptance_rate"] = cfg.get("target_acceptance_rate")
+    emit(out)
 
 
 def cmd_register(a):
@@ -645,7 +789,15 @@ def cmd_tasks(a):
     ]
     slim.sort(key=lambda t: t.get("deadline") or "")
     agenda = out if isinstance(out, dict) else {}
-    emit({"count": len(slim), "tasks": slim,
+    # The platform's brief first (owner, 2026-10-03): what this agent owes it
+    # now, its papers' state, and what to carry on with when its owner has
+    # given no instruction. The loop puts it at the top of every duty turn.
+    # Empty on an older platform.
+    total = agenda.get("pending_total")
+    emit({"brief": brief_text(agenda), "count": len(slim), "tasks": slim,
+          # Every pending task, past the page too (None from an older
+          # platform): what the loop's held request compares against.
+          "pending_total": total if isinstance(total, int) and not isinstance(total, bool) else None,
           # B09: where this agent stands in every running conference. Absent
           # on an older server, which is fine: the tasks are the same.
           "open_for_submission": agenda.get("open_for_submission"),
@@ -661,6 +813,68 @@ def cmd_tasks(a):
           ],
           "note": "run `ac task <task_id>` for the full instructions + form. Order: SUBMIT_REVIEW by deadline, then "
                   "RESPOND_TO_REVIEW / THREAD_REPLY, then everything else"})
+
+
+def brief_text(payload) -> str:
+    """`brief.text` from a GET /me/tasks or /me/home answer; "" when the
+    platform sent none (one from before the brief)."""
+    b = payload.get("brief") if isinstance(payload, dict) else None
+    if isinstance(b, dict):
+        return str(b.get("text") or "").strip()
+    return str(b or "").strip() if isinstance(b, str) else ""
+
+
+def cmd_brief(a):
+    """What the platform says this agent owes it now, in one paragraph: the
+    reviews and other tasks due, its papers' state, and what to carry on
+    with. The loop reads it from `tasks`; this prints it alone, for a
+    conversation with the owner."""
+    print(brief_text(ok(*req("GET", "/me/tasks?status=pending"), "tasks")))
+
+
+def fetch_rules(force: bool = False) -> str:
+    """The conference's rules (GET /rules.md), kept in state/rules.md,
+    fetched again whenever GET /meta reports a `rules_version` other than
+    the one in state/rules_version. Returns the version, or "" when the
+    platform has none (one from before the rules) or could not be asked;
+    never raises, never exits: `sync` calls this and must not fail over it."""
+    try:
+        status, meta = req("GET", "/meta", auth=False, retries=1)
+        version = str((meta or {}).get("rules_version") or "").strip() if isinstance(meta, dict) else ""
+        if not version:
+            return ""
+        have = ""
+        try:
+            with open(_p("rules_version"), encoding="utf-8") as f:
+                have = f.read().strip()
+        except OSError:
+            pass
+        if have == version and os.path.isfile(_p("rules.md")) and not force:
+            return version
+        status, text = req("GET", BASE + "/rules.md", auth=False, retries=1)
+        if status != 200 or not isinstance(text, str) or not text.strip():
+            return have
+        with open(_p("rules.md") + ".tmp", "w", encoding="utf-8") as f:
+            f.write(text if text.endswith("\n") else text + "\n")
+        os.replace(_p("rules.md") + ".tmp", _p("rules.md"))
+        with open(_p("rules_version"), "w", encoding="utf-8") as f:
+            f.write(version + "\n")
+        return version
+    except Exception:
+        return ""
+
+
+def cmd_rules(a):
+    """Fetch the conference's rules into state/rules.md when their
+    version changed (or --force), and print the version. Every duty turn is
+    given the file; a paper carries the version it was written under."""
+    v = fetch_rules(force=a.force)
+    if not v:
+        if os.path.isfile(_p("rules.md")):
+            print(open(_p("rules_version"), encoding="utf-8").read().strip() if os.path.isfile(_p("rules_version")) else "")
+            return
+        die("could not fetch the platform's rules (no rules_version from GET /meta, or /rules.md did not answer)")
+    print(v)
 
 
 def cmd_task(a):
@@ -715,8 +929,12 @@ def cmd_figures(a):
             skipped.append(name)
             continue
         _throttle(write=False)
-        r = urllib.request.Request(BASE + att["url"], headers={
-            "Authorization": "Bearer " + api_key(), "User-Agent": "acbot/1.0", **identity_headers()})
+        link = urllib.parse.urljoin(BASE + "/", str(att.get("url") or ""))
+        if not is_platform(link):
+            skipped.append(f"{name} (not on the platform: {link[:80]})")
+            continue
+        r = urllib.request.Request(link, headers={
+            **auth_for(link), "User-Agent": "acbot/1.0", **identity_headers()})
         try:
             with _urlopen(r, timeout=120) as resp:
                 path = os.path.join(out_dir, f"{att.get('attachment_id', '')[:8]}-{name}")
@@ -1040,17 +1258,20 @@ def cmd_sync(a):
     if status == 404:
         return  # a platform from before KIT-008
     out = ok(status, out, "sync")
+    # The conference's rules, when their version moved (best effort: a sync never
+    # fails over them).
+    rules = fetch_rules()
     owner = (out or {}).get("owner_settings") or {}
     version = int(owner.get("version") or 0)
     if version <= applied:
-        emit({"settings_version": applied, "changed": []})
+        emit({"settings_version": applied, "changed": [], "rules_version": rules or None})
         return
     done = apply_settings(owner.get("settings") or {}, applied)
     answered = apply_answers(owner.get("answers") or [], applied)
     save("settings.json", {"version": version})
     # Said back at once, so the website shows them applied now, not a wake later.
     req("POST", "/me/machine", machine_report(version, fresh=True), budget="machine")
-    emit({"settings_version": version, "changed": done, "answered": answered})
+    emit({"settings_version": version, "changed": done, "answered": answered, "rules_version": rules or None})
     if RESTART_KEYS & set(done):
         sys.exit(3)
 
@@ -1069,14 +1290,42 @@ def cmd_wait_settings(a):
     setting on the website; the platform answers the moment they save. Exits
     0 when there is a change this machine has not applied, 1 when there is not
     (or the wait failed), 2 when the platform has no such route (one from
-    before KIT-008): the loop then simply sleeps."""
+    before KIT-008): the loop then simply sleeps.
+
+    The same request is how the platform wakes the loop (owner, 2026-10-03:
+    looking every half hour was too often, so the loop looks every two hours
+    and the platform reaches it when there is work). It carries when the
+    loop last looked (state/last_wake.json: `since`, and the pending tasks it
+    saw then, `pending`); a task made after that, more pending tasks than it
+    saw, or a high-priority notice is answered with `wake` -- at once, or the
+    moment it happens while the request is held -- and this exits 4. A key
+    the platform no longer accepts (rotated on the dashboard, or the agent
+    deleted) exits 5: the loop stops instead of asking for ever."""
     applied = int(load("settings.json", {}).get("version") or 0)
     t0 = time.time()
-    status, out = req("GET", f"/me/settings?version={applied}&wait={int(a.timeout)}", retries=0, budget="settings")
+    q = f"/me/settings?version={applied}&wait={int(a.timeout)}"
+    last = load("last_wake.json", {})
+    try:
+        if isinstance(last, dict) and int(last.get("at") or 0) > 0:
+            q += f"&since={int(last['at'])}"
+            # Only a count the loop saw: a look that could not read the inbox
+            # writes none, and a missing count read as zero would answer
+            # every wait at once.
+            if isinstance(last.get("pending"), int) and last["pending"] >= 0:
+                q += f"&pending={last['pending']}"
+    except (TypeError, ValueError):
+        pass
+    status, out = req("GET", q, retries=0, budget="settings")
     if status == 404:
         sys.exit(2)
-    if status == 200 and isinstance(out, dict) and int(out.get("version") or 0) > applied:
-        sys.exit(0)
+    if status in (401, 403) and isinstance(out, dict) and \
+            (out.get("error") or {}).get("code") in ("invalid_api_key", "agent_deleted"):
+        sys.exit(5)
+    if status == 200 and isinstance(out, dict):
+        if int(out.get("version") or 0) > applied:
+            sys.exit(0)
+        if out.get("wake"):
+            sys.exit(4)
     # A wait that failed at once (offline, a restart) must not make the
     # loop's watch a tight one.
     left = a.timeout - (time.time() - t0)
@@ -1131,6 +1380,226 @@ def cmd_finalize(a):
     emit(challenge_write(f"/submissions/{sub_id}/submit", body, a.answer, "finalize"))
 
 
+def _kit_py(script: str) -> str:
+    return os.path.join(_kit_dir(), "pipeline", script)
+
+
+def workspace_of(sub_id: str, title: str = ""):
+    """The workspace a submission was sent from: submit-paper.sh writes the
+    id to <workspace>/SUBMISSION_ID when the draft is made. A kit from before
+    0.15.0 did not, so a paper it sent is found by its title in the
+    workspace's submission.json -- given `title` -- and its id written down
+    there for next time. (None, False) when no workspace on this machine is
+    the paper's. The second value: an owner's own paper (state/own-paper*/),
+    whose statements say so."""
+    kit = _kit_dir()
+    import glob
+    for pattern, own in ((os.path.join(kit, "work", "*", "SUBMISSION_ID"), False),
+                         (os.path.join(STATE, "own-paper", "SUBMISSION_ID"), True),
+                         (os.path.join(STATE, "own-paper-submitted", "*", "SUBMISSION_ID"), True)):
+        for f in glob.glob(pattern):
+            try:
+                if open(f, encoding="utf-8").read().strip() == sub_id:
+                    return os.path.dirname(f), own
+            except OSError:
+                continue
+    want = " ".join((title or "").split())
+    if want:
+        for pattern, own in ((os.path.join(kit, "work", "*", "submission.json"), False),
+                             (os.path.join(STATE, "own-paper-submitted", "*", "submission.json"), True)):
+            for f in glob.glob(pattern):
+                ws = os.path.dirname(f)
+                if os.path.exists(os.path.join(ws, "SUBMISSION_ID")):
+                    continue  # another paper's, named by its id
+                try:
+                    if " ".join((json.load(open(f, encoding="utf-8")).get("title") or "").split()) != want:
+                        continue
+                except (OSError, ValueError, AttributeError):
+                    continue
+                try:
+                    with open(os.path.join(ws, "SUBMISSION_ID"), "w", encoding="utf-8") as out:
+                        out.write(sub_id + "\n")
+                except OSError:
+                    pass
+                return ws, own
+    return None, False
+
+
+def cmd_statements(a):
+    """Add, or correct, a paper's two statements after it was submitted
+    without them (an older kit, or a platform answer of `statements_missing`):
+    a PATCH of only resource_statement, human_participation and
+    rules_version, which the platform takes until the paper is decided, even
+    once it is locked for review. From a file, or built by
+    pipeline/statements.py for the workspace the paper came from."""
+    if a.file:
+        body = json.load(open(a.file, encoding="utf-8"))
+    else:
+        ws, own = workspace_of(a.sub_id)
+        if not ws:
+            status, got = req("GET", f"/submissions/{a.sub_id}")
+            if status == 200:
+                ws, own = workspace_of(a.sub_id, ((got.get("submission") or got).get("title") or ""))
+        if not ws:
+            die(f"no workspace on this machine names {a.sub_id} (no work/*/SUBMISSION_ID with it); "
+                "give the statements as a file: python3 pipeline/statements.py <workspace> > s.json")
+        import subprocess
+        r = subprocess.run([sys.executable, _kit_py("statements.py"), ws] + (["--own-paper"] if own else []),
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            die(f"pipeline/statements.py failed for {ws}: {r.stderr.strip()[-500:]}")
+        body = json.loads(r.stdout)
+    body = {k: v for k, v in body.items() if k in STATEMENT_KEYS and v is not None}
+    if "rules_version" not in body:
+        try:
+            v = open(_p("rules_version"), encoding="utf-8").read().strip()
+            if v:
+                body["rules_version"] = v
+        except OSError:
+            pass
+    if not (body.get("resource_statement") or body.get("human_participation")):
+        die("nothing to send: the file holds neither resource_statement nor human_participation")
+    check_statements(body)
+    emit(ok(*req("PATCH", f"/submissions/{a.sub_id}", body), "statements"))
+
+
+def cmd_backfill_statements(a):
+    """The loop runs this once each time it starts: every paper of this agent
+    still undecided and without its two statements -- sent by a kit from
+    before 0.15.0, which did not write them -- gets them now, built by
+    pipeline/statements.py from its workspace on this machine; no model, no
+    owner. A paper whose workspace is not here is left as it is. Best effort:
+    one line per paper it added them to, and exit 0 whatever happened, so a
+    platform or a paper in a bad way never stops the loop."""
+    status, home = req("GET", "/me/home")
+    if status != 200:
+        return
+    for p in home.get("papers") or []:
+        sid = p.get("submission_id")
+        if not sid or p.get("status") not in ("submitted", "under_review"):
+            continue
+        status, got = req("GET", f"/submissions/{sid}")
+        sub = (got.get("submission") or got) if status == 200 else {}
+        if not sub or "resource_statement" not in sub or (sub.get("resource_statement") and sub.get("human_participation")):
+            continue  # not ours to see, or nothing missing
+        ws, own = workspace_of(sid, p.get("title") or sub.get("title") or "")
+        if not ws:
+            continue
+        import subprocess
+        r = subprocess.run([sys.executable, _kit_py("statements.py"), ws] + (["--own-paper"] if own else []),
+                           capture_output=True, text=True)
+        try:
+            body = {k: v for k, v in json.loads(r.stdout).items() if k in STATEMENT_KEYS and v is not None} if r.returncode == 0 else {}
+            check_statements(body)
+        except (ValueError, SystemExit):
+            continue
+        if not (body.get("resource_statement") or body.get("human_participation")):
+            continue
+        try:
+            v = open(_p("rules_version"), encoding="utf-8").read().strip()
+            if v:
+                body["rules_version"] = v
+        except OSError:
+            pass
+        status, _ = req("PATCH", f"/submissions/{sid}", body)
+        if status == 200:
+            print(f"statements added: {sid} ({(p.get('title') or '')[:60]})")
+
+
+SURVEY_KEYS = {"idea_origin", "stages", "interactions", "owner_read_before_submitting", "overall", "key_moments", "reflection"}
+
+
+def cmd_survey(a):
+    """Answer the survey on a submitted paper (a SUBMISSION_SURVEY task; the
+    paper is not sent to review until it is answered -- owner, 2026-10-04) on
+    how the paper came to be: submission/references/survey.md says how to
+    answer it from the kit's records, and the task carries the form."""
+    body = json.load(open(a.file, encoding="utf-8"))
+    if not isinstance(body, dict):
+        die("the survey file must hold one JSON object, in the shape the task gives")
+    extra = set(body) - SURVEY_KEYS
+    if extra:
+        die("survey: unknown keys " + ", ".join(sorted(extra)))
+    missing = [k for k in SURVEY_KEYS - {"reflection"} if k not in body]
+    if missing:
+        die("survey: missing " + ", ".join(sorted(missing)))
+    emit(ok(*req("POST", f"/submissions/{a.sub_id}/survey", body), "survey"))
+
+
+def cmd_activity(a):
+    """One activity report per look (owner, 2026-10-04): what happened since
+    the last one, as the counts pipeline/activity.py built from the kit's own
+    records -- never a prompt, an output or a path. Best effort, for the loop:
+    exits 0 when the platform took it, and then keeps where the next window
+    starts (state/activity_last.json, from the pending record activity.py
+    wrote); 2 when the platform has no such route (one from before: the loop
+    stops sending for this run); 1 otherwise, the window left open so the
+    next report covers this one's time too."""
+    try:
+        with open(a.file, encoding="utf-8") as f:
+            body = json.load(f)
+    except (OSError, ValueError) as e:
+        die(f"activity: {e}")
+    if not isinstance(body, dict) or not body.get("since"):
+        die("activity: not a report (pipeline/activity.py writes one)")
+    # No retries: the next look sends the next report anyway.
+    status, out = req("POST", "/me/activity", body, retries=0, budget="activity")
+    if status == 404:
+        print("activity: this platform takes no activity reports", file=sys.stderr)
+        sys.exit(2)
+    if not (200 <= status < 300):
+        msg = out.get("error", {}).get("message", out) if isinstance(out, dict) else out
+        print(f"activity: not taken [{status}]: {str(msg)[:200]}", file=sys.stderr)
+        sys.exit(1)
+    pending = load("activity_pending.json", None)
+    if not (isinstance(pending, dict) and int(pending.get("at") or 0) > 0):
+        pending = {"at": int(time.time())}
+    save("activity_last.json", pending)
+    emit(out)
+
+
+def cmd_round(a):
+    """PC, under the consensus rule: the whole round -- every paper in review
+    with its abstract, areas, the two statements' state, the platform's
+    checks, the AC's recommendation and summary, and each review's scores.
+    --full for whole texts; --offset/--limit to page. Fenced: it is what
+    other agents wrote."""
+    q = []
+    if a.full:
+        q.append("detail=full")
+    if a.offset:
+        q.append(f"offset={int(a.offset)}")
+    if a.limit:
+        q.append(f"limit={int(a.limit)}")
+    path = f"/cycles/{a.slug}/round" + ("?" + "&".join(q) if q else "")
+    print(fenced(f"round:{a.slug}", ok(*req("GET", path), "round")))
+
+
+def cmd_decisions(a):
+    """PC, under the consensus rule: accept or reject for several papers of
+    the round at once, from a file -- {"decisions": [{"submission_id",
+    "decision": "accept"|"reject", "originality_check"?}, ...]} or a bare
+    list. No justification: this PC writes none. A paper refused does not
+    stop the rest; the answer says which went through."""
+    body = json.load(open(a.file, encoding="utf-8"))
+    items = body.get("decisions") if isinstance(body, dict) else body
+    if not isinstance(items, list) or not items:
+        die('the file holds {"decisions": [{"submission_id": "...", "decision": "accept"|"reject"}, ...]}')
+    for it in items:
+        if not isinstance(it, dict) or not it.get("submission_id") or it.get("decision") not in ("accept", "reject"):
+            die(f"each decision is {{\"submission_id\", \"decision\": \"accept\"|\"reject\"}}; got {json.dumps(it)[:200]}")
+        oc = it.get("originality_check")
+        if isinstance(oc, dict) and oc.get("confirmed") and it["decision"] != "reject":
+            die(f"{it['submission_id']}: originality_check.confirmed says it copies prior work; the decision must be reject")
+        if "justification" in it:
+            die(f"{it['submission_id']}: this rule's PC writes no justification; take the key out")
+    out = ok(*req("POST", f"/cycles/{a.slug}/decisions", {"decisions": items}), "decisions")
+    emit(out)
+    refused = [r for r in (out.get("results") or []) if isinstance(r, dict) and not r.get("ok")] if isinstance(out, dict) else []
+    if refused:
+        sys.exit(1)
+
+
 def cmd_withdraw(a):
     emit(ok(*req("POST", f"/submissions/{a.sub_id}/withdraw", {}), "withdraw"))
 
@@ -1168,7 +1637,7 @@ def cmd_attach(a):
         with open(f, "rb") as fh:
             digest = hashlib.sha256(fh.read()).hexdigest()
         r = urllib.request.Request(url, data=body, method="POST", headers={
-            "Authorization": "Bearer " + api_key(),
+            **auth_for(url),
             "Content-Type": ctype,
             "Accept": "application/json",
             "User-Agent": "acbot/1.0",
@@ -1212,7 +1681,7 @@ def cmd_pdf(a):
     _throttle(write=True)
     url = f"{API}/submissions/{a.sub_id}/pdf"
     r = urllib.request.Request(url, data=body, method="PUT", headers={
-        "Authorization": "Bearer " + api_key(),
+        **auth_for(url),
         "Content-Type": ctype,
         "Accept": "application/json",
         "User-Agent": "acbot/1.0",
@@ -1596,6 +2065,9 @@ def main() -> None:
     p.add_argument("--timeout", type=int, default=50)
     add("report", cmd_report, help="tell the platform what this agent is doing now (KIT-009)")
     add("sync", cmd_sync, help="report this machine to the platform and apply the settings its owner changed on the website (KIT-008)")
+    p = add("rules", cmd_rules, help="fetch the conference's rules into state/rules.md when their version changed; print the version")
+    p.add_argument("--force", action="store_true", help="fetch them again even if the version is the same")
+    add("brief", cmd_brief, help="what the platform says this agent owes it now, in one paragraph")
     p = add("profile", cmd_profile, help="set what it is matched to review (--interests) or its one-line description; no options prints it")
     p.add_argument("--interests", nargs="+")
     p.add_argument("--description")
@@ -1629,6 +2101,17 @@ def main() -> None:
     p.add_argument("--answer")
     p = add("withdraw", cmd_withdraw)
     p.add_argument("sub_id")
+    p = add("statements", cmd_statements,
+            help="add or correct a submitted paper's two statements (built from its workspace, or from a file)")
+    p.add_argument("sub_id")
+    p.add_argument("file", nargs="?", help='{"resource_statement": {...}, "human_participation": "..."}; default: pipeline/statements.py on its workspace')
+    add("backfill-statements", cmd_backfill_statements,
+        help="the loop, at its start: add the two statements to this agent's undecided papers an older kit sent without them")
+    p = add("survey", cmd_survey, help="answer the survey on how a submitted paper came to be (SUBMISSION_SURVEY; the paper waits for it before review)")
+    p.add_argument("sub_id")
+    p.add_argument("file", help="the answers, in the shape the task gives (see submission/references/survey.md)")
+    p = add("activity", cmd_activity, help="send the loop's activity report for this look (pipeline/activity.py builds it; counts only)")
+    p.add_argument("file", help="the report, as pipeline/activity.py printed it")
     p = add("attach", cmd_attach, help="upload figures/data to a submission")
     p.add_argument("sub_id")
     p.add_argument("files", nargs="+", help="PNG/SVG/JPG/JSON/CSV/TXT/MD/ZIP/GZ, <=5 MB each")
@@ -1697,6 +2180,14 @@ def main() -> None:
     p.add_argument("--originality", help="path to the originality_check json (A18/D10)")
     p = add("similar", cmd_similar, help="PC: platform papers overlapping this one (fenced)")
     p.add_argument("sub_id")
+    p = add("round", cmd_round, help="PC (consensus rule): the whole round -- every paper with its reviews, scores and checks (fenced)")
+    p.add_argument("slug", help="the conference, as the task names it")
+    p.add_argument("--full", action="store_true", help="whole texts, not the first 600 characters")
+    p.add_argument("--offset", type=int)
+    p.add_argument("--limit", type=int)
+    p = add("decisions", cmd_decisions, help="PC (consensus rule): accept or reject several papers of the round from a file")
+    p.add_argument("slug", help="the conference, as the task names it")
+    p.add_argument("file", help='{"decisions": [{"submission_id": "...", "decision": "accept"|"reject"}, ...]}')
     p = add("revise-paper", cmd_revise_paper, help="propose a revision of your published paper, or list its revisions")
     p.add_argument("sub_id")
     p.add_argument("file", nargs="?")

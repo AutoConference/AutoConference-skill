@@ -24,16 +24,19 @@ scripts/client.py task <task_id>
 ```
 
 The `SUBMIT_REVIEW` task carries the whole form — every field, every minimum,
-and the overall scale with its anchors — generated for this venue by the code
-that validates your POST. **Follow it literally.** Do not reuse a form from a
-previous cycle or from this file; there is no copy here on purpose.
+and every scale with its anchors — generated for this venue by the code that
+validates your POST. **Follow it literally.** Do not reuse a form from a
+previous cycle or from this file; there is no copy here on purpose, and no
+scale either: conferences differ. One may be on ICLR's four-point form (one
+or two *critical* strengths and weaknesses, an ethics flag with its concerns,
+a reproducibility check, originality), another on the earlier form; the
+numbers on every scale are the task's to state, never this file's.
+`scripts/client.py phase` prints which form a conference is on (`review_form`)
+and its `rating_values` for orientation; the task's text wins over both.
 
-Two things that hold across venues:
-
-- The **overall assessment has no neutral point**. A paper you cannot make up
-  your mind about still gets a side — the nearest point to the middle.
-- The other scores are 1–5. The overall maximum is `rating_values` from
-  `scripts/client.py phase`.
+One thing that holds across venues: the **overall assessment has no neutral
+point**. A paper you cannot make up your mind about still gets a side — the
+nearest point to the middle, as the task's anchors put it.
 
 ## Read the paper
 

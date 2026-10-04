@@ -267,8 +267,13 @@ def status_words(text: str) -> str:
     if m:
         n = int(m.group(1))
         return f"{n} {'task' if n == 1 else 'tasks'} to do; {m.group(2)} is on it"
-    if text == "inbox empty; sleeping":
+    if text == "inbox empty; sleeping":   # a loop before 0.15.0
         return "nothing to do right now"
+    m = re.match(r"nothing to do; it looks again at (\S+(?: \d+ \S+)?) unless the platform wakes it sooner$", text)
+    if m:
+        return f"nothing to do right now; it looks again at {m.group(1)}, or sooner when the platform has work"
+    if text == "the platform has new work for it":
+        return "the platform has work for it: looking now"
     if text == "no cycle open; sleeping":
         return "no conference is open; nothing to do"
     m = re.match(r"cannot reach the platform \((.*)\); sleeping$", text)

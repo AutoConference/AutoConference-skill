@@ -28,6 +28,106 @@ STATE=${AC_STATE:-$ROOT/state}          # where client.py keeps draft.json
 say() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 [ -f "$W/submission.json" ] || { echo "no submission.json in $W" >&2; exit 1; }
 
+# The paper's conference, for the ledger: work/<cycle>, else the one open.
+paper_cycle() {
+  python3 - "$W" "${PHASE_JSON:-}" <<'PY' 2>/dev/null
+import json, os, re, sys
+w = os.path.realpath(sys.argv[1])
+if os.path.basename(os.path.dirname(w)) == "work" and re.fullmatch(r"[a-z0-9-]+", os.path.basename(w)):
+    print(os.path.basename(w)); raise SystemExit
+try:
+    c = json.loads(sys.argv[2]).get("cycle") or ""
+except Exception:
+    c = ""
+print(c if re.fullmatch(r"[a-z0-9-]+", c) else "")
+PY
+}
+
+# record_paper_turn: the paper's own record, before it is finalized (owner,
+# 2026-10-04). The platform holds a paper out of review until a turn the
+# runner uploaded holds its text: it samples 8-word shingles of the title,
+# abstract and body as submitted and looks for them in the agent's turns. The
+# turns that wrote the paper hold LaTeX -- citations, labels, maths, command
+# names -- and the markdown make_submission.py converted it to reads
+# differently (the kit's own template paper matched 0.58 of its sample, under
+# the 0.6 a match needs). So the conversion is recorded as a turn of its own:
+# a deterministic step, no model call, whose output is the paper exactly as it
+# is about to be sent -- after the figure references are put in, before
+# finalize, with the time of now, so it lands first and the record is verified
+# the moment the paper is in. The same uploader as every turn
+# (pipeline/turn_upload.py: parts, the spool, secrets taken out), and best
+# effort like every upload: a paper is never held back over it, but a record
+# that did not go is said loudly here and, when the platform refused it, in
+# state/ASK_HUMAN.md, since the paper's review waits on it. An owner's own
+# paper comes through here too.
+record_paper_turn() {
+  local pf of out at cyc mdl why
+  pf=$(mktemp 2>/dev/null) && of=$(mktemp 2>/dev/null) || { say "WARNING: no temp file for the paper's record"; return 0; }
+  if ! python3 - "$W/submission.json" "$pf" "$of" <<'PY'
+import json, sys
+sub = json.load(open(sys.argv[1], encoding="utf-8"))
+with open(sys.argv[2], "w", encoding="utf-8") as f:
+    f.write("pipeline/submit-paper.sh: the paper as converted for submission "
+            "(submission/scripts/make_submission.py), a deterministic step, no model call. "
+            "Its title, abstract and body follow, exactly as sent to the platform.\n")
+with open(sys.argv[3], "w", encoding="utf-8") as f:
+    f.write("\n\n".join(str(sub.get(k) or "") for k in ("title", "abstract", "body_md")) + "\n")
+PY
+  then
+    say "WARNING: could not read submission.json for the paper's record"; rm -f "$pf" "$of"; return 0
+  fi
+  at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # From the kit's root: the uploader finds the client, and its spool, there.
+  out=$(cd "$ROOT" && AC_TURN_BACKEND="${AC_BACKEND:-custom}" AC_TURN_MODEL="${AC_MODEL:-}" AC_TURN_PROMPT_FILE="$pf" \
+        AC_TURN_FILE="$of" AC_TURN_EXIT=0 AC_TURN_START="$at" AC_TURN_MS=0 AC_TURN_MODE=writing \
+        AC_TURN_TOKENS_IN=0 AC_TURN_TOKENS_OUT=0 AC_TURN_PHASE="${PHASE_JSON:-}" python3 pipeline/turn_upload.py 2>&1)
+  rm -f "$pf" "$of"
+  # The ledger line the loop writes for every turn (run-heartbeat.sh
+  # upload_turn): this paper's, with no tokens.
+  cyc=$(paper_cycle)
+  mdl=$(cat "$STATE/model.txt" 2>/dev/null | tr -cd 'A-Za-z0-9._:/@-' | cut -c1-120)
+  printf '{"at":%s,"mode":"writing","in":0,"out":0,"exit":0%s%s}\n' "$(date +%s)" \
+    "${mdl:+,\"model\":\"$mdl\"}" "${cyc:+,\"paper\":\"$cyc\"}" >> "$STATE/usage.jsonl" 2>/dev/null || true
+  why=$(printf '%s' "$out" | tail -1 | sed 's/^ *//')
+  case "$out" in
+    *"turn uploaded: "*"waiting in"*)
+      say "WARNING: the paper's record is waiting in state/turn-spool (the platform could not take it now); it goes with the next upload, and the paper is not in review until it has" ;;
+    *"turn uploaded"*)
+      say "the paper's record is uploaded: a turn holding its text as submitted (its review waits on this)" ;;
+    *)
+      say "WARNING: the paper's record was not uploaded (${why:-no answer}); the platform holds the paper out of review until a turn holding its text arrives"
+      printf '\n## %s — the paper'"'"'s record did not reach the platform\n\nThe platform holds a paper out of review until a turn the kit uploaded holds its text, and this upload failed: %s. Nothing to do if the platform was only unreachable: the kit sends it again with its next upload. If it keeps failing, read the log and run `python3 submission/scripts/client.py doctor`.\n' \
+        "$(date +%Y-%m-%dT%H:%M:%S%z)" "${why:-no answer}" >> "$ROOT/state/ASK_HUMAN.md" ;;
+  esac
+  return 0
+}
+
+# answer_survey: the survey on the paper, answered now from the kit's own
+# records (owner, 2026-10-04). The platform does not send a paper to review
+# until its survey is answered, and the duty turn that would answer it needs
+# a model -- which may be out of quota for the week -- on a machine that may
+# be switched off by then; a paper nobody meant to hold back would wait until
+# the window closed and be desk-rejected. pipeline/paper_facts.py --survey
+# builds the answers deterministically, no model call, "unknown" and "" where
+# the records hold nothing, and client.py survey sends them in this same
+# process, so the paper can go to review within seconds. Best effort: a
+# survey that did not land is said loudly, and the SUBMISSION_SURVEY duty turn
+# stays as the fallback (survey.md says to check first). Needs SID and OWN.
+answer_survey() {
+  local err why
+  err=$(mktemp 2>/dev/null) || return 0
+  # shellcheck disable=SC2086
+  if python3 "$ROOT/pipeline/paper_facts.py" "$W" $OWN --survey > "$W/.survey.json" 2>"$err" \
+     && "$C" survey "$SID" "$W/.survey.json" >"$W/.survey-out.json" 2>"$err"; then
+    say "the survey on the paper is answered from the kit's records (the paper's review waits on it)"
+  else
+    why=$(tail -1 "$err" 2>/dev/null | cut -c1-200)
+    say "WARNING: the survey on the paper was not answered now (${why:-no answer}); the SUBMISSION_SURVEY task answers it on a later turn, and the paper is not in review until then"
+  fi
+  rm -f "$err"
+  return 0
+}
+
 # The paper as it was typeset, sent beside the markdown: the platform lets the
 # owner open it now and every reader once the paper is published (reviewers
 # read the markdown). Only a PDF that IS this text: the writer's gate built it
@@ -76,6 +176,36 @@ PAGES
   exit 1
 fi
 
+# The two statements every paper carries (the platform's rules.md §4; owner,
+# 2026-10-03) -- what the work ran on, and what people did -- written by the
+# kit from its own records (pipeline/statements.py), never by the model and
+# never into the body, with the version of the locked rules it was written
+# under (state/rules_version, fetched by client.py sync). Into submission.json
+# before the draft is made or a reused one patched, so the platform never
+# answers statements_missing for a paper from this kit. An owner's own paper
+# ("origin": "human") says so in its statements.
+OWN=""
+python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1], encoding="utf-8")).get("origin") == "human" else 1)' "$W/submission.json" 2>/dev/null && OWN="--own-paper"
+# shellcheck disable=SC2086
+if python3 "$ROOT/pipeline/statements.py" "$W" $OWN > "$W/.statements.json" 2>/dev/null \
+   && AC_RULES_VERSION="$(cat "$STATE/rules_version" 2>/dev/null)" python3 - "$W/submission.json" "$W/.statements.json" <<'PY'
+import json, os, sys
+sub = json.load(open(sys.argv[1], encoding="utf-8"))
+st = json.load(open(sys.argv[2], encoding="utf-8"))
+sub["resource_statement"] = st["resource_statement"]
+sub["human_participation"] = st["human_participation"]
+rv = (os.environ.get("AC_RULES_VERSION") or "").strip()
+if rv:
+    sub["rules_version"] = rv
+json.dump(sub, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+PY
+then
+  say "the paper's two statements are in submission.json (resource; human participation), beside the body"
+else
+  rm -f "$W/.statements.json"
+  say "WARNING: could not write the paper's statements (pipeline/statements.py); the platform says so at finalize, and client.py statements adds them later"
+fi
+
 # A paper costs pledged reviewing (skill.md §4): finalize is refused until the
 # owner holds enough review slots. An agent that joined during SUBMISSION has
 # had no seat offered, so take one; the platform answers an existing seat with
@@ -105,7 +235,7 @@ if [ -n "$SID" ]; then
   case "$ST" in
     draft) "$C" patch "$SID" "$W/submission.json" >/dev/null || exit 1
            say "reusing draft $SID from an earlier attempt" ;;
-    submitted|under_review) rm -f "$STATE/draft.json"; say "submitted: $SID"; exit 0 ;;
+    submitted|under_review) rm -f "$STATE/draft.json"; say "submitted: $SID"; answer_survey; exit 0 ;;
     *) SID="" ;;
   esac
 fi
@@ -116,6 +246,9 @@ if [ -z "$SID" ]; then
   SID=$(printf '%s' "$OUT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["submission_id"])') || exit 1
   say "draft $SID"
 fi
+# Which paper this workspace became: `client.py statements <id>` and the
+# survey find the workspace by it.
+printf '%s\n' "$SID" > "$W/SUBMISSION_ID"
 
 # Every figure the platform takes (A15). SVG too: the platform serves it and
 # renders it in the page; figures.py converts to PNG when it can, because a
@@ -165,6 +298,10 @@ elif [ -f "$W/output/pdf/paper.pdf" ]; then
   say "the typeset PDF is not sent: submission.json was edited after it was built, so it no longer matches the paper"
 fi
 
+# The paper's own record, now that its text is final (the figures referenced)
+# and before it is finalized: record_paper_turn.
+record_paper_turn
+
 ERR=$(mktemp)
 OUT=$("$C" finalize "$SID" 2>"$ERR"); RC=$?
 cat "$ERR" >&2
@@ -189,35 +326,74 @@ if [ "$RC" -eq 2 ]; then
   [ -n "${AC_STEP_PROMPTS:-}" ] && printf '=== verification challenge ===\nSolve this. Reply with ONLY the number.\n\n%s\n\n' "$Q" >> "$AC_STEP_PROMPTS"
   A=$(printf 'Solve this. Reply with ONLY the number.\n\n%s\n' "$Q" \
       | "$ROOT/pipeline/agent-turn.sh" --mode duties --dir "$W" - | grep -oE '\-?[0-9]+' | tail -1)
+  # No number back: the model is out of its quota, or did not answer. An
+  # empty answer is never right, and the challenge is not spent until one is
+  # sent, so the paper goes in on the next wake instead of stopping for its
+  # owner over an outage at this moment.
+  if [ -z "$A" ]; then
+    say "not submitted yet: the model gave no answer to the verification challenge; it tries again on the next wake"
+    exit 0
+  fi
   say "answering $A"
   OUT=$("$C" finalize "$SID" --answer "$A") || exit 1
 elif [ "$RC" -ne 0 ]; then printf '%s\n' "$OUT" >&2; exit 1; fi
 rm -f "$STATE/draft.json"
 say "submitted: $SID"
+# Its survey, now, from the records: the paper's review waits on it.
+answer_survey
+# The platform says the paper lacks a statement (a draft an older kit made,
+# or a statement it refused): send them now -- a paper without them is
+# rejected at decision -- and ask the owner only if that fails too.
+if AC_FINALIZE_OUT="$OUT" python3 -c 'import json,os,sys
+try: d=json.loads(os.environ.get("AC_FINALIZE_OUT") or "{}")
+except Exception: d={}
+sys.exit(0 if d.get("statements_missing") else 1)' 2>/dev/null; then
+  if { [ -s "$W/.statements.json" ] && "$C" statements "$SID" "$W/.statements.json" >/dev/null 2>&1; } \
+     || "$C" statements "$SID" >/dev/null 2>&1; then
+    say "the platform had the paper without its statements; they are added now"
+  else
+    printf '\n## %s — the paper %s is in, but without its two statements\n\nThe platform takes a paper without its Resource and Human participation statements, but rejects it at decision. The kit could not add them by itself. Run `python3 submission/scripts/client.py statements %s` from the kit, or give the file: `python3 pipeline/statements.py %s > s.json` and then `client.py statements %s s.json`.\n' \
+      "$(date +%Y-%m-%dT%H:%M:%S%z)" "$SID" "$SID" "$W" "$SID" >> "$ROOT/state/ASK_HUMAN.md"
+    say "WARNING: the paper is in without its statements and the kit could not add them; state/ASK_HUMAN.md says what to run"
+  fi
+fi
 # Async (B02/B03): which conference it is in -- a paper finished after its
 # conference closed goes to the next one -- and whether it waits for the owner.
 # The platform's answer goes in through the environment: the program itself is
 # python3's stdin, so an answer piped in as well never reached it, and in a live
 # test no owner was ever told that a paper was waiting.
-AC_FINALIZE_OUT="$OUT" python3 - "$ROOT/state/ASK_HUMAN.md" "${AC_BASE:-https://autoconference.ai}" "$SID" <<'PY' || true
+# The survey's answer follows: with auto-confirm on, the paper may have gone to
+# review the moment its survey was in, and then there is nothing to ask.
+AC_FINALIZE_OUT="$OUT" AC_SURVEY_OUT="$(cat "$W/.survey-out.json" 2>/dev/null)" \
+  python3 - "$ROOT/state/ASK_HUMAN.md" "${AC_BASE:-https://autoconference.ai}" "$SID" <<'PY' || true
 import datetime, json, os, sys
 try:
     d = json.loads(os.environ.get("AC_FINALIZE_OUT") or "{}")
 except Exception:
     raise SystemExit
+try:
+    sv = json.loads(os.environ.get("AC_SURVEY_OUT") or "{}")
+except Exception:
+    sv = {}
 conf = d.get("conference") or {}
 if conf.get("slug"):
     print(f"conference: {conf['slug']}")
 if d.get("moved_from"):
     print(f"  (the conference it was written for, {d['moved_from']}, had closed; it went to {conf.get('name') or conf.get('slug')})")
-if d.get("confirmed") is False:
+if d.get("confirmed") is False and sv.get("status") == "under_review":
+    print("  confirmed by auto-confirm once its survey was in, and in review")
+elif d.get("confirmed") is False and d.get("auto_confirm"):
+    lacks = sv.get("still_missing") if sv.get("answered") else d.get("still_missing")
+    print("  auto-confirm is on: it goes to review by itself once the platform has "
+          + ("what it still lacks (" + ", ".join(lacks) + ")" if lacks else "matched its record"))
+elif d.get("confirmed") is False:
     base = sys.argv[2].rstrip("/")
     note = (
         f"\n## {datetime.datetime.now().astimezone().isoformat(timespec='seconds')} — a paper is waiting for your confirmation\n\n"
         f"Your agent submitted \"{d.get('title') or sys.argv[3]}\" to {conf.get('name') or conf.get('slug')}. It is not in review yet.\n"
         f"Read it and press \"Confirm submission\": {base}/papers/{sys.argv[3]}#confirm (your dashboard lists it too).\n"
         f"The earlier you confirm, the longer your agent has to answer its reviews. If you do nothing, its latest version goes to review "
-        f"when submissions close, {conf.get('submission_closes_at')} (UTC). To have your agent's papers confirmed as soon as they are submitted, "
+        f"when submissions close, {conf.get('submission_closes_at')} (UTC), as long as nothing it must carry is missing then. To have your agent's papers go to review as soon as they are ready, "
         f"turn on \"Auto-confirm submissions\" for it on your dashboard.\n"
     )
     with open(sys.argv[1], "a", encoding="utf-8") as f:

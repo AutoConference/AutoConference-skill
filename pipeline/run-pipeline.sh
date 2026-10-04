@@ -387,6 +387,30 @@ seed changes nothing and reporting it as a spread would be fabricated), at least
 \$(jq -r .token_budget.max_truncation_rate_per_cell $QUALITY) of any cell truncated."
 QBAR=$(eval "printf '%s' \"$QBAR\"")
 
+# No reviewer backend on this machine, and no person to ask (a live user,
+# 2026-10-04: "every so often a manual-review page opens"). `— reviewer:
+# manual` is what keeps ARIS off Codex MCP, which cannot be installed here --
+# but it routes every review to a manual-review MCP server that opens a
+# browser page for a person to paste the prompt into another model, and a
+# research turn, with every permission, once installed that server itself.
+# Of the directives ARIS offers (codex, oracle-pro, agy, manual) none
+# degrades to the executor: each names a backend, the first three fall back
+# to Codex, and manual stops when its server is missing. So the directive
+# stays, the server's tools are kept out of reach (agent-turn.sh), and every
+# step that passes it is told this, in the same words:
+NO_REVIEWER=$(cat <<'TXT'
+There is no external reviewer on this machine and no person to ask. Where
+the skill routes a review to a reviewer backend (Codex MCP, Oracle, the agy or
+manual-review MCP), or says a reviewer MCP is not installed and to stop: do
+not stop, and do not install anything. Do that review yourself, as a separate,
+adversarial pass over the artifact, say in its report that it is a self-review
+by the executor (never cross-model acceptance), and continue the skill. Never
+install, add or configure an MCP server, a plugin or a CLI setting (no `claude
+mcp add`, nothing under ~/.claude, ~/.codex or ~/.config), never open a
+browser, and never wait for a person.
+TXT
+)
+
 say "workspace $W   (paper=${PAPER:-none} backend=$("$ROOT/pipeline/agent-turn.sh" --which 2>/dev/null || echo none) kind=${KIND:-undecided} pilot=${AC_PILOT:-0})"
 
 # ── 1 ─ ARIS: paper -> ideas -> plan ─────────────────────────────────────────
@@ -397,6 +421,8 @@ say "workspace $W   (paper=${PAPER:-none} backend=$("$ROOT/pipeline/agent-turn.s
 if want 1; then
   skill "1/15 idea-discovery (ARIS)" \
 "/idea-discovery \"${DIRECTION:-the direction implied by the reference paper}\"${PAPER:+ — ref paper: $PAPER} — reviewer: manual — effort: balanced — assurance: submission — auto proceed: true — render html: false
+
+$NO_REVIEWER
 
 $QBAR
 
@@ -493,6 +519,8 @@ elif want 4; then
   skill "4/15 calibrate the token budget (ARIS experiment-bridge, calibration only)" \
 "/experiment-bridge refine-logs/EXPERIMENT_PLAN.md — gpu: local — reviewer: manual — effort: lite
 
+$NO_REVIEWER
+
 CALIBRATION ONLY. Do not run the sweep.
 
 RUN IT, do not just write it. This step is not finished when the calibration
@@ -573,8 +601,8 @@ peer review exists to catch."
   * Greedy decoding. Variance comes from the instance seed, not from sampling."
     GPU_LIST=${AC_GPUS:-0}; case "$GPU_LIST" in none|NONE) GPU_LIST="" ;; esac
     S5_ENV="\"CUDA_VISIBLE_DEVICES\": \"$GPU_LIST\", \"HF_HOME\": \"$HFH\""
-    S5_TAIL="Greedy decoding on fixed instance seeds is bit-for-bit reproducible
-here, so accuracy-like fields belong in \`exact\`; only wall-clock is \`tolerant\`."
+    S5_TAIL="Greedy decoding on fixed instance seeds reproduces here, so accuracy-like
+fields belong in \`exact\`; wall-clock time and throughput go in \`timing\`."
   else
     if [ "$KIND" = theory ]; then
       S5_HEAD="This study's contribution is its derivations. The experiments are the numerical
@@ -603,11 +631,16 @@ partial run reported as a complete one is the thing peer review exists to catch.
   * Fix every seed and record it; the spread you report comes from seeds you
     name, never from uncontrolled randomness."
     S5_ENV=""
-    S5_TAIL="A computation with fixed seeds is bit-for-bit reproducible, so its outputs
-belong in \`exact\`; only timings are \`tolerant\`."
+    S5_TAIL="A computation with fixed seeds reproduces, so its outputs belong in
+\`exact\` (a float is compared to floating-point precision, so a process pool
+summing in another order is fine). A result that really varies from run to run
+-- a nondeterministic GPU kernel, thread timing -- goes in \`tolerant\` with the
+band you saw across two runs; wall-clock time and throughput go in \`timing\`."
   fi
   skill "5/15 experiment-bridge (ARIS)" \
 "/experiment-bridge refine-logs/EXPERIMENT_PLAN.md — gpu: local — reviewer: manual — effort: balanced
+
+$NO_REVIEWER
 
 $S5_HEAD
 
@@ -627,13 +660,16 @@ is separate from any run-provenance manifest you may also want to write:
    \"experiments\": [{\"script\": \"<path, relative to runs/ or to the workspace>\",
                      \"output\": \"<results file it writes, relative to runs/>\",
                      \"args\": [], \"timeout_s\": 7200,
-                     \"exact\": [\"field names that must reproduce bit for bit\"],
-                     \"tolerant\": {\"wall_s\": 0.3}}]}
+                     \"exact\": [\"field names that must come out the same\"],
+                     \"tolerant\": {\"<a field that varies run to run>\": 0.05},
+                     \"timing\": [\"wall_s\"]}]}
 
-Every leaf number in your results must be named in \`exact\` or \`tolerant\`.
-research/scripts/check_reproduction.py re-runs each script from a clean copy and FAILS on any number
-that is in neither, because an unclassified number is one nobody decided was
-reproducible. $S5_TAIL$PILOT" 25200 || exit 1
+Every leaf number in your results must be named in \`exact\`, \`tolerant\` or
+\`timing\`. research/scripts/check_reproduction.py re-runs each script from a
+clean copy and FAILS on any number that is in none of them, because an
+unclassified number is one nobody decided was reproducible. \`timing\` fields
+measure the machine, so they are re-measured and never compared; report them in
+the paper as approximate, with the hardware. $S5_TAIL$PILOT" 25200 || exit 1
 fi
 
 # ── 6 ─ ARIS: statistics, then what the numbers support ─────────────────────
@@ -981,6 +1017,8 @@ fi
 if want 13; then
   skill "13/15 kill-argument (ARIS)" \
 "/kill-argument submission.json — reviewer: manual — effort: balanced
+
+$NO_REVIEWER
 
 Write the strongest rejection memo you can against this paper, then adjudicate
 each attack: which land, which do not, and which are fixable before submission.
