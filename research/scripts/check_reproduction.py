@@ -270,6 +270,29 @@ def same_number(a, b) -> tuple:
     return False, False
 
 
+# What the clean copy leaves behind: the kit's and the agent's own tooling,
+# recorded results (a script must make its output, not inherit it), and any
+# environment -- a virtual environment, a conda env, node_modules, tool
+# caches. An environment is not the experiment: the copy runs with this
+# interpreter, and copying one costs gigabytes per script. Worse, a script that
+# walked the workspace counted a setuptools `.pth` inside `.venv` as a model
+# file, and the copy carried the same file along, so the wrong count
+# "reproduced" (a user's report, 2026-10-04). Left out, it no longer does.
+SKIP = {".claude", ".aris", ".git", "__pycache__", "archive-v1", "figures",
+        "results", "data", ".venv", "venv", "node_modules", ".tox",
+        ".mypy_cache", ".pytest_cache", ".ruff_cache", ".ipynb_checkpoints"}
+
+
+def skipped_dir(parent: str, name: str) -> bool:
+    """A directory the clean copy leaves out: one named in SKIP, or any
+    environment whatever its name (a venv's pyvenv.cfg, a conda env's
+    conda-meta)."""
+    if name in SKIP:
+        return True
+    d = os.path.join(parent, name)
+    return os.path.isfile(os.path.join(d, "pyvenv.cfg")) or os.path.isdir(os.path.join(d, "conda-meta"))
+
+
 def run_one(runs: str, exp: dict, env: dict, report: list) -> bool:
     script = exp["script"]
     out_rel = exp["output"]
@@ -289,11 +312,9 @@ def run_one(runs: str, exp: dict, env: dict, report: list) -> bool:
     # own previous output fails here rather than in review.
     work = os.path.dirname(os.path.abspath(runs))
     tmp = tempfile.mkdtemp(prefix="reprogate-")
-    SKIP = {".claude", ".aris", ".git", "__pycache__", "archive-v1", "figures",
-            "results", "data"}
     try:
         for dirpath, dirnames, filenames in os.walk(work):
-            dirnames[:] = [d for d in dirnames if d not in SKIP]
+            dirnames[:] = [d for d in dirnames if not skipped_dir(dirpath, d)]
             rel = os.path.relpath(dirpath, work)
             dst = tmp if rel == "." else os.path.join(tmp, rel)
             os.makedirs(dst, exist_ok=True)

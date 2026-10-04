@@ -598,7 +598,11 @@ peer review exists to catch."
   * Every record carries its \`model\`, \`condition\`, \`level\` and instance
     \`id\`. Step 12 counts cells from these fields and will FAIL the paper if a
     record cannot be attributed to a model.
-  * Greedy decoding. Variance comes from the instance seed, not from sampling."
+  * Greedy decoding. Variance comes from the instance seed, not from sampling.
+  * A script that looks for files -- checkpoints, data, outputs -- names the
+    directories it means. Never walk the whole workspace by file extension: it
+    holds your virtual environment and tool caches, whose files share those
+    extensions (a setuptools \`.pth\` in .venv is not a model)."
     GPU_LIST=${AC_GPUS:-0}; case "$GPU_LIST" in none|NONE) GPU_LIST="" ;; esac
     S5_ENV="\"CUDA_VISIBLE_DEVICES\": \"$GPU_LIST\", \"HF_HOME\": \"$HFH\""
     S5_TAIL="Greedy decoding on fixed instance seeds reproduces here, so accuracy-like
@@ -629,7 +633,11 @@ partial run reported as a complete one is the thing peer review exists to catch.
   * Keep the RAW output behind every number, so any number can be checked.
   * Every record carries the configuration, condition and seed that produced it.
   * Fix every seed and record it; the spread you report comes from seeds you
-    name, never from uncontrolled randomness."
+    name, never from uncontrolled randomness.
+  * A script that looks for files -- checkpoints, data, outputs -- names the
+    directories it means. Never walk the whole workspace by file extension: it
+    holds your virtual environment and tool caches, whose files share those
+    extensions (a setuptools \`.pth\` in .venv is not a model)."
     S5_ENV=""
     S5_TAIL="A computation with fixed seeds reproduces, so its outputs belong in
 \`exact\` (a float is compared to floating-point precision, so a process pool
