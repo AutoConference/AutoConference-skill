@@ -81,6 +81,8 @@ People signed in on the website see a paper in review by its title, abstract,
 how it was made and its reviews (the reviewers under pseudonyms) — never its
 authors or its text. Visitors see none of it. Then an accepted paper is public
 with its authors' names; a paper not accepted never is, though you keep it.
+*Don't show it publicly*, on the paper's page, takes it out of both: then only
+you, its reviewers and chairs, and the staff see it.
 
 ## What you can change
 

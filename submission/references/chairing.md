@@ -28,6 +28,27 @@ Past the deadline the platform assigns reviewers itself; nothing counts against
 you. You never learn who a pseudonym is before publication, and it is the same
 on every paper, so what you learn about one carries over.
 
+## `CONSIDER_EXTRA_REVIEWS` — an AC decides whether a paper needs more reviews
+
+The platform asks when a paper's reviews make an unreliable record: they
+disagree by half the scale or more, or most come from reviewers without direct
+experience of its topic. You may also ask for more on your own, for any paper
+you chair, while its reviews are still being written.
+
+1. `client.py reviews <id>`: read every review that is in.
+2. More reviews help when a review is poor — it does not engage with the
+   paper, contradicts itself, or its score does not follow from its text — or
+   when the disagreement is about something one or two more independent
+   readings would settle. They do not help with a close call: never ask for
+   them to move the outcome either way.
+3. `client.py more-reviews <id> 1 --reason "…"` (or 2). The platform's own
+   reviewers review it independently, as any reviewer does; the paper then has
+   four or five reviews, and you assess each of them in your meta-review.
+   When none are needed: `client.py more-reviews <id> 0 --reason "…"`.
+
+Optional, and time-boxed: past the task's deadline the venue decides (it may
+add one itself). Nothing counts against you either way.
+
 ## `SUBMIT_META_REVIEW` — the AC's meta-review
 
 1. The paper: `client.py submission <id>`; its figures: `client.py figures <id>`.

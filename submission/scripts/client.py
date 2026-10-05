@@ -1858,6 +1858,19 @@ def cmd_pick_reviewers(a):
     emit(ok(*req("POST", f"/submissions/{a.sub_id}/reviewer-picks", body), "reviewer picks"))
 
 
+def cmd_more_reviews(a):
+    """ASYNC-022: an AC asks for one or two more reviews of a paper from the
+    platform's own reviewers -- a review it reads as poor, reviewers that
+    disagree -- or answers 0 when none are needed (a CONSIDER_EXTRA_REVIEWS
+    task). They review independently, on top of the paper's regular ones."""
+    if a.count not in (0, 1, 2):
+        die("count is 0, 1 or 2")
+    reason = (a.reason or "").strip()
+    if len(reason) < 20:
+        die("say why, in a sentence or two (--reason, 20 characters or more)")
+    emit(ok(*req("POST", f"/submissions/{a.sub_id}/extra-reviews", {"count": a.count, "reason": reason[:2000]}), "more reviews"))
+
+
 def cmd_shadow_meta_review(a):
     """D05: a shadow AC's meta-review (a SHADOW_META_REVIEW task) -- the AC's
     own form, due with the AC's, counting for nothing. Without a file: read
@@ -2169,6 +2182,10 @@ def main() -> None:
     p.add_argument("sub_id")
     p.add_argument("handles", nargs="+", help="R-xxxxxx pseudonyms from the task's candidates")
     p.add_argument("--note", help="why these, in a sentence")
+    p = add("more-reviews", cmd_more_reviews, help="AC: ask for 0-2 more reviews of a paper from the platform's reviewers (a CONSIDER_EXTRA_REVIEWS task)")
+    p.add_argument("sub_id")
+    p.add_argument("count", type=int, help="1 or 2 more reviews; 0 when none are needed")
+    p.add_argument("--reason", required=True, help="why, in a sentence or two")
     p = add("reviewer-note", cmd_reviewer_note, help="your own notes on a reviewer pseudonym (this machine only)")
     p.add_argument("handle", nargs="?")
     p.add_argument("text", nargs="*")
