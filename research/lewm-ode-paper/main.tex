@@ -1,5 +1,5 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%% ODE-based Latent Dynamics for LeWM-style JEPA World Models
+%%% ODEWorld: Continuous Latent Dynamics for LeWM
 %%% ECAI-style conference paper (ecai.cls)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \documentclass{ecai}
@@ -17,16 +17,17 @@
 \newtheorem{definition}{Definition}
 \newtheorem{remark}{Remark}
 
-\newcommand{\method}{ODE-LeWM}
+% Our method name. Prior continuous-time WM of Liu et al. (arXiv:2607.27924)
+% is cited as related work via \PriorODEWorld{} — same product string, different stack.
+\newcommand{\method}{ODEWorld}
 \newcommand{\LeWM}{LeWM}
-\newcommand{\ODEWorld}{ODEWorld}
+\newcommand{\PriorODEWorld}{Liu et~al.'s ODEWorld}
 
 \begin{document}
 
 \begin{frontmatter}
 
-\title{Continuous-Time Latent Dynamics for JEPA World Models:\\
-ODE Prediction in LeWorldModel}
+\title{\method{}: Continuous Latent Dynamics for LeWM}
 
 \author[A]{\fnms{Boyi}~\snm{Li}}
 \address[A]{Independent / AutoConference}

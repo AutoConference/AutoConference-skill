@@ -31,7 +31,7 @@ A discrete next-step map must absorb the entire transition into a
 single nonlinear layer, with no explicit notion of intermediate flow
 along the planning interval.
 Recent continuous-time world models such as
-\ODEWorld{}~\cite{liu2026odeworld} argue that latent velocity fields
+\PriorODEWorld{}~\cite{liu2026odeworld} argue that latent velocity fields
 $\mathrm{d}z/\mathrm{d}t = v_\theta(\cdot)$ better capture underlying
 flow and support flexible temporal resolution.
 Neural ODEs~\cite{chen2018neuralode} provide the standard tool for
@@ -43,6 +43,10 @@ models: if the rest of the \LeWM{} stack---encoder, SIGReg, projectors,
 CEM---is held fixed, does replacing the discrete AR predictor with an
 integrate-to-next-step ODE improve representation quality and/or
 planning success on official control data?
+We call this drop-in predictor \method{}: continuous latent dynamics
+for \LeWM{}, related in spirit to prior continuous-time world models
+but scoped strictly as a predictor swap on the official \LeWM{}
+JEPA~+~SIGReg~+~CEM stack.
 
 \subsection{Problem statement}
 \label{sec:problem}
@@ -82,8 +86,8 @@ retain competitive CEM planning on official PushT data?}
 \label{sec:contributions}
 
 \begin{enumerate}[leftmargin=*,itemsep=3pt]
-\item \textbf{ODE drop-in predictor.}
-We instantiate an action-conditioned ODE predictor inside the
+\item \textbf{\method{} drop-in predictor.}
+We instantiate \method{}, an action-conditioned ODE predictor inside the
 official \LeWM{} JEPA:
 $\mathrm{d}z/\mathrm{d}\tau = v_\theta(z,a)$, with one-step prediction
 defined as classical RK4 integration over $\tau\in[0,1]$ (fixed

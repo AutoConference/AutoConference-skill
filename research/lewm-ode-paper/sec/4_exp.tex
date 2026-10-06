@@ -199,7 +199,7 @@ work (official HF datasets exist but were not downloaded here).
 We use RK4 with $N{=}4$ and no adaptive stepping; Euler is implemented
 but not ablated at 100 epochs.
 Broader ODE solvers, multi-step $\tau$ schedules, and
-\ODEWorld{}-style physical-time flow are unexplored.
+physical-time flow as in \PriorODEWorld{}~\cite{liu2026odeworld} are unexplored.
 
 \item \textbf{Compute.}
 ODE CEM is $\sim$10$\times$ slower than discrete AR on the same GPU;
@@ -252,4 +252,4 @@ drop-in, (2)~multi-environment CEM under matched splits,
 (4)~evaluating official HF pretrained weights under the same val-99
 CEM protocol as an external reference, and
 (5)~stronger continuous-time formulations in the spirit of
-\ODEWorld{}~\cite{liu2026odeworld} beyond a one-step RK4 map.
+\PriorODEWorld{}~\cite{liu2026odeworld} beyond a one-step RK4 map.

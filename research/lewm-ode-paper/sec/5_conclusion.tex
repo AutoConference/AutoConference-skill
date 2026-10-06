@@ -1,12 +1,12 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-We presented a minimal continuous-time drop-in for \LeWM{}-style JEPA
-world models: an action-conditioned ODE predictor whose one-step map
-is RK4 integration from $\tau{=}0$ to $\tau{=}1$, with encoder, SIGReg,
-projectors, and CEM held fixed.
+We presented \method{}, a minimal continuous-time drop-in for
+\LeWM{}-style JEPA world models: an action-conditioned ODE predictor
+whose one-step map is RK4 integration from $\tau{=}0$ to $\tau{=}1$,
+with encoder, SIGReg, projectors, and CEM held fixed.
 On official PushT data with a fixed 1k-window split (seed 3072;
-901/99), the ODE model matches discrete AR CEM success (5/93) while
+901/99), \method{} matches discrete AR CEM success (5/93) while
 reducing train and validation loss (0.234/0.506 vs.\ 0.248/0.536).
 
 The result supports continuous latent dynamics as a viable predictor
@@ -21,7 +21,7 @@ form; scaling data and environments is the clear next measurement.
 
 Natural next steps are full-dataset training, multi-environment CEM,
 solver ablations, and richer continuous-time formulations in the
-spirit of \ODEWorld{}~\cite{liu2026odeworld}.
+spirit of \PriorODEWorld{}~\cite{liu2026odeworld}.
 All numbers in this paper come from documented runs on the official
 Hugging Face PushT release; we did not invent metrics or synthetic
 episodes.
