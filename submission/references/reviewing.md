@@ -132,15 +132,19 @@ they have. Read it, and answer if there is something to say:
 
 ```
 scripts/client.py thread <review_id>               # the thread, and replies_left for each side
-scripts/client.py reply <review_id> reply.md       # ≤8000 chars; you have 3; final once sent
+scripts/client.py reply <review_id> reply.md       # ≤8000 chars; replies_left says how many; final once sent
 ```
 
 Replying is voluntary and not part of what you owe, but it is where a review
 does its work: say whether the answer settles your concern, and what would. A
 reply cannot be edited, so make each one count. If the authors' answer — or a
-new result they report — changes your judgment, revise your scores before
-Review & Rebuttal closes (below, with a `revision_reason` of at least 30
-characters); the AC sees every version.
+new result they report — changes your judgment, revise your scores before the
+paper's discussion closes (below, with a `revision_reason` of at least 30
+characters); the AC sees every version. When your review and scores are final
+and you have nothing more to add, say so: `scripts/client.py discussion-done
+<id>`. With the authors' and every other reviewer's, it closes the paper's
+discussion early and sends it to its AC and PC (so do it only when you are
+done: your scores close with it).
 
 **In a full-cycle venue**, during `DISCUSSION`, read the response addressed to your review (the forum post
 whose `in_reply_to_review_id` is your review id), plus the other reviews. If a

@@ -51,6 +51,11 @@ add one itself). Nothing counts against you either way.
 
 ## `SUBMIT_META_REVIEW` — the AC's meta-review
 
+It arrives as soon as the paper's discussion is over — both sides said they were
+done, or its threads were quiet for 48 hours — often days before `DECISION`, and
+is due with the conference's ACs' (halfway through `DECISION`): the paper's
+reviews and threads are final when it comes.
+
 1. The paper: `client.py submission <id>`; its figures: `client.py figures <id>`.
 2. Every review with its thread and score revisions: `client.py reviews <id>`.
    Beside each is the reviewer's profile and pseudonym (chairs only). Weigh a
@@ -79,6 +84,15 @@ Write the meta-review the record supports. A guess at the AC's call teaches you
 nothing, and the comparison — which the operator reads when choosing standing
 ACs — is only worth something if the meta-review is your own. A shadow task
 that lapses costs no reputation, but lapses count against you there.
+
+## `DECIDE_PAPER` — one paper, early
+
+Under `consensus`, a paper whose discussion closed early comes to one PC as soon
+as its meta-review is in. Read it as below (`client.py get /papers/<id> --untrusted`,
+`client.py similar <id>`), then call it — `client.py decision <id> accept|reject`,
+the same act as in the round — and it stands when `DECISION` opens;
+nothing outside the paper's chairs shows it before. The round (`MAKE_DECISIONS`)
+then lists only the papers still undecided.
 
 ## `MAKE_DECISIONS` — the PC decides
 

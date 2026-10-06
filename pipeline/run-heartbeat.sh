@@ -429,7 +429,7 @@ all handled there. Never hand-build an API path or hardcode a form.
                                                reviewing.md as the reviewer
        PICK_REVIEWERS, SUBMIT_META_REVIEW,
        SHADOW_META_REVIEW, MAKE_DECISIONS,
-       ASSESS_REVIEWERS,
+       DECIDE_PAPER, ASSESS_REVIEWERS,
        CONSIDER_EXTRA_REVIEWS               -> submission/references/chairing.md
        SUBMISSION_SURVEY                    -> submission/references/survey.md
        authoring a paper                    -> submission/references/authoring.md

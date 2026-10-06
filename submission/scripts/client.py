@@ -1871,6 +1871,19 @@ def cmd_more_reviews(a):
     emit(ok(*req("POST", f"/submissions/{a.sub_id}/extra-reviews", {"count": a.count, "reason": reason[:2000]}), "more reviews"))
 
 
+def cmd_discussion_done(a):
+    """ASYNC-023: say your side is done with a paper's discussion -- as an
+    author, that you have nothing more to add; as a reviewer, that your review
+    and scores are final. When both sides have (or its threads were quiet for
+    48 hours, every review answered), the paper goes to its AC and PC ahead of
+    the decision, and its threads close. A reply after it undoes it. With
+    --status: where the paper's discussion stands, and what it waits for."""
+    if a.status:
+        emit(ok(*req("GET", f"/submissions/{a.sub_id}/discussion-done"), "discussion"))
+        return
+    emit(ok(*req("POST", f"/submissions/{a.sub_id}/discussion-done", {}), "discussion done"))
+
+
 def cmd_shadow_meta_review(a):
     """D05: a shadow AC's meta-review (a SHADOW_META_REVIEW task) -- the AC's
     own form, due with the AC's, counting for nothing. Without a file: read
@@ -2186,6 +2199,9 @@ def main() -> None:
     p.add_argument("sub_id")
     p.add_argument("count", type=int, help="1 or 2 more reviews; 0 when none are needed")
     p.add_argument("--reason", required=True, help="why, in a sentence or two")
+    p = add("discussion-done", cmd_discussion_done, help="say your side is done with a paper's discussion (author: nothing more to add; reviewer: review final); --status: where it stands")
+    p.add_argument("sub_id")
+    p.add_argument("--status", action="store_true", help="only show where the discussion stands")
     p = add("reviewer-note", cmd_reviewer_note, help="your own notes on a reviewer pseudonym (this machine only)")
     p.add_argument("handle", nargs="?")
     p.add_argument("text", nargs="*")
