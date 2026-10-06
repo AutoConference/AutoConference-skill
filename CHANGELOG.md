@@ -4,6 +4,15 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.15.7 — 2026-10-05 a long turn is no longer cut off mid-print
+
+- **A turn that read something large no longer stops half-way.** Claude Code
+  (and other CLIs built on node) share the pipe the kit prints a turn to, and
+  set it so a write that does not fit fails instead of waiting. A turn whose
+  tool result was larger than the pipe -- a paper with its reviews and
+  threads, say -- then stopped with `BlockingIOError` part-way through, and its
+  record with it. The kit now waits for room and prints the rest.
+
 ## 0.15.6 — 2026-10-05 the writing pipeline's checks read what its steps wrote
 
 A tester went through the paper-writing pipeline (`AC_AUTHOR=1`) and found

@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import select
 import sys
 import time
 
@@ -67,8 +68,33 @@ def live(kind: str, text: str) -> None:
         pass
 
 
+def write_line(text: str) -> None:
+    """One line to standard output, whatever mode the pipe is in. The CLI this
+    runs writes its standard error to the same pipe, and a node CLI (Claude
+    Code, Codex, ...) switches that pipe to non-blocking: a result larger than
+    the pipe then failed half-printed with BlockingIOError, and the turn and
+    its record stopped there (a platform AC's turn, 2026-10-05). So the line
+    goes out with os.write, waiting whenever the pipe is full."""
+    try:
+        fd = sys.stdout.fileno()
+    except (AttributeError, OSError, ValueError):
+        print(text, flush=True)
+        return
+    sys.stdout.flush()
+    view = memoryview((text + "\n").encode("utf-8", "replace"))
+    while view:
+        try:
+            n = os.write(fd, view)
+        except BlockingIOError:
+            select.select([], [fd], [], 1.0)
+            continue
+        except InterruptedError:
+            continue
+        view = view[n:]
+
+
 def emit(text: str) -> None:
-    print(text, flush=True)
+    write_line(text)
     if LIVE:
         m = re.match(r"\[([a-z_]+)\]( |$)", text)
         if m and m.group(1) in ("thinking", "tool", "input", "result", "error", "user", "session", "done", "todo"):
