@@ -1,25 +1,76 @@
 \section{Introduction}
 \label{sec:intro}
 
+\subsection{Motivation}
+\label{sec:motivation}
+
 World models that plan in a compact latent space enable fast
 model-predictive control without decoding pixels at every step
 \cite{ha2018worldmodels,hafner2019planet}.
+Classical latent dynamics models often predict the next state with a
+discrete transition (RNN, RSSM, or transformer block), then hand the
+rollout to a planner such as CEM or MPPI.
 Joint Embedding Predictive Architectures (JEPAs)
-\cite{assran2023jepa} push this idea further by predicting future
-\emph{embeddings} rather than reconstructions, and
+\cite{assran2023jepa} push the representation side further by
+predicting future \emph{embeddings} rather than reconstructions,
+avoiding a pixel decoder that can dominate compute and encourage
+shortcut features.
 LeWorldModel (\LeWM{})~\cite{maes2026lewm} shows that a stable
 end-to-end JEPA can be trained from pixels with only two loss terms:
-next-embedding MSE and SIGReg isotropic-Gaussian regularization.
+next-embedding MSE and SIGReg isotropic-Gaussian regularization
+\cite{balestriero2023sigreg}.
+The resulting system supports Cross-Entropy Method (CEM) planning
+directly in latent space and reports strong PushT success under
+full-data training.
 
 In \LeWM{}, the predictor is a discrete autoregressive transformer
 block: given context latents $z_t$ and action embeddings $a_t$, it
 directly outputs $\hat z_{t+1}$.
 Physical dynamics, however, are continuous in time.
+A discrete next-step map must absorb the entire transition into a
+single nonlinear layer, with no explicit notion of intermediate flow
+along the planning interval.
 Recent continuous-time world models such as
 \ODEWorld{}~\cite{liu2026odeworld} argue that latent velocity fields
 $\mathrm{d}z/\mathrm{d}t = v_\theta(\cdot)$ better capture underlying
 flow and support flexible temporal resolution.
-This raises a concrete question for planning JEPA models:
+Neural ODEs~\cite{chen2018neuralode} provide the standard tool for
+parameterizing such fields and integrating them with classical
+solvers.
+
+This creates a natural inductive-bias question for planning JEPA
+models: if the rest of the \LeWM{} stack---encoder, SIGReg, projectors,
+CEM---is held fixed, does replacing the discrete AR predictor with an
+integrate-to-next-step ODE improve representation quality and/or
+planning success on official control data?
+
+\subsection{Problem statement}
+\label{sec:problem}
+
+We study a \emph{minimal} predictor swap under a matched experimental
+protocol.
+Let $f_\phi$ be the pixel encoder, $p$ and $q$ the projectors,
+$\mathcal{L}_{\mathrm{SIGReg}}$ the anti-collapse regularizer, and
+$\mathrm{CEM}$ the official planner.
+The discrete baseline predicts
+\begin{equation}
+  \hat Z_{t+1} = g^{\mathrm{AR}}_\theta(Z_t, A_t),
+\end{equation}
+while our continuous alternative defines a velocity field $v_\theta$
+and
+\begin{equation}
+  \hat Z_{t+1}
+  \;=\;
+  \mathrm{ODESolve}\bigl(v_\theta;\, Z_t, A_t;\, \tau{:}0\to 1\bigr).
+\end{equation}
+Both models are trained with the same JEPA objective
+$\mathcal{L}_{\mathrm{pred}}+\lambda\mathcal{L}_{\mathrm{SIGReg}}$
+on the same official PushT windows, and evaluated with the same
+val-tied CEM starts.
+We deliberately do \emph{not} redesign the encoder, change SIGReg
+hyperparameters, introduce pixel reconstruction, or invent new
+planning costs: any difference is attributable to the predictor
+dynamics.
 
 \begin{quote}
 \emph{Can we replace \LeWM{}'s discrete AR predictor with an ODE
@@ -27,20 +78,55 @@ integrate-to-next-step rule, keep the rest of the pipeline fixed, and
 retain competitive CEM planning on official PushT data?}
 \end{quote}
 
-\paragraph{Contributions.}
-(1)~We instantiate an \textbf{ODE predictor} inside the official
-\LeWM{} JEPA: $\mathrm{d}z/\mathrm{d}\tau = v_\theta(z,a)$, with
-one-step prediction defined as RK4 integration over $\tau\in[0,1]$
-(fixed $N{=}4$ steps), actions held constant on the interval, and a
-zero-initialized linear velocity head for residual stability.
-(2)~We evaluate on the \textbf{official} PushT expert HDF5 with a
-reproducible \textbf{1000-window} split (seed~3072; 901/99), matching
-encoder, SIGReg ($\lambda{=}0.09$, $M{=}1024$), optimizer, and CEM
-protocol between discrete and ODE runs ($\approx$18.07M parameters).
-(3)~Empirically, ODE lowers train/val loss relative to discrete AR,
-while CEM success on the val-99 protocol is \textbf{tied} at
-5/93~(5.38\%).
+\subsection{Contributions}
+\label{sec:contributions}
+
+\begin{enumerate}[leftmargin=*,itemsep=3pt]
+\item \textbf{ODE drop-in predictor.}
+We instantiate an action-conditioned ODE predictor inside the
+official \LeWM{} JEPA:
+$\mathrm{d}z/\mathrm{d}\tau = v_\theta(z,a)$, with one-step prediction
+defined as classical RK4 integration over $\tau\in[0,1]$ (fixed
+$N{=}4$ substeps), actions held constant on the interval, and a
+zero-initialized linear velocity head for residual stability at
+initialization.
+The velocity backbone reuses the same ConditionalBlock / AdaLN-zero
+transformer capacity as the discrete AR predictor
+($\approx$18.07M parameters; +37{,}056 from the $v$-head).
+
+\item \textbf{Matched 1k protocol on official data.}
+We evaluate on the official Hugging Face PushT expert HDF5 with a
+reproducible 1000-window split (seed~3072; 901 train / 99 val),
+matching encoder, SIGReg ($\lambda{=}0.09$, $M{=}1024$), optimizer,
+hardware batching (64$\times$accum~2), and CEM protocol between
+discrete and ODE runs.
+Indices are frozen and never regenerated between runs.
+
+\item \textbf{Honest empirical findings.}
+On this protocol, ODE lowers train/val loss relative to discrete AR
+(0.234 / 0.506 vs.\ 0.248 / 0.536), while CEM success on the val-99
+protocol is \textbf{tied} at 5/93~(5.38\%).
 We explicitly contrast this with the paper-reported
 $96{\pm}2.83\%$ PushT figure under full-data training, and treat the
 1k regime as a controlled ablation rather than a claim of
 paper-scale performance.
+No synthetic episodes are used.
+\end{enumerate}
+
+\paragraph{Why this matters.}
+If continuous dynamics help even as a drop-in, JEPA world models can
+borrow ODE inductive bias without abandoning SIGReg or CEM.
+If they do not help planning under matched compute and data, that is
+also useful: it suggests that predictor form is secondary to data scale
+and planner configuration in the 1k regime.
+Our results land in the middle---loss improves, CEM does not---and we
+report both sides without overselling.
+
+\paragraph{Scope.}
+This paper is a controlled predictor ablation, not a full re-training
+of \LeWM{} at paper scale, and not a multi-environment bake-off.
+Cube, Two-rooms, and Reacher remain future work
+(\Cref{sec:limitations}).
+We also do not convert or evaluate the official Hugging Face pretrained
+PushT weights under our val-99 protocol; that baseline remains future
+work.

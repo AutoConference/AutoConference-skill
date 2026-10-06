@@ -6,13 +6,11 @@ Conference-style writeup of the ODE latent-dynamics predictor for LeWM-style JEP
 
 ```bash
 cd research/lewm-ode-paper
-pdflatex main.tex
-bibtex main
-pdflatex main.tex
-pdflatex main.tex
+latexmk -pdf main.tex
+# or: pdflatex + bibtex + pdflatex ×2
 ```
 
-Requires TeX Live with `ecai.cls` (vendored here from the kit's AGP template).
+Requires TeX Live with `ecai.cls` (vendored here) and `algorithm` / `algpseudocode`.
 
 ## Layout
 
@@ -23,6 +21,10 @@ Requires TeX Live with `ecai.cls` (vendored here from the kit's AGP template).
 | `refs.bib` | Bibliography |
 | `figs/` | Train loss curves (discrete + ODE) |
 | `ecai.cls` | ECAI class |
+
+## Length
+
+Expanded manuscript targets **6–8 pages** (ECAI `ecai.cls`).
 
 ## Key claims (honest)
 

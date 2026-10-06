@@ -6,22 +6,30 @@
 
 \paragraph{Data.}
 We use only the official Hugging Face PushT expert release
-(\texttt{quentinll/lewm-pusht}, HDF5).
+(\texttt{quentinll/lewm-pusht}, HDF5; no Cube / Two-rooms / Reacher
+downloads in this study).
 A reproducible subset of \textbf{1000} windows is drawn with seed
 \textbf{3072} and split by \texttt{spt.random\_split([0.9, 0.1])} into
-\textbf{901} train / \textbf{99} validation windows
-(indices frozen; never regenerated between runs).
+\textbf{901} train / \textbf{99} validation windows.
+Because the validation fraction is passed as $1-0.9$ in floating
+point, $\lfloor 1000\times 0.1\rfloor$ yields 99 validation indices and
+the remainder assigns 901 to train---matching the frozen subset files
+(\texttt{pusht\_expert\_train\_n1000\_seed3072} train/val index arrays).
+Indices are never regenerated between discrete and ODE runs.
 Of the 99 val windows, \textbf{93} remain feasible under
-\texttt{goal\_offset=25} for CEM (6 dropped).
+goal offset 25 for CEM (6 dropped because the goal frame would fall
+past the episode end).
 
 \paragraph{Models and compute.}
 Both predictors use ViT-tiny, history 3, $D{=}192$, SIGReg
 $\lambda{=}0.09$, AdamW lr $5{\times}10^{-5}$, weight decay
 $10^{-3}$, grad clip 1.0, bf16, 100 epochs, frameskip 5.
-Hardware: RTX~4060 Laptop (8\,GiB); batch 64 with gradient
-accumulation 2 (effective 128); \texttt{num\_workers=0}.
+Hardware: RTX~4060 Laptop (8\,GiB).
+Official batch size 128 OOMs with dataloader workers on this GPU; we
+run batch 64 with gradient accumulation 2 (effective 128) and
+\texttt{num\_workers=0}.
 Parameter counts: discrete AR \textbf{18,034,478}; ODE
-\textbf{18,071,534} (+37,056 from $v$-head).
+\textbf{18,071,534} (+37{,}056 from the velocity head).
 
 \begin{table}[t]
 \centering
@@ -36,11 +44,32 @@ Subset / seed & 1000 windows / 3072 \\
 Train / val & 901 / 99 \\
 CEM eval set & val-99 $\to$ 93 feasible \\
 Encoder & ViT-tiny, patch 14, $224^2$, scratch \\
+Predictor depth / heads & 6 / 16 (AdaLN-zero) \\
 SIGReg & $\lambda{=}0.09$, $M{=}1024$, knots 17 \\
 ODE solver & RK4, $N{=}4$, $\tau{:}0\to1$ \\
-Params (ODE) & 18,071,534 ($\approx$18.07M) \\
-Train & 100 epochs, AdamW $5{\times}10^{-5}$ \\
+Params (AR / ODE) & 18,034,478 / 18,071,534 \\
+Optimizer & AdamW $5{\times}10^{-5}$, wd $10^{-3}$ \\
+Train & 100 epochs, bf16, grad clip 1.0 \\
 Effective batch & 128 (64$\times$accum~2) \\
+Hardware & RTX 4060 Laptop 8\,GiB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{CEM planner hyperparameters (official PushT config).}
+\label{tab:cem}
+\begin{tabular}{lc}
+\toprule
+Item & Value \\
+\midrule
+Solver & \texttt{CEMSolver} \\
+Samples / iterations / top-$k$ & 300 / 30 / 30 \\
+Horizon / receding / action block & 5 / 5 / 5 \\
+Goal offset (steps) & 25 \\
+Max episode steps & 100 \\
+Eval seed & 42 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -66,45 +95,161 @@ ODE RK4 0$\to$1 (ours) & 18.07M & \textbf{0.234} & \textbf{0.506} & 5/93 (5.38\%
 \end{tabular}
 \end{table}
 
+\begin{table}[t]
+\centering
+\caption{ODE run: final validation loss decomposition (epoch 100).}
+\label{tab:ode-decomp}
+\begin{tabular}{lc}
+\toprule
+Metric & Value \\
+\midrule
+fit/loss (train) & 0.234 \\
+val/loss & 0.506 \\
+val/pred ($\mathcal{L}_{\mathrm{JEPA}}$) & $\approx$0.220 \\
+val/sigreg & $\approx$3.17 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.48\linewidth]{figs/lewm_train_loss.png}%
-\hfill
-\includegraphics[width=0.48\linewidth]{figs/lewm_ode_train_loss.png}
-\caption{Training curves on the fixed 1k split (left: discrete AR;
-right: ODE predictor). ODE converges to lower fit/val loss.}
-\label{fig:curves}
+\includegraphics[width=\linewidth]{figs/lewm_train_loss.png}
+\caption{Discrete AR training curves on the fixed 1k split
+(seed~3072). Fit/val loss decrease over 100 epochs; final
+fit/loss~$\approx$0.248, val/loss~$\approx$0.536.}
+\label{fig:curves-ar}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figs/lewm_ode_train_loss.png}
+\caption{ODE predictor training curves on the same 1k split.
+Final fit/loss~$\approx$0.234, val/loss~$\approx$0.506.
+Early epochs show transiently elevated val SIGReg before convergence
+near~$\approx$3.17.}
+\label{fig:curves-ode}
 \end{figure}
 
 Table~\ref{tab:results} summarizes the matched comparison.
 The ODE predictor improves fit/loss (0.234 vs.\ 0.248) and val/loss
 (0.506 vs.\ 0.536); final val prediction / SIGReg terms are
-approximately 0.220 / 3.17.
+approximately 0.220 / 3.17 (\Cref{tab:ode-decomp}).
 CEM success is identical: \textbf{5 successes out of 93} feasible
 val starts ($\approx$5.38\%).
-ODE CEM wall-clock is substantially higher ($\approx$82\,min vs.\
-$\approx$8\,min for discrete on the same machine) because each
-rollout step runs four RK4 stages.
+ODE CEM wall-clock is substantially higher ($\approx$82\,min /
+4859\,s vs.\ $\approx$8\,min for discrete on the same machine) because
+each rollout step runs four RK4 stages with four velocity evaluations
+each.
+
+\paragraph{Loss$\downarrow$ vs.\ CEM flat.}
+Lower next-embedding loss does not yield higher CEM success under
+this budget.
+Several non-exclusive explanations are consistent with the data:
+(i)~the 1k subset may be too small for planning-relevant long-horizon
+structure to separate the two predictors;
+(ii)~CEM hyperparameters (horizon 5, 300 samples) may be the bottleneck
+rather than one-step prediction error;
+(iii)~goal-offset feasibility and the sparse success events (only 5
+hits) make the metric high-variance at $n{=}93$;
+(iv)~RK4's extra compute does not change the discrete CEM interface,
+so planning search explores the same action schedule.
+We therefore report a \emph{tie} on CEM and a clear but modest win on
+loss---not a planning breakthrough.
+
+\paragraph{Training dynamics.}
+Figure~\ref{fig:curves-ar} and Figure~\ref{fig:curves-ode} show
+that both predictors decrease fit and val loss over 100 epochs on the
+same split.
+The ODE run exhibits a transiently high validation SIGReg term in
+early epochs (on the order of $30$--$100$) before settling near
+$\approx 3.17$, comparable to the discrete baseline's late-training
+SIGReg scale.
+This suggests that the continuous residual path does not permanently
+destabilize SIGReg under $\lambda{=}0.09$, but can delay isotropy early
+in training when the velocity head leaves the zero-init regime.
 
 \paragraph{Protocol note.}
-Earlier CEM probes on random full-dataset starts (e.g.\ 0/10) are
+Earlier CEM probes on random full-dataset starts (e.g.\ 0/10 for the
+100-epoch discrete checkpoint, 1/10 for a 1-epoch smoke run) are
 \emph{not} val-tied and are discarded; all claims here use the
 val-99 / 93-feasible protocol shared with \texttt{validate/loss}.
+The prior 0/10 result reflected a protocol mismatch (random windows
+from the $\sim$1.9M pool), not total model collapse.
 
-\subsection{Limitations}
+\subsection{Limitations and future work}
 \label{sec:limitations}
 
 \begin{itemize}[leftmargin=*,itemsep=2pt]
-\item \textbf{1k subset.} Results are on 1000 windows, not the full
-PushT expert corpus. Paper-scale $\approx$96\% success is out of
-scope for this study.
-\item \textbf{CEM tied.} Lower loss does not yield higher CEM success
-under this budget; planning may be bottlenecked by data scale, CEM
-hyperparameters, or goal-offset feasibility rather than predictor
-form.
-\item \textbf{Single environment.} Only PushT is evaluated; Cube,
-Two-rooms, and Reacher remain future work.
-\item \textbf{Fixed solver.} We use RK4 with $N{=}4$ and no adaptive
-stepping; broader ODE solvers and multi-step $\tau$ schedules are
-unexplored.
+\item \textbf{1k subset / not paper scale.}
+Results are on 1000 windows, not the full PushT expert corpus.
+Paper-scale $\approx$96\% success is out of scope for this study;
+closing that gap requires full-data 100-epoch training and
+paper-protocol CEM ($n{=}50$), which we have not run.
+
+\item \textbf{CEM tied.}
+Lower loss does not yield higher CEM success under this budget;
+planning may be bottlenecked by data scale, CEM hyperparameters, or
+goal-offset feasibility rather than predictor form.
+
+\item \textbf{Single environment.}
+Only PushT is evaluated; Cube, Two-rooms, and Reacher remain future
+work (official HF datasets exist but were not downloaded here).
+
+\item \textbf{Fixed solver.}
+We use RK4 with $N{=}4$ and no adaptive stepping; Euler is implemented
+but not ablated at 100 epochs.
+Broader ODE solvers, multi-step $\tau$ schedules, and
+\ODEWorld{}-style physical-time flow are unexplored.
+
+\item \textbf{Compute.}
+ODE CEM is $\sim$10$\times$ slower than discrete AR on the same GPU;
+any deployment story must weigh loss gains against planning latency.
+
+\item \textbf{Single seed / single split.}
+All numbers use seed 3072 and one frozen 901/99 split.
+We do not report multi-seed confidence intervals; the 5/93 CEM count
+should be read as a point estimate under this protocol.
 \end{itemize}
+
+\subsection{Discussion}
+\label{sec:discussion}
+
+The matched comparison supports three practical takeaways.
+
+First, continuous latent dynamics are a \emph{compatible} inductive
+bias for \LeWM{}-style JEPA training: the ODE predictor trains stably
+for 100 epochs under the same SIGReg weight, reaches lower fit/val
+loss, and requires only a small parameter delta (+37{,}056).
+
+Second, compatibility is not the same as a planning win.
+CEM success remains 5/93 for both predictors.
+In a low-data regime with a sparse binary success metric, improved
+one-step embedding fit need not rearrange which of 93 starts are
+solved under a fixed CEM budget.
+We therefore treat loss and CEM as separate axes and refuse to conflate
+them.
+
+Third, protocol discipline matters as much as predictor choice.
+Random-start CEM probes produced misleading 0/10 or 1/10 scores that
+are not comparable across runs; the val-tied protocol is what makes
+the discrete vs.\ ODE comparison legitimate.
+Future scaling experiments should preserve the same discipline:
+frozen splits, shared CEM starts, and explicit separation between
+subset ablations and paper-scale claims.
+
+\paragraph{What we are \emph{not} claiming.}
+We do not claim paper-scale PushT performance, multi-seed statistical
+significance of the 5/93 tie, superiority of ODEs for CEM in general,
+or that lower JEPA loss implies better control.
+We claim only a matched 1k comparison on official data: ODE reduces
+reported train/val loss and matches discrete CEM success under the
+val-99 protocol documented above.
+
+\paragraph{Future work.}
+Natural next steps are (1)~full PushT training with the same ODE
+drop-in, (2)~multi-environment CEM under matched splits,
+(3)~solver ablations ($N$, Euler vs.\ RK4, adaptive integrators),
+(4)~evaluating official HF pretrained weights under the same val-99
+CEM protocol as an external reference, and
+(5)~stronger continuous-time formulations in the spirit of
+\ODEWorld{}~\cite{liu2026odeworld} beyond a one-step RK4 map.

@@ -1,33 +1,115 @@
 \section{Related Work}
 \label{sec:related}
 
-\paragraph{JEPA world models and \LeWM{}.}
-JEPA methods learn predictive representations without pixel decoding
-\cite{assran2023jepa,bardes2024vjepa}.
-Collapse is a central failure mode; \LeWM{}~\cite{maes2026lewm}
-stabilizes end-to-end pixel JEPA training with SIGReg
-\cite{balestriero2023sigreg}, pairing MSE next-embedding prediction
-with a sketched isotropic-Gaussian regularizer.
-We adopt \LeWM{}'s official encoder, SIGReg recipe, and CEM planner,
-changing only the predictor dynamics.
+\subsection{JEPA, SIGReg, and \LeWM{}}
+\label{sec:rel-jepa}
 
-\paragraph{Continuous-time / ODE world models.}
+Joint Embedding Predictive Architectures learn predictive
+representations by forecasting future embeddings rather than pixels
+\cite{assran2023jepa}.
+The JEPA objective is typically a distance between a predicted latent
+and a target latent from a context encoder, often with stop-gradient
+on the target path so the predictor cannot collapse by copying a
+degenerate constant.
+Video JEPA variants extend this idea to temporal sequences
+\cite{bardes2024vjepa}, still avoiding reconstruction decoders that
+can dominate loss and encourage shortcut visual features.
+A recurring failure mode is \emph{representation collapse}: embeddings
+that ignore inputs yet trivially satisfy a prediction objective.
+SIGReg~\cite{balestriero2023sigreg} addresses collapse by pushing
+projected embedding coordinates toward an isotropic Gaussian via a
+sketched Epps--Pulley statistic, without requiring a stop-gradient
+teacher network as in contrastive or BYOL-style recipes.
+
+\LeWM{}~\cite{maes2026lewm} brings JEPA to end-to-end pixel world
+models for control.
+Its recipe is deliberately simple: a ViT encoder trained from scratch,
+an action-conditioned predictor, MSE next-embedding loss, and SIGReg
+with weight $\lambda{=}0.09$ and $M{=}1024$ projections.
+Planning uses CEM in latent space against a goal embedding derived
+from a future observation.
+Reported PushT success under full-data training is high
+($96{\pm}2.83\%$), which motivates careful protocol matching when
+studying predictor variants on smaller subsets: a weak absolute CEM
+score on 1k windows is expected and should not be confused with a
+failed reproduction of the full recipe.
+We adopt \LeWM{}'s official encoder, SIGReg recipe, projectors, and CEM
+evaluator unchanged, so our study isolates predictor dynamics rather
+than re-tuning the full stack.
+
+\subsection{Continuous-time and ODE world models}
+\label{sec:rel-ode}
+
 Neural ODEs~\cite{chen2018neuralode} parameterize continuous
-transformations via $\mathrm{d}z/\mathrm{d}t = v_\theta(z,t)$.
-\ODEWorld{}~\cite{liu2026odeworld} introduces Physical-Time Flow:
-a continuous latent velocity field integrated by an ODE solver for
-video and control, emphasizing dynamical representation structure
-beyond discrete next-step prediction.
+transformations via $\mathrm{d}z/\mathrm{d}t = v_\theta(z,t)$ and
+backpropagate through ODE solvers.
+This viewpoint has influenced continuous-depth networks, continuous
+normalizing flows, and---more recently---world models that treat
+latent evolution as a flow rather than a discrete jump.
+
+\ODEWorld{}~\cite{liu2026odeworld} introduces Physical-Time Flow: a
+continuous latent velocity field integrated by an ODE solver for video
+and control, emphasizing dynamical representation structure beyond
+discrete next-step prediction.
 Our setting is narrower and deliberately comparable: we keep
 \LeWM{}'s JEPA loss and planning loop, and redefine a single discrete
 planning step as integrate $\tau{:}0\to 1$ under an
 action-conditioned velocity field.
+We do not claim the full Physical-Time Flow agenda (adaptive physical
+time, multi-scale horizons, or ODEWorld's broader architecture);
+instead we ask whether the ODE inductive bias alone helps under a
+matched \LeWM{} protocol.
 
-\paragraph{Latent MPC and CEM.}
-Cross-entropy method (CEM) planning in latent world models
-\cite{chua2018pets,hafner2019planet,maes2026lewm} samples action
-sequences, rolls out the predictor, and ranks by a goal-conditioned
-cost.
-We use the official \LeWM{} CEM evaluator on a fixed validation
-window set so discrete and ODE predictors share the same starts and
-feasibility filter.
+\subsection{Discrete AR vs.\ continuous latent dynamics}
+\label{sec:rel-disc-cont}
+
+Discrete autoregressive predictors map $(z_t,a_t)\mapsto\hat z_{t+1}$
+in one shot.
+They are efficient at inference (one forward pass per step) and match
+the discrete action schedule used by CEM rollouts.
+Continuous predictors instead learn $v_\theta$ and obtain
+$\hat z_{t+1}$ by numerical integration.
+This costs more compute per step (RK4 with $N{=}4$ evaluates the
+velocity field four times per substep interval, sixteen times over
+$\tau{:}0\to1$ with $N{=}4$), but exposes intermediate states along
+the interval and encourages residual updates ($z(1)\approx z(0)$ when
+$v\approx 0$).
+Our experiments quantify both sides: loss and CEM on a fixed split,
+plus wall-clock CEM cost on the same hardware.
+
+\subsection{Latent MPC and CEM planning}
+\label{sec:rel-cem}
+
+Model-based RL and planning systems often learn latent dynamics and
+optimize action sequences by shooting
+\cite{chua2018pets,hafner2019planet}.
+Cross-entropy method (CEM) samples candidate action sequences, rolls
+out the learned dynamics, ranks by a goal-conditioned cost, and
+refits a sampling distribution around elite samples.
+\LeWM{} uses this interface with a latent goal embedding derived from
+a future observation at a fixed goal offset.
+
+We use the official \LeWM{} CEM evaluator on a fixed validation window
+set so discrete and ODE predictors share the same starts and
+feasibility filter (\Cref{sec:setup}).
+Earlier probes on random full-dataset starts are discarded as
+protocol-mismatched; all planning claims in this paper use the
+val-99 / 93-feasible protocol tied to \texttt{validate/loss}.
+
+\subsection{Positioning summary}
+\label{sec:rel-position}
+
+Relative to prior work, \method{} is intentionally conservative:
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+\item vs.\ \LeWM{}: same JEPA + SIGReg + CEM stack; only the predictor
+map changes from discrete AR to RK4-integrated $v_\theta$.
+\item vs.\ \ODEWorld{}: we borrow the continuous-velocity idea, but do
+not adopt Physical-Time Flow, adaptive physical time, or ODEWorld's
+full training recipe.
+\item vs.\ classical Neural ODEs: we integrate on a fixed normalized
+interval $\tau\in[0,1]$ per planning step, with piecewise-constant
+actions, rather than learning an unrestricted continuous-time policy.
+\end{itemize}
+This positioning keeps comparisons fair on official PushT windows and
+makes negative or tied CEM results interpretable rather than confounded
+by simultaneous encoder or planner changes.

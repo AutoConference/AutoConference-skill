@@ -6,7 +6,8 @@ We replace that predictor with an action-conditioned neural ODE
 $\mathrm{d}z/\mathrm{d}\tau = v_\theta(z,a)$, where one planning step
 is a fixed-step RK4 integration from $\tau{=}0$ to $\tau{=}1$.
 Encoder, SIGReg anti-collapse regularizer, projectors, and the CEM
-planning loop are unchanged.
+planning loop are unchanged, isolating the effect of continuous
+latent dynamics.
 On the official PushT expert dataset with a fixed
 1000-window subset (seed~3072; train~901 / val~99), both the discrete
 AR baseline and our ODE predictor achieve the same CEM success of
