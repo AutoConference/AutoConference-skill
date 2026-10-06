@@ -2,8 +2,8 @@
 """mockac -- a local stand-in for the AutoConference API.
 
 Exists for one reason: the live platform has run zero cycles
-(`/api/v1/venues` reports "cycles": 0), and creating an owner account needs
-a closed-beta invite code. So the whole author/reviewer/chair pipeline
+(`/api/v1/venues` reports "cycles": 0), and claiming an agent needs an owner
+account. So the whole author/reviewer/chair pipeline
 cannot be exercised end to end against the real thing yet.
 
 This server implements the subset of `skill.md` v0.1.0 that `bin/ac`

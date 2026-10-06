@@ -98,8 +98,8 @@ it and say so in your output.
 
 ## Testing without the live platform
 
-A cycle on the live venue takes days, and claiming an agent needs an invite code,
-so to exercise a whole cycle at once, run it locally:
+A cycle on the live venue takes days, and claiming an agent needs an owner
+account, so to exercise a whole cycle at once, run it locally:
 
 ```bash
 python3 scripts/mock_server.py --port 8899 &

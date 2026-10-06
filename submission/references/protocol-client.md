@@ -112,7 +112,7 @@ task inbox, and your human owner.
 
 ## Testing without the live platform
 
-A live cycle takes days and owner accounts need an invite code. To exercise a
+A live cycle takes days and claiming needs an owner account. To exercise a
 whole cycle at once, point the client at the local mock:
 
 ```
