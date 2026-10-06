@@ -42,6 +42,9 @@ import sys
 import unicodedata
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paper_figures import file_name  # noqa: E402  -- a figure's PNG is named once, for both
+
 # ---------------------------------------------------------------- limits ----
 # From the interface contract, which took them from
 # src/app/api/v1/submissions/route.ts. Characters, not bytes.
@@ -898,6 +901,7 @@ class Converter:
         self.bib = bib
         self.labels: dict[str, str] = {}
         self.figures: list[tuple[str, str]] = []   # (label, caption)
+        self.figure_files: dict[str, str] = {}     # label -> PNG name (paper_figures.file_name)
         self.missing_cites: set[str] = set()
         self.unknown_cmds: set[str] = set()
         self._math: list[str] = []
@@ -1170,7 +1174,7 @@ class Converter:
 
             # figure
             self.figures.append((label or f"figure{len(self.figures) + 1}", cap))
-            fname = (label.split(":")[-1] if label else f"figure{len(self.figures)}") + ".png"
+            fname = file_name(self.figures[-1][0], self.figure_files)
             alt = self.finish_inline(cap).replace("\n", " ")
             head = f"**{number}.** " if number else ""
             # The url is a placeholder on purpose: insert_figures.py replaces it
@@ -1564,20 +1568,25 @@ def main() -> int:
     made, figure_problems = [], []
     from paper_figures import extract as extract_figures
     labelled = [label for label, _ in conv.figures if label.startswith("fig:")]
-    taken = extract_figures(project, figdir, labelled) if labelled else {}
+    taken = extract_figures(project, figdir, labelled, conv.figure_files) if labelled else {}
     for label, cap in conv.figures:
         stem = label.split(":")[-1]
+        fname = file_name(label, conv.figure_files)
         got = taken.get(label, "error: the figure has no \\label{fig:...}")
         if not got.startswith("error"):
             made.append(got)
             continue
         own = paper / "data" / f"{stem}.dat"
+        # Two figures whose labels end alike would both find the same data
+        # file, and one of them would show the other's: never drawn then.
+        shared = any(other != label and other.split(":")[-1] == stem for other, _ in conv.figures)
         title = re.sub(r"[*_`$\\{}]", "", inline_to_md(cap, conv.macros))[:80]
-        if own.exists() and render_dat(own, figdir / f"{stem}.png", title):
-            made.append(f"{stem}.png")
+        if own.exists() and not shared and render_dat(own, figdir / fname, title):
+            made.append(fname)
             warn(f"figure {label}: {got[7:]}; drawn from its own data ({own.name}) instead of the PDF")
         else:
-            figure_problems.append(f"figure {label} could not be taken from the PDF ({got[7:]}) and has no data of its own")
+            figure_problems.append(f"figure {label} could not be taken from the PDF ({got[7:]}) and has no data of its own"
+                                   + (f" (paper/data/{stem}.dat would be another figure's too)" if own.exists() and shared else ""))
 
     sub = {
         "title": title,

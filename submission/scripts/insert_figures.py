@@ -36,6 +36,13 @@ import re
 import sys
 
 IMG = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+# An image reference: its alt, its target (bare, or in <...>), an optional title.
+LOCAL_IMG = re.compile(r"(!\[[^\]]*\]\()(<[^>]*>|[^)\s]+)((?:\s+\"[^\"]*\")?\s*\))")
+
+
+def file_of(path: str) -> str:
+    """A reference's or an upload's file name, without its folders, query or fragment."""
+    return os.path.basename(str(path).replace("\\", "/").split("#")[0].split("?")[0])
 
 
 def captions_from(figures_md: str | None) -> dict:
@@ -105,12 +112,40 @@ def main() -> None:
     #
     # The contract's rule still holds -- the id comes from the attach response
     # and is never hand-built. Only the POSITION is the manuscript's.
+    #
+    # A reference is an upload's when its whole file name is the upload's.
+    # Matched as the end of any path, `loss.png` also took the place of
+    # `train_loss.png`, which then showed the loss plot while its own was
+    # appended at the end (a tester's report, 2026-10-05). The platform keeps
+    # only a file's name, so two uploads with the same name cannot be told
+    # apart: their references are left as they are, and said so, rather than
+    # guessed.
+    by_name: dict[str, list[dict]] = {}
     for u in raster:
-        name = re.escape(os.path.basename(u["filename"]))
-        local = re.compile(r"(!\[[^\]]*\]\()(?!https?:|/api/)[^)]*?" + name + r"(\))")
-        body, n = local.subn(lambda m: m.group(1) + "/" + u["url"].lstrip("/") + m.group(2), body)
-        if n:
-            rewritten.append(f"{u['filename']} x{n}")
+        by_name.setdefault(file_of(u["filename"]), []).append(u)
+    shared = sorted(n for n, us in by_name.items() if len(us) > 1)
+    counts: dict[str, int] = {}
+    dead: list[str] = []
+
+    def adopt(m: re.Match) -> str:
+        target = m.group(2).strip("<>")
+        if re.match(r"(?i)(?:https?:|/api/|data:)", target):
+            return m.group(0)
+        us = by_name.get(file_of(target))
+        if not us or len(us) > 1:
+            dead.append(target)
+            return m.group(0)
+        counts[us[0]["filename"]] = counts.get(us[0]["filename"], 0) + 1
+        return m.group(1) + "/" + us[0]["url"].lstrip("/") + m.group(3)
+
+    body = LOCAL_IMG.sub(adopt, body)
+    rewritten += [f"{name} x{n}" for name, n in counts.items()]
+    for n in shared:
+        print(f"insert_figures: {len(by_name[n])} uploads are named {n}; the platform keeps only the name, "
+              f"so their place in the text cannot be told apart -- both are added under {a.section}. "
+              f"Give each figure its own file name.", file=sys.stderr)
+    for t in sorted(t for t in set(dead) if file_of(t) not in shared):
+        print(f"insert_figures: ![...]({t}) names no uploaded figure; it will not show", file=sys.stderr)
     already = {m for m in IMG.findall(body)}
 
     for i, u in enumerate(raster, 1):

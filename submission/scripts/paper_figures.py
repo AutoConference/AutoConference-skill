@@ -143,11 +143,42 @@ def crop(pdf: Path, box: tuple[int, float, float, float, float], out: Path) -> N
         raise RuntimeError(f"pdftoppm failed: {r.stderr.strip()[:200]}")
 
 
-def extract(project: Path, out_dir: Path, labels: list[str]) -> dict[str, str]:
+def file_name(label: str, assigned: dict[str, str]) -> str:
+    """The PNG a figure is saved as: its label's last part (`fig:loss` ->
+    `loss.png`), or, when another figure of the paper already has that name,
+    the whole label (`fig-exp2-loss.png`). Two labels ending alike
+    (`fig:exp1:loss`, `fig:exp2:loss`) once became one file: the second
+    overwrote the first, and both places in the paper showed it (a tester's
+    report, 2026-10-05). `assigned` is label -> name for the paper's figures
+    so far, in the order they appear; the new name is added to it."""
+    if label in assigned:
+        return assigned[label]
+
+    def clean(s: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_.-]+", "-", s).strip("-.")
+
+    taken = set(assigned.values())
+    base = clean(label.split(":")[-1]) or "figure"
+    name = base + ".png"
+    if name in taken:
+        name = (clean(label) or base) + ".png"
+    k = 2
+    while name in taken:
+        name = f"{base}-{k}.png"
+        k += 1
+    assigned[label] = name
+    return name
+
+
+def extract(project: Path, out_dir: Path, labels: list[str],
+            names: dict[str, str] | None = None) -> dict[str, str]:
     """Compile a marked copy of project/paper and cut every figure out of it.
-    label -> PNG name in out_dir, or "error: ..." when that figure could not be taken."""
+    label -> PNG name in out_dir, or "error: ..." when that figure could not be taken.
+    `names` is label -> PNG name as the converter gave them (file_name); a
+    label it lacks is named here the same way, in order."""
     paper = project / "paper"
     result: dict[str, str] = {}
+    assigned = dict(names or {})
     missing = [t for t in ("pdftoppm", "pdfinfo") if not shutil.which(t)]
     if missing or not BUILD.exists() or not (paper / "main.tex").exists():
         why = f"missing {', '.join(missing)}" if missing else "no paper/main.tex or no build_paper.sh"
@@ -181,7 +212,7 @@ def extract(project: Path, out_dir: Path, labels: list[str]) -> dict[str, str]:
             if label not in found:
                 result[label] = "error: no marks for this figure in the compiled copy"
                 continue
-            name = label.split(":")[-1] + ".png"
+            name = file_name(label, assigned)
             try:
                 crop(pdf, found[label], out_dir / name)
                 result[label] = name

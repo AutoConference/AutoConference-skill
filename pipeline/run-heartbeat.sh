@@ -910,6 +910,15 @@ pipeline_steps() {
     upload_turn "$BACKEND" "${MODEL:-}" \
       "${asked:-run-pipeline.sh step $n/15: a deterministic check, no model call}" \
       writing "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "$cyc"
+    # A step that ran again after the model came back (below: the usage-limit
+    # wait) has not succeeded until nothing its cut-off attempt had finished
+    # is gone or shrunk without a reason (pipeline/resume.py; a tester's
+    # report, 2026-10-05). Failing that is a failed step like any other: tried
+    # again, told what went missing and where its copy is.
+    if [ "$rc" -eq 0 ] && [ -f "$ws/refine-logs/RESUME-step-$n.md" ] && [ -f "$ROOT/pipeline/resume.py" ]; then
+      python3 "$ROOT/pipeline/resume.py" check "$ws" "$n" >>"$out" 2>&1 || rc=8
+      log "paper $cyc: $(tail -1 "$out")"
+    fi
     # A NO-GO from the feasibility gate (step 3, exit 3) is not a fault to
     # hand to a person: it says the plan does not fit this machine, and why.
     # Twice, the loop goes back to step 1 with the reasons written where step 1
@@ -934,6 +943,7 @@ for c in f.get("required_changes") or []:
     print(f"- {c}")
 NOGO
         log "paper $cyc: plan judged infeasible here; back to step 1 with the reasons (try $((tries + 1)) of 2)"
+        python3 "$ROOT/pipeline/resume.py" forget "$ws" 1 >/dev/null 2>&1
         rm -f "$out"; n=1; echo 1 > "$ws/pipeline.next"; continue
       fi
     fi
@@ -967,12 +977,14 @@ def walk(o):
 items = list(walk(gate))
 print(f"# Numbers the paper printed that no file under runs/ carries (check {attempt})\n")
 for it in items:
-    print(f"- `{it.get('value')}` in: ...{it.get('claim', '').strip()}...")
+    why = f" -- {it['why']}" if it.get("why") else ""
+    print(f"- `{it.get('value')}` in: ...{it.get('claim', '').strip()}...{why}")
 if not items:
     print("(step 14 failed without a list; see runs/REPRO_GATE.json)")
 UNTRACE
         rm -f "$ws/.paper-ready"
         log "paper $cyc: the paper prints numbers no result carries; back to step 11 with the list (try $((ctries + 1)) of 2)"
+        python3 "$ROOT/pipeline/resume.py" forget "$ws" 11 >/dev/null 2>&1
         rm -f "$out"; n=11; echo 11 > "$ws/pipeline.next"; continue
       fi
     fi
@@ -994,6 +1006,7 @@ UNTRACE
         } > "$ws/refine-logs/SHAPE_FAILURES.md"
         rm -f "$ws/.paper-ready"
         log "paper $cyc: the draft fails the platform's shape checks; back to step 11 with them (try $((stries + 1)) of 2)"
+        python3 "$ROOT/pipeline/resume.py" forget "$ws" 11 >/dev/null 2>&1
         rm -f "$out"; n=11; echo 11 > "$ws/pipeline.next"; continue
       fi
     fi
@@ -1007,6 +1020,11 @@ UNTRACE
       retry_at=$1; why=$2
       echo $((qtries + 1)) > "$ws/.quota-count"
       echo "$retry_at" > "$ws/QUOTA_WAIT"
+      # Run again from the top, unprompted, the step could rewrite results it
+      # had already finished (a tester's report, 2026-10-05): what it wrote is
+      # kept as it was, and its next attempt is told to resume
+      # (pipeline/resume.py; refine-logs/RESUME-step-N.md).
+      python3 "$ROOT/pipeline/resume.py" save "$ws" "$n" "$t0" "$why" 2>&1 | while IFS= read -r line; do log "paper $cyc: $line"; done
       block_model "$retry_at" "$why" "${3:-$1}"
       local when
       when=$(date -r "$retry_at" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || date -d "@$retry_at" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || echo "$retry_at")

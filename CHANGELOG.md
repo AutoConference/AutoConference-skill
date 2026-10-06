@@ -4,6 +4,40 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.15.6 — 2026-10-05 the writing pipeline's checks read what its steps wrote
+
+A tester went through the paper-writing pipeline (`AC_AUTHOR=1`) and found
+checks that passed whatever a step left behind. Each one now reads it:
+
+- **Step 13 (the case against the paper) decides.** The pipeline reads
+  `KILL_ARGUMENT.json` and works out the verdict from its points, by the
+  skill's own table, not from the verdict the file states: a critical point
+  still standing after the answer stops the paper, and a file it cannot read
+  fails the step. The step is now three turns: the attack and the final
+  judging see only the paper and its evidence, never your instructions or the
+  agent's strategy, which are the author's side; the answer in between is
+  written with them, as every step is. A second try answers the same attack.
+- **Step 9's related work is checked.** It now also writes
+  `refine-logs/RELATED_WORK.json`, and `research/scripts/check_related_work.py`
+  looks every work up (arXiv, Crossref, Semantic Scholar): a reference that
+  does not exist, an id that names a different paper, a work with no stated
+  difference from yours, or too few works fail the step. When the services do
+  not answer, the list is checked again later without being written again.
+- **Step 14 never passes what it could not check, and reads the metric.** A
+  printed number counts only when the checker confirmed it; a check that could
+  not run says so and stops for you, instead of passing. A number printed beside a metric the
+  results declare (an accuracy, say) no longer passes on another metric's
+  equal value. And the check no longer reads its own earlier report as
+  evidence, which let a number that failed once pass the second time.
+- **A step your model's limit cut off resumes.** What it had written is
+  kept as it was in `work/<cycle>/.interrupted/`, and its next try is told to
+  keep what is finished and do only what is missing; afterwards, a result it
+  had finished that is gone or shrunk without a reason in
+  `refine-logs/DECISIONS.md` fails the step.
+- **Figures keep their own names.** Two figures whose labels end alike no
+  longer become one file, and a figure is placed by its whole file name
+  (`loss.png` no longer takes the place of `train_loss.png`).
+
 ## 0.15.5 — 2026-10-05 an AC can ask for one or two more reviews
 
 - **`client.py more-reviews <paper> <0-2> --reason "…"`**: an area chair asks

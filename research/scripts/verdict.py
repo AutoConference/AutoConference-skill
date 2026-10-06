@@ -99,7 +99,10 @@ def evidence_check(root: str, claims: list) -> dict:
 
     Each claim is {"value": <the number as it appears in the paper>,
                    "source": <results file, relative to root>}.
-    Returns its report, or a BLOCKED-shaped dict if the helper is missing.
+    Returns its report. When the helper is missing, does not finish, or answers
+    something unreadable, the report has no results and says why in "note" or
+    "error": the caller counts every claim without a "verified" result as not
+    checked, never as passed.
     """
     tool = resolve_tool("evidence_check.py")
     if not tool:
@@ -112,20 +115,24 @@ def evidence_check(root: str, claims: list) -> dict:
     # ARIS's checker rereads the results for every claim -- about 90 s per claim
     # on a 4 MB results tree -- so a fixed ten minutes failed a paper with sixteen
     # numbers to check by crashing. The budget scales with the claims, and running
-    # out of it is a verdict ("could not check"), not a traceback.
+    # out of it is a verdict ("could not check"), not a traceback -- and not
+    # "value not found", which sent a paper back to be rewritten for the
+    # checker's slowness.
     budget = max(600, 150 * len(claims))
     try:
         r = subprocess.run([sys.executable, tool, root, "--batch", batch],
                            capture_output=True, text=True, timeout=budget)
     except subprocess.TimeoutExpired:
-        return {"available": True, "exit": None,
-                "results": [dict(c, status="value_not_found",
-                                 detail=f"evidence_check.py did not finish in {budget}s")
-                            for c in claims]}
+        return {"available": True, "exit": None, "results": [],
+                "error": f"evidence_check.py did not finish in {budget}s"}
     try:
         rep = json.loads(r.stdout)
     except ValueError:
-        return {"available": True, "results": [], "error": r.stderr[-500:]}
+        return {"available": True, "exit": r.returncode, "results": [],
+                "error": (r.stderr.strip()[-500:] or f"evidence_check.py printed no JSON (exit {r.returncode})")}
+    if not isinstance(rep, dict):
+        return {"available": True, "exit": r.returncode, "results": [],
+                "error": "evidence_check.py printed JSON that is not a report"}
     rep["available"] = True
     rep["exit"] = r.returncode
     return rep

@@ -20,12 +20,16 @@
 #                               on a task needing more, truncated 9 of 15 samples,
 #                               and destroyed its own primary measurement. Now the
 #                               cap is derived from the task and checked.
+#   step  9  research/scripts/check_related_work.py  Every reference exists and is the paper its id
+#                               names, each states how it differs, enough of them.
 #   step 10  research/scripts/check_reproduction.py  ARIS gates on a cross-model reviewer via Codex MCP;
 #                               no node here, so we re-run and diff instead.
 #   step 12  submission/scripts/check_submission_shape.py  Refuses a submission that is not shaped like a
 #                               paper: no equations, no figure, four citations, a
 #                               title calling itself a pilot. Thresholds live in
 #                               quality.json, which says why each one is what it is.
+#   step 13  research/scripts/check_kill_argument.py  Reads KILL_ARGUMENT.json and computes its verdict
+#                               from the points; a critical one still standing stops.
 #   step 15  submission/scripts/client.py             The AutoConference protocol. Nothing upstream speaks it.
 #
 # Step 11 is paper-writing/, not CCFA's writer: a LaTeX paper that passes its
@@ -314,9 +318,31 @@ retry_note() {
   tail -c 6000 "$f"
   printf '\n=== END ===\nRead that first: fix what went wrong, or reach the step'"'"'s goal another way that cannot fail like that. A step that ran out of time did too much in one go: do less in it, or split the work. Never lower a check'"'"'s bar, or change a check, to get past it.\n\n'
 }
+# A step the model's limit cut off (run-heartbeat.sh, pipeline/resume.py) is
+# told so, and what the cut-off attempt left on disk, so it resumes rather than
+# redoes: run again from the top unprompted, an experiment step rewrote results
+# it had already finished (a tester's report, 2026-10-05).
+resume_note() {
+  local n base f
+  n=${1%%/*}; base=$(printf '%s' "$n" | tr -dc '0-9')
+  f="$W/refine-logs/RESUME-step-$base.md"
+  [ -n "$base" ] && [ -s "$f" ] || return 0
+  printf '=== THIS STEP WAS INTERRUPTED, NOT FAILED (refine-logs/RESUME-step-%s.md) ===\n' "$base"
+  head -c 6000 "$f"
+  printf '\n=== END ===\n\n'
+}
+# skill <label> <prompt> [timeout] [fresh]. A fresh turn -- step 13's attack
+# and its judging -- is given the paper and its evidence and nothing of the
+# author's side: not the owner's instructions or answers, not the strategy, not
+# what earlier attempts said. Those are the author's case, and a turn told it
+# first attacks the paper softly (a tester's report, 2026-10-05).
 skill(){ local label=$1 prompt=$2 tmo
          tmo=$(step_timeout "${3:-7200}")
-         prompt="$(turn_note)$(retry_note "$label")$(deadline_note)$(owner_context "$label")$prompt"
+         if [ "${4:-}" = fresh ]; then
+           prompt="$(turn_note)$prompt"
+         else
+           prompt="$(turn_note)$(resume_note "$label")$(retry_note "$label")$(deadline_note)$(owner_context "$label")$prompt"
+         fi
          if [ -n "$DRY" ]; then
            printf '\n\033[1m===== %s =====\033[0m\n%s\n' "$label" "$prompt"
            printf '\033[2m[%s chars]\033[0m\n' "$(printf '%s' "$prompt" | wc -c)"
@@ -356,6 +382,10 @@ want() { if [ -n "$STEP" ]; then [ "$STEP" = "$1" ]; else
 # paper (step 11 reads the mark).
 if [ -z "$DRY" ]; then
   for n in 1 2 3 4 5 6 7 8 9 10; do want "$n" && { rm -f "$W/.paper-ready"; break; }; done
+  # A resume note belongs to the pass its step was cut off in (pipeline/
+  # resume.py): running an earlier step -- the loop going back, or the owner
+  # moving pipeline.next -- starts a new pass, and the later steps' notes go.
+  python3 "$ROOT/pipeline/resume.py" forget "$W" $(( ${STEP:-$FROM} + 1 )) >/dev/null 2>&1
 fi
 # In a reduced run the gates still RUN — that is the point of a reduced run: you
 # want to see what they say about the configuration. They just do not block.
@@ -778,7 +808,23 @@ not follow, mark it as an assumption rather than hiding the gap." || exit 1
 fi
 
 # ── 9 ─ ARIS: related work that is actually related work ────────────────────
+# Then checked, not taken on the turn's word (a tester's report, 2026-10-05: a
+# turn that wrote no related work at all passed): research/scripts/
+# check_related_work.py looks every work up and wants the stated differences.
+# When the reference services did not answer for enough of the list, the next
+# try checks the same list again rather than writing a new one.
+related_work_waiting() {
+  python3 - "$W/refine-logs/RELATED_WORK.check.json" "$W/refine-logs/RELATED_WORK.json" <<'WAIT' 2>/dev/null
+import hashlib, json, sys
+c = json.load(open(sys.argv[1]))
+sys.exit(0 if c.get("outcome") == "unchecked" and
+         c.get("sha256") == hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest() else 1)
+WAIT
+}
 if want 9; then
+  if [ -z "$DRY" ] && related_work_waiting; then
+    say "9/15 the related work of the last try is unchanged and waited only on the reference services; checking it again"
+  else
   skill "9/15 research-lit (ARIS)" \
 "/research-lit \"$(jq -r '.paper_shape.min_citations' "$QUALITY") or more works genuinely related to the method in refine-logs/FINAL_PROPOSAL.md\" — effort: balanced
 
@@ -798,7 +844,24 @@ DOI, Semantic Scholar title match); it is on the helper chain at
 get desk-rejected, and this venue publishes the whole record.
 
 Group them so the paper's positioning is visible: prior work this builds on,
-prior work this contradicts, and prior work that solves a neighbouring problem." || exit 1
+prior work this contradicts, and prior work that solves a neighbouring problem.
+
+Write the same list as refine-logs/RELATED_WORK.json, for the check after this step:
+
+  {\"works\": [{\"title\": \"...\", \"arxiv_id\": \"2307.03172\" or null, \"doi\": \"10.…\" or null,
+              \"relation\": \"builds_on\" | \"contradicts\" | \"neighbouring\",
+              \"what_it_does\": \"...\",
+              \"difference\": \"how it differs from what this paper claims\"}]}
+
+python3 $ROOT/research/scripts/check_related_work.py . looks every work up --
+an arXiv id on arXiv, a DOI on Crossref, a title alone on Semantic Scholar --
+and fails this step for a work that does not exist, an identifier that names a
+different paper than its title, a difference of fewer than twelve words or
+copied from another work's, or fewer than $(jq -r .paper_shape.min_citations "$QUALITY")
+works. Run it before you finish, and fix what it reports." || exit 1
+  fi
+  gated "9b/15 related-work check (ours)" python3 "$ROOT/research/scripts/check_related_work.py" "$W" || {
+    echo "research: the related work does not hold (above): step 9 again." >&2; exit 1; }
 fi
 
 # ── 10 ─ ours: do the numbers survive a re-run? ─────────────────────────────
@@ -1008,6 +1071,9 @@ PAGES
     rm -rf "$W/figures"; mkdir -p "$W/figures"
     cp "$W/.submission-build/figures/"* "$W/figures/" 2>/dev/null || true
     cp "$W/.submission-build/submission.json" "$W/submission.json"
+    # A new rendering is a new paper to attack: step 13's attack on the last
+    # one, and the answers to it, go.
+    rm -rf "$W/.kill-argument" "$W/KILL_ARGUMENT.json" "$W/KILL_ARGUMENT.md" "$W/refine-logs/KILL_ARGUMENT_ANSWERS.md"
     say "submission.json and $(ls "$W/figures" | wc -l | tr -d ' ') figure(s) ready"
   fi
 fi
@@ -1022,43 +1088,181 @@ if want 12; then
 fi
 
 # ── 13 ─ ARIS: try to kill it before a reviewer does ────────────────────────
+# Three turns, so that what judges the paper never heard the author's side (a
+# tester's report, 2026-10-05: one turn attacked, fixed and graded the paper
+# after reading the owner's strategy and instructions, and the pipeline went on
+# whatever KILL_ARGUMENT.json said, or if it said nothing readable):
+#   13a  the attack, judged against the paper as it stands   fresh (skill ... fresh)
+#   13b  the author answers what stands                      the owner's context, as every step
+#   13c  the answered paper judged again, point by point     fresh, held to 13a's points
+# research/scripts/check_kill_argument.py computes the verdict from the points
+# (the skill's own table), never from the verdict the file states. A critical
+# point still standing after 13c stops the paper (exit 6, tried again: 13b
+# answers the same points, told what stood); a file it cannot use is a failed
+# step (exit 1). The attack on this rendering is kept in .kill-argument/ across
+# tries, so a second try answers it rather than starting a new one; step 11's
+# render withdraws it. A judging turn may not edit the paper: it is compared
+# before and after, and put back.
+KCHECK="$ROOT/research/scripts/check_kill_argument.py"
+KA="$W/KILL_ARGUMENT.json"
+KDIR="$W/.kill-argument"
+paper_sha() { python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$W/submission.json" 2>/dev/null; }
+ka_usable() { python3 "$KCHECK" "$@" >/dev/null 2>&1; [ $? -lt 3 ]; }
+judge() {   # judge <label> <prompt>: a fresh turn that leaves the paper as it found it
+  local label=$1 before
+  [ -n "$DRY" ] || { before=$(paper_sha); cp "$W/submission.json" "$KDIR/paper-before.json"; }
+  skill "$label" "$2" 3600 fresh || return 1
+  [ -n "$DRY" ] && return 0
+  if [ "$(paper_sha)" != "$before" ]; then
+    # Its rulings were made on a paper that is no longer there: they go too.
+    cp "$KDIR/paper-before.json" "$W/submission.json"
+    rm -f "$KA"
+    echo "research: $label edited submission.json, which a judging turn may not do; the paper is put back as it was." >&2
+    return 1
+  fi
+}
 if want 13; then
-  skill "13/15 kill-argument (ARIS)" \
-"/kill-argument submission.json — reviewer: manual — effort: balanced
+  mkdir -p "$KDIR"
+  if [ -z "$DRY" ] && ka_usable "$KDIR/attack.json"; then
+    say "13a/15 this rendering was attacked on an earlier try (.kill-argument/attack.json); answering that attack"
+    ka_usable "$KA" --held-to "$KDIR/attack.json" || cp "$KDIR/attack.json" "$KA"
+  else
+    rm -f "$KA" "$W/KILL_ARGUMENT.md" "$KDIR/attack.json"
+    judge "13a/15 kill-argument: the attack (ARIS)" \
+"/kill-argument submission.json — reviewer: manual — effort: balanced — render html: false
 
 $NO_REVIEWER
 
-Write the strongest rejection memo you can against this paper, then adjudicate
-each attack: which land, which do not, and which are fixable before submission.
+You are a hostile reviewer meeting this paper for the first time. This turn is
+the attack and its judging, and nothing else: the author answers in the next
+turn, and a fresh reader judges the answered paper after that.
+
+Read the paper (submission.json) and what it rests on: runs/ (the results and
+the code that made them), readiness.json, runs/REPRO_GATE.json and the works it
+cites. Nothing of the author's side is in this turn, on purpose -- no notes, no
+strategy, no instructions -- so do not look for it: leave refine-logs/ unread.
+Do not edit submission.json, the paper or anything under runs/; the pipeline
+compares submission.json before and after this turn.
 
 The cross-model reviewer this skill prefers needs Codex MCP, which cannot be
-installed here (no node) — so this is a same-family review and must record itself
-as such. Do not label it cross-model acceptance.
+installed here -- so this is a same-family review and must record itself as
+such. Do not label it cross-model acceptance.
 
-Attack the things a real reviewer will: does the interval actually support the
-claim, or does it contain the baseline? Is the effect larger than the spread
-across instance seeds? Does the method's formal definition match what the code
-did? Is any citation load-bearing but unverified?
+Write the single strongest argument for rejecting this paper, about 200 words.
+Then break it into 3 to 7 atomic rejection points and judge each against the
+paper as it stands: answered_by_current_text, partially_answered or
+still_unresolved, with its severity if unresolved (critical, major or minor)
+and one recommended fix. Attack what a real reviewer will: does each interval
+support its claim, or contain the baseline? Is the effect larger than the
+spread across seeds? Does the method's formal definition match what the code
+did? Is a load-bearing citation unverified? Does the title or abstract claim
+more than the body shows? This pipeline attacks every paper, empirical or
+theoretical: NOT_APPLICABLE is not a verdict here.
 
-If an attack lands and is fixable, fix it in submission.json and say what you
-changed. If it lands and is not fixable at this scale, move it into the
-limitations section stated precisely — not as a blanket disclaimer.
+Write KILL_ARGUMENT.md and KILL_ARGUMENT.json in this directory, the JSON in the
+skill's schema. The pipeline reads details.attack_memo and
+details.decomposed_points -- each with id, attack_claim, verdict,
+severity_if_unresolved and recommended_fix -- and computes the verdict from the
+points itself: a file it cannot read stops this step." || exit 1
+    if [ -z "$DRY" ]; then
+      if ka_usable "$KA"; then
+        cp "$KA" "$KDIR/attack.json"
+      else
+        python3 "$KCHECK" "$KA"
+        echo "research: the attack left no KILL_ARGUMENT.json the pipeline can use (above)." >&2
+        [ "$BLOCKING" = 1 ] && exit 1
+        say "^^ not blocking (pilot mode): the attack's answer and judging are skipped"
+      fi
+    fi
+  fi
+  # Where the paper stands: 0 PASS, 1 WARN, 2 FAIL, 3 no usable verdict.
+  KV=0
+  if [ -z "$DRY" ]; then
+    if [ -s "$KDIR/attack.json" ]; then
+      run "13a/15 what stands against it (ours)" python3 "$KCHECK" "$KA" --held-to "$KDIR/attack.json"
+      KV=$?
+    else
+      KV=3
+    fi
+  fi
+  if [ -n "$DRY" ] || [ "$KV" -eq 1 ] || [ "$KV" -eq 2 ]; then
+    skill "13b/15 answer the attack (the author)" \
+"Answer the attack on this paper. KILL_ARGUMENT.json in this directory holds a
+hostile reviewer's case against it (details.attack_memo), broken into points
+(details.decomposed_points), each judged against the paper as it stood. After
+you, a fresh reader judges every point again, from the paper alone.
 
-The platform refuses a main text over its page budget. After your fixes run
+In submission.json, answer every point that is still_unresolved, and every one
+partially_answered at critical or major severity:
+  * It lands and the text can fix it -- a claim worded beyond its interval, a
+    missing qualification, an unclear definition, a comparison the results
+    already hold: fix it.
+  * It lands and cannot be fixed at this scale: state it precisely in the
+    limitations, and narrow the claim it undermines -- not a blanket
+    disclaimer.
+  * It does not land: make the paper show why, where a reader would look.
+
+Print only numbers a file under runs/ carries: step 14 checks every one. Do not
+run new experiments, and do not edit anything under runs/, readiness.json, the
+aggregates, KILL_ARGUMENT.json or KILL_ARGUMENT.md.
+
+The platform refuses a main text over its page budget. After your changes run
 python3 $ROOT/submission/scripts/page_count.py submission.json; if it says
 \"over\", cut or move material past the Appendix heading until it does not.
 
-Write KILL_ARGUMENT.json in the 6-state verdict schema from
-skills/shared-references/assurance-contract.md." || exit 1
-  [ -n "$DRY" ] || verify_evidence "after the kill-argument fixes" || exit 5
-  gated "13b/15 re-check shape after the fixes" python3 "$ROOT/submission/scripts/check_submission_shape.py" "$W" || exit 5
+Write refine-logs/KILL_ARGUMENT_ANSWERS.md: per point id, what you changed and
+where." || exit 1
+    [ -n "$DRY" ] || verify_evidence "after the answer to the kill-argument" || exit 5
+    judge "13c/15 kill-argument: the answered paper, judged again" \
+"You are an area chair judging, for the first time, whether this paper answers a
+hostile reviewer. This turn is that judging and nothing else.
+
+KILL_ARGUMENT.json in this directory holds the reviewer's case
+(details.attack_memo) and its points (details.decomposed_points). The paper has
+been revised since they were judged. Judge every point again, from the current
+submission.json and the evidence under runs/ alone: answered_by_current_text,
+partially_answered or still_unresolved, with the evidence for the ruling. A
+point the paper now only acknowledges as a limitation is partially_answered.
+Keep each point's id, attack_claim and severity_if_unresolved as they are, and
+add or drop none: the pipeline holds this judging to the attack's points and
+severities.
+
+Read nothing the author wrote about the revision -- leave refine-logs/ unread --
+and do not edit submission.json, the paper or runs/; the pipeline compares
+submission.json before and after this turn.
+
+Rewrite KILL_ARGUMENT.json with the new rulings, and KILL_ARGUMENT.md to match;
+the pipeline computes the verdict from the points." || exit 1
+    if [ -z "$DRY" ]; then
+      run "13c/15 what still stands against it (ours)" python3 "$KCHECK" "$KA" --held-to "$KDIR/attack.json"
+      KV=$?
+    fi
+  fi
+  case "$KV" in
+    0|1) ;;
+    2) echo "research: a critical point of the attack still stands against the paper (above)." >&2
+       if [ "$BLOCKING" = 1 ]; then exit 6; fi
+       say "^^ the kill-argument stands; NOT blocking (pilot mode)." ;;
+    *) echo "research: step 13 has no usable verdict on the paper (above)." >&2
+       if [ "$BLOCKING" = 1 ]; then exit 1; fi
+       say "^^ no usable kill-argument verdict; NOT blocking (pilot mode)." ;;
+  esac
+  gated "13d/15 re-check shape after the answers" python3 "$ROOT/submission/scripts/check_submission_shape.py" "$W" || exit 5
 fi
 
 # ── 14 ─ ours: does every printed number exist? ─────────────────────────────
+# Exit 1 is the paper's: numbers no result carries, or carries only as another
+# metric -- the loop sends it back to step 11 with the list (exit 4). Exit 3 is
+# the check's: it could not read the paper or run its checker, which no
+# rewrite fixes -- the paper stops for a person (exit 1).
 if want 14; then
   gated "14/15 cited-number check (ARIS evidence_check via ours)" \
-        python3 "$ROOT/research/scripts/check_reproduction.py" "$W" --claims-only || {
-    echo "research: the paper cites numbers that are not in runs/results/." >&2; exit 4; }
+        python3 "$ROOT/research/scripts/check_reproduction.py" "$W" --claims-only
+  case $? in
+    0) ;;
+    1) echo "research: the paper cites numbers that are not in runs/results/." >&2; exit 4 ;;
+    *) echo "research: the cited numbers could not be checked (above); a rewrite cannot fix that." >&2; exit 1 ;;
+  esac
 fi
 
 # ── 15 ─ ours: submit, with the figures attached ────────────────────────────

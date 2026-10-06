@@ -43,7 +43,16 @@ Anything in the recorded output that is listed in none of the three is
 reported as UNCLASSIFIED and fails the gate: an unlabelled number is one
 nobody decided was reproducible.
 
-Exit 0 = PASS, 1 = FAIL, 2 = the manifest or layout is wrong.
+The paper's printed numbers (submission.json, when there is one; always with
+--claims-only) must each trace to a result: by rounding, to a result number of
+the metric the paper prints it as when it names one the results declare, or
+else literally, by ARIS's evidence_check.py. The gates' own reports
+(REPRO_GATE.json) are never evidence. A number the checker could not decide is
+"unchecked", never passed.
+
+Exit 0 = PASS, 1 = FAIL, 2 = the manifest or layout is wrong,
+3 = UNCHECKED: the cited numbers could not be checked (no paper to read, or the
+checker could not run) -- for a person, not a rewrite.
 """
 from __future__ import annotations
 
@@ -78,28 +87,104 @@ SIGN_BEFORE = re.compile(r"(?:-|\u2212|\$-\$|\$\u2212\$)$")
 ARXIV_ID = re.compile(r"(?:arxiv[:\s]*)?(\d{4}\.\d{4,5})(?:v\d+)?", re.I)
 
 
-def result_numbers(runs: str) -> list:
-    """Every leaf number in every results file, so a paper's ROUNDED figure can
-    be matched against the full-precision value it came from."""
-    nums = []
+# The gates' own reports sit under runs/ beside the results, and list the very
+# numbers a paper printed -- the unsupported ones too, as strings. Read as
+# evidence, a second check passed every number the first had found unsupported
+# (found 2026-10-05). A report is never evidence.
+GATE_OUTPUTS = {"REPRO_GATE.json"}
+
+# What a result number is called, so a paper's number is matched only to a
+# result of the metric it is printed as (a tester's report, 2026-10-05: a
+# number printed as an accuracy passed because a loss had the same value).
+# A key made only of these words names a statistic of something, not a metric:
+# its metric is its siblings', its parent's, or the one its file declares.
+STAT_WORDS = {
+    "mean", "avg", "average", "median", "std", "stdev", "sd", "se", "sem", "var", "variance",
+    "ci", "low", "high", "lower", "upper", "lo", "hi", "min", "max", "n", "count", "values",
+    "value", "estimate", "est", "point", "uncertainty", "range", "iqr", "overall", "per",
+    "split", "paired", "contrast", "delta", "diff", "difference", "gap", "margin", "total",
+    "sum", "raw", "result", "results", "summary", "stats", "statistics",
+}
+ALIASES = {"acc": "accuracy", "accuracies": "accuracy", "err": "error", "ppl": "perplexity"}
+
+
+def name_tokens(key) -> list:
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(key))
+    return [ALIASES.get(t, t) for t in re.findall(r"[a-z0-9]+", s.lower())]
+
+
+def canon(key) -> str:
+    return " ".join(name_tokens(key))
+
+
+def is_stat(key) -> bool:
+    toks = name_tokens(key)
+    return all(t in STAT_WORDS or t.isdigit() for t in toks)
+
+
+def entries_of(doc, where: str, out: list, declared: set) -> None:
+    """Every leaf number in a parsed results file, with the names it is stored
+    under: its own key; for a statistic (mean, ci_low, values...), the metric
+    beside it or above it; and any metric a dict around it declares
+    ("metric": "accuracy", as every aggregate does)."""
+    def walk(obj, path: str, parent: str, metrics: frozenset) -> None:
+        if isinstance(obj, dict):
+            own = {canon(obj[k]) for k in ("metric", "metric_display", "metric_name")
+                   if isinstance(obj.get(k), str) and obj[k].strip()}
+            declared.update(own)
+            metrics = metrics | own
+            beside = {canon(k) for k, v in obj.items()
+                      if isinstance(v, NUM) and not isinstance(v, bool) and not is_stat(k)}
+            for k, v in obj.items():
+                p = f"{path}.{k}" if path else str(k)
+                if isinstance(v, (dict, list)):
+                    walk(v, p, k, metrics)
+                elif isinstance(v, NUM) and not isinstance(v, bool):
+                    names = set(metrics)
+                    if not is_stat(k):
+                        names.add(canon(k))
+                    elif beside:
+                        names |= beside
+                    elif parent and not is_stat(parent):
+                        names.add(canon(parent))
+                    out.append((v, frozenset(n for n in names if n), f"{where}:{p}"))
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                p = f"{path}[{i}]"
+                if isinstance(v, (dict, list)):
+                    walk(v, p, parent, metrics)
+                elif isinstance(v, NUM) and not isinstance(v, bool):
+                    names = set(metrics)
+                    if parent and not is_stat(parent):
+                        names.add(canon(parent))
+                    out.append((v, frozenset(n for n in names if n), f"{where}:{p}"))
+    walk(doc, "", "", frozenset())
+
+
+def result_entries(runs: str) -> tuple:
+    """Every leaf number in every results file -- (value, names, where) -- so
+    a paper's ROUNDED figure can be matched against the full-precision value it
+    came from, and the metrics the results declare."""
+    out, declared = [], set()
     # Walk the whole results tree, not two fixed directories: the sweep decides its
     # own layout and CALIBRATION.json sitting one level up was being missed.
     for dirpath, dirnames, names in os.walk(runs):
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]
         for name in sorted(names):
-            if not name.endswith((".json", ".jsonl")):
+            if not name.endswith((".json", ".jsonl")) or name in GATE_OUTPUTS:
                 continue
             path = os.path.join(dirpath, name)
+            where = os.path.relpath(path, os.path.dirname(os.path.abspath(runs)))
             try:
                 if name.endswith(".jsonl"):
                     with open(path, encoding="utf-8") as f:
                         for line in f:
                             line = line.strip()
                             if line:
-                                nums.extend(flatten(json.loads(line)).values())
+                                entries_of(json.loads(line), where, out, declared)
                 else:
                     with open(path, encoding="utf-8") as f:
-                        nums.extend(flatten(json.load(f)).values())
+                        entries_of(json.load(f), where, out, declared)
             except (OSError, ValueError):
                 continue
     # A paper legitimately states hardware facts and configuration constants that
@@ -112,10 +197,10 @@ def result_numbers(runs: str) -> list:
                  os.path.join(kit, "interfaces", "quality.example.json")):
         try:
             with open(path, encoding="utf-8") as f:
-                nums.extend(flatten(json.load(f)).values())
+                entries_of(json.load(f), os.path.basename(path), out, set())
         except (OSError, ValueError):
             pass
-    return nums
+    return out, declared
 
 
 def rounds_to(value: str, pool: list) -> bool:
@@ -160,29 +245,104 @@ YEAR = re.compile(r"(?:19|20)\d{2}")
 CONSTANTS = [1.959964, 1.644854, 2.575829, 3.14159265, 2.71828183]
 
 
+class PaperUnreadable(Exception):
+    pass
+
+
+def words_of(text: str) -> list:
+    return [ALIASES.get(t, t) for t in re.findall(r"[a-z0-9]+", text.lower())]
+
+
+def _same_word(w: str, t: str) -> bool:
+    if w == t:
+        return True
+    a, b = (w, t) if len(w) >= len(t) else (t, w)   # one may be the plural of the other
+    return a in (b + "s", b + "es") or (b.endswith("y") and a == b[:-1] + "ies")
+
+
+def named_in(phrase: str, words: list) -> bool:
+    p = phrase.split()
+    if not p:
+        return False
+    return any(all(_same_word(words[i + j], p[j]) for j in range(len(p)))
+               for i in range(len(words) - len(p) + 1))
+
+
+def read_with(text: str, start: int, end: int) -> str:
+    """The words a printed number is read with: in a table, its column's
+    header and the table's caption; in prose, its sentence."""
+    ls = text.rfind("\n", 0, start) + 1
+    le = text.find("\n", end)
+    le = len(text) if le < 0 else le
+    if text[ls:le].lstrip().startswith("|"):
+        lines = text[:le].split("\n")
+        i = len(lines) - 1
+        while i > 0 and lines[i - 1].lstrip().startswith("|"):
+            i -= 1
+        header = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+        col = text[ls:start].count("|") - 1
+        head = header[col] if 0 <= col < len(header) else ""
+        before = "\n".join(lines[:i]).rstrip()
+        caption = before[before.rfind("\n\n") + 2:] if "\n\n" in before else before
+        return head + "\n" + caption[-400:]
+    a = max([start - 300] + [text.rfind(s, 0, start) for s in (". ", "? ", "! ", "\n\n", "\n|")])
+    ends = [i for i in (text.find(s, end) for s in (". ", "? ", "! ", "\n\n")) if i >= 0]
+    b = min(ends + [end + 300])
+    return text[max(0, a):b]
+
+
 def build_claims(workdir: str, submission_path: str) -> tuple:
-    """Split the paper's printed numbers into (unsupported, matched_by_rounding).
+    """Split the paper's printed numbers into (to check literally,
+    matched_by_rounding, printed_as_another_metric).
 
     ARIS's evidence_check.py is the checker of record, but it searches literally,
     so it cannot see that 0.067 came from 0.06666666666666667. Anything it would
     miss for that reason is resolved here instead of being reported as a
-    fabricated number.
+    fabricated number -- but only by a result of the metric the paper prints it
+    as. Where the paper names a metric the results declare (an aggregate's
+    `metric`) beside the number -- its sentence, or its table column and
+    caption -- a result of another metric that happens to round to it does not
+    count; the number is reported, with what the results do hold it as. Where
+    the paper names none, any result number will do, as before.
     """
     try:
         with open(submission_path, encoding="utf-8") as f:
             sub = json.load(f)
-    except (OSError, ValueError):
-        return [], []
+    except FileNotFoundError:
+        raise PaperUnreadable("there is no submission.json to check")
+    except (OSError, ValueError) as e:
+        raise PaperUnreadable(f"submission.json cannot be read ({e})")
+    if not isinstance(sub, dict):
+        raise PaperUnreadable("submission.json is not a JSON object")
     text = "\n".join(str(sub.get(k, "")) for k in ("abstract", "body_md"))
     cited_ids = {m.group(1) for m in ARXIV_ID.finditer(text)}
-    pool = result_numbers(os.path.join(workdir, "runs"))
+    entries, declared = result_entries(os.path.join(workdir, "runs"))
+    vocab = declared | {n for _, names, _ in entries for n in names}
+    by_dp: dict = {}
+
+    def candidates(value: str) -> list:
+        """Results that round to `value` at the precision it is printed."""
+        try:
+            want = float(value)
+        except ValueError:
+            return []
+        dp = len(value.split(".")[1]) if "." in value else 0
+        if dp not in by_dp:
+            idx: dict = {}
+            for e in entries:
+                idx.setdefault(round(float(e[0]), dp), []).append(e)
+            by_dp[dp] = idx
+        return by_dp[dp].get(round(want, dp), [])
 
     spans = [m.span() for rx in CITATION_SPANS for m in rx.finditer(text)]
 
     def in_citation(pos: int) -> bool:
         return any(a <= pos < b for a, b in spans)
 
-    seen, claims, rounded = set(), [], []
+    # Each place a number is printed is read on its own: the same value may be
+    # a cited work's in one sentence, an accuracy in another, a loss in a third.
+    claims, rounded, other_metric = [], [], []
+    literal, plain, judged = set(), set(), set()
     for m in MEANINGFUL.finditer(text):
         v = m.group(1)
         if v in cited_ids:
@@ -193,21 +353,65 @@ def build_claims(workdir: str, submission_path: str) -> tuple:
         # magnitude ("regret falls by 95.9"), so either sign will do.
         neg = bool(SIGN_BEFORE.search(text[max(0, m.start() - 3):m.start()]))
         key = ("-" if neg else "") + v
-        if key in seen:
-            continue
-        seen.add(key)
         ctx = text[max(0, m.start() - 70):m.end() + 30].replace("\n", " ")
         # A number inside a sentence that cites another paper is that paper's
         # number, not a claim about this experiment.
         if CITATION_NEAR.search(ctx):
             rounded.append({"value": v, "matched": "belongs_to_a_cited_work"})
-        elif rounds_to(v, CONSTANTS):
+            continue
+        if rounds_to(v, CONSTANTS):
             rounded.append({"value": v, "matched": "a_standard_constant"})
-        elif rounds_to("-" + v, pool) if neg else (rounds_to(v, pool) or rounds_to("-" + v, pool)):
-            rounded.append({"value": key, "matched": "rounded_to_a_result_number"})
-        else:
-            claims.append({"value": v, "source": "runs/**/*.json", "claim": ctx})
-    return claims, rounded
+            continue
+        cands = candidates("-" + v) if neg else candidates(v) + candidates("-" + v)
+        if not cands:
+            if key not in literal:
+                literal.add(key)
+                claims.append({"value": v, "source": "runs/**/*.json", "claim": ctx})
+            continue
+        words = words_of(read_with(text, m.start(), m.end()))
+        named = {d for d in declared if named_in(d, words)}
+        if not named:
+            if key not in plain:
+                plain.add(key)
+                rounded.append({"value": key, "matched": "rounded_to_a_result_number"})
+            continue
+        here = {n for n in vocab if named_in(n, words)}
+        if (key, frozenset(here)) in judged:
+            continue
+        judged.add((key, frozenset(here)))
+        fit = [e for e in cands if not e[1] or e[1] & here]
+        if fit:
+            rounded.append({"value": key, "matched": "rounded_to_a_result_of_the_metric_named",
+                            "metric": sorted(named), "found_at": fit[0][2]})
+            continue
+        held = sorted({n for e in cands for n in e[1]})
+        other_metric.append({"value": key, "claim": ctx, "status": "other_metric",
+                             "why": (f"printed as {' / '.join(sorted(named))}; the results hold {key} only as "
+                                     f"{', '.join(held[:6])} ({', '.join(e[2] for e in cands[:3])})")})
+    rounded = list({(r["value"], r["matched"]): r for r in rounded}.values())
+    return claims, rounded, other_metric
+
+
+def evidence_root(workdir: str) -> str:
+    """runs/ as the literal search may read it: every results file but the
+    gates' own reports (GATE_OUTPUTS), linked into .aris/evidence-root/."""
+    root = os.path.join(workdir, ".aris", "evidence-root")
+    shutil.rmtree(root, ignore_errors=True)
+    runs = os.path.join(workdir, "runs")
+    for dirpath, dirnames, names in os.walk(runs):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in names:
+            if not name.endswith((".json", ".jsonl")) or name in GATE_OUTPUTS:
+                continue
+            src = os.path.join(dirpath, name)
+            dst = os.path.join(root, "runs", os.path.relpath(src, runs))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            try:
+                os.link(src, dst)
+            except OSError:
+                shutil.copy2(src, dst)
+    os.makedirs(os.path.join(root, "runs"), exist_ok=True)
+    return root
 
 
 def flatten(obj, prefix=""):
@@ -280,7 +484,10 @@ def same_number(a, b) -> tuple:
 # "reproduced" (a user's report, 2026-10-04). Left out, it no longer does.
 SKIP = {".claude", ".aris", ".git", "__pycache__", "archive-v1", "figures",
         "results", "data", ".venv", "venv", "node_modules", ".tox",
-        ".mypy_cache", ".pytest_cache", ".ruff_cache", ".ipynb_checkpoints"}
+        ".mypy_cache", ".pytest_cache", ".ruff_cache", ".ipynb_checkpoints",
+        # the pipeline's own copies: what an interrupted step had written
+        # (pipeline/resume.py), and step 13's attack
+        ".interrupted", ".kill-argument"}
 
 
 def skipped_dir(parent: str, name: str) -> bool:
@@ -486,29 +693,67 @@ def main() -> None:
     # Second half of the job, and ARIS already owns it: do the numbers the paper
     # prints actually appear in the results files? `evidence_check.py` answers
     # that mechanically, so we call it rather than re-deriving it.
+    #
+    # It fails closed (a tester's report, 2026-10-05). A number counts only
+    # when the checker confirmed it ("verified"); one it found nowhere is
+    # unsupported; and one it could not decide -- the checker missing,
+    # crashed, out of time, answering something unreadable, or silent about it
+    # -- is "unchecked": never a pass, and not the paper's fault either, so
+    # the verdict is UNCHECKED (exit 3), for a person, not a rewrite. Without
+    # submission.json, --claims-only has nothing to check: UNCHECKED too.
     evidence = {"available": False}
+    unchecked: list = []
     sub_path = os.path.join(a.workdir, "submission.json")
-    if os.path.exists(sub_path):
-        claims, rounded = build_claims(a.workdir, sub_path)
+    if os.path.exists(sub_path) or a.claims_only:
+        try:
+            claims, rounded, other_metric = build_claims(a.workdir, sub_path)
+        except PaperUnreadable as e:
+            claims, rounded, other_metric = [], [], []
+            unchecked.append({"value": None, "status": "not_checked", "detail": str(e)})
+            print(f"repro-gate: {e}")
         print(f"repro-gate: {len(rounded)} paper figure(s) matched a result number "
-              f"by rounding; {len(claims)} still to verify literally")
+              f"by rounding; {len(other_metric)} printed as a metric the results do not "
+              f"hold them as; {len(claims)} still to verify literally")
+        bad = list(other_metric)
         if claims:
-            evidence = aris_audit.evidence_check(a.workdir, claims)
-            bad = [r for r in evidence.get("results", [])
-                   if r.get("status") in ("path_missing", "value_not_found")]
-            if bad:
-                allok = False
-                report.append({"script": "(paper)", "verdict": "FAIL",
-                               "problems": [{"kind": "unsupported_claim", **b} for b in bad[:20]]})
-            evidence["rounded_matches"] = rounded
+            mirror = evidence_root(a.workdir)
+            try:
+                evidence = aris_audit.evidence_check(mirror, claims)
+            finally:
+                shutil.rmtree(mirror, ignore_errors=True)
+            answered = {}
+            for r in evidence.get("results") or []:
+                if isinstance(r, dict):
+                    answered.setdefault(str(r.get("value")), r)
+            why_not = evidence.get("error") or evidence.get("note") or "the checker returned nothing for it"
+            for c in claims:
+                r = answered.get(c["value"])
+                status = r.get("status") if r else None
+                if status == "verified":
+                    continue
+                if status in ("path_missing", "value_not_found"):
+                    bad.append({**c, **r})
+                else:
+                    unchecked.append({**c, "status": status or "not_checked",
+                                      "detail": (r or {}).get("detail") or why_not})
             print(f"repro-gate: evidence check on {len(claims)} cited number(s): "
-                  f"{len(bad)} unsupported")
-        else:
-            evidence = {"available": True, "results": [], "rounded_matches": rounded,
-                        "note": "every printed figure traced to a result number"}
+                  f"{len(bad) - len(other_metric)} unsupported, {len(unchecked)} could not be checked")
+        if not claims:
+            evidence = {"available": not unchecked, "results": []}
+        evidence = {**evidence, "rounded_matches": rounded, "other_metric": other_metric}
+        if not claims and not other_metric and not unchecked:
+            evidence["note"] = "every printed figure traced to a result number"
+        if bad:
+            allok = False
+            report.append({"script": "(paper)", "verdict": "FAIL",
+                           "problems": [{"kind": "unsupported_claim", **b} for b in bad[:20]]})
+        if unchecked:
+            evidence["unchecked"] = unchecked[:20]
+            for u in unchecked[:10]:
+                print(f"repro-gate: could not check {u.get('value') or 'the paper'}: {u.get('detail')}")
 
     result = {
-        "verdict": "PASS" if allok else "FAIL",
+        "verdict": "PASS" if allok and not unchecked else ("FAIL" if not allok else "UNCHECKED"),
         "workdir": os.path.abspath(a.workdir),
         "experiments": report,
         "evidence_check": evidence,
@@ -541,7 +786,8 @@ def main() -> None:
                                                   if r.get("script") == "(paper)"]
             # the replay verdict still stands; this pass can only add claim failures
             replay_ok = all(e.get("verdict") == "PASS" for e in prior_exps)
-            result["verdict"] = "PASS" if (allok and replay_ok) else "FAIL"
+            result["verdict"] = ("FAIL" if not (allok and replay_ok)
+                                 else "UNCHECKED" if unchecked else "PASS")
             result["replay_from"] = prior.get("generated_at", "earlier full run")
     result["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     result["mode"] = "claims_only" if a.claims_only else "full"
@@ -553,15 +799,19 @@ def main() -> None:
     # reviewer; we have no second model family here, and ARIS's contract already
     # allows a deterministic verifier to stand in.
     nprob = sum(len(r.get("problems", [])) for r in report)
+    # A check that could not run is ERROR in ARIS's terms -- submission-blocking,
+    # and never mistaken for a FAIL the paper can be rewritten out of.
     audit = aris_audit.emit(
         a.workdir, "paper-claim-audit",
-        "PASS" if allok else "FAIL",
-        "numbers_reproduce_and_are_cited" if allok else "reproduction_or_citation_failure",
+        "FAIL" if not allok else "ERROR" if unchecked else "PASS",
+        ("reproduction_or_citation_failure" if not allok
+         else "cited_numbers_not_checked" if unchecked else "numbers_reproduce_and_are_cited"),
         (f"Re-ran {len(report)} experiment(s) from a clean copy of runs/ and diffed "
          f"every leaf number against the recorded results; "
          f"{'all matched' if allok else f'{nprob} problem(s) found'}. "
          f"Cited-number check: "
-         f"{'not run (no submission.json yet)' if not evidence.get('available') else str(len(evidence.get('results', []))) + ' checked'}."),
+         f"{'not run (no submission.json yet)' if not evidence.get('available') and not unchecked else str(len(evidence.get('results', []))) + ' checked'}"
+         f"{f', {len(unchecked)} could not be checked' if unchecked else ''}."),
         inputs=[man_path, sub_path] + [os.path.join(runs, e["output"])
                                        for e in exps if os.path.exists(os.path.join(runs, e["output"]))],
         reasoning=("Deterministic: execution replay plus a literal search for each cited "
@@ -572,7 +822,7 @@ def main() -> None:
     print(json.dumps(result, indent=2)[:4000])
     print(f"\nrepro-gate: {result['verdict']} -> {out}")
     print(f"repro-gate: ARIS verdict -> {audit}")
-    sys.exit(0 if allok else 1)
+    sys.exit(1 if result["verdict"] == "FAIL" else 3 if result["verdict"] == "UNCHECKED" else 0)
 
 
 if __name__ == "__main__":

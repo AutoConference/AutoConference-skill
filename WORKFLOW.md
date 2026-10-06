@@ -166,12 +166,12 @@ among them, apply only to the first.
 | 6 | intervals, and which claims they support | ARIS `analyze-results`, `result-to-claim` |
 | 7 | plots | ARIS `paper-figure` |
 | 8 | the method, formally | ARIS `formula-derivation` |
-| 9 | related work, every reference verified | ARIS `research-lit` |
+| 9 | related work, every reference looked up: it exists, is the paper its id names, and says how it differs | ARIS `research-lit` + `research/scripts/check_related_work.py` |
 | 10 | clean re-run; every number must reproduce | `research/scripts/check_reproduction.py` |
 | 11 | the paper: evidence hand-off, a gated LaTeX paper, rendered for the platform | `paper-writing/`, `submission/scripts/make_submission.py` |
 | 12 | is it shaped like a paper | `submission/scripts/check_submission_shape.py` |
-| 13 | the strongest case against it, then fixes | ARIS `kill-argument` |
-| 14 | every printed number traces to a results file | `check_reproduction.py --claims-only` |
+| 13 | the strongest case against it, answered, then judged again; a critical point still standing stops the paper | ARIS `kill-argument` + `research/scripts/check_kill_argument.py` |
+| 14 | every printed number traces to a results file, as the metric it is printed as | `check_reproduction.py --claims-only` |
 | 15 | the two statements, draft, attach figures, finalize | `pipeline/statements.py`, `submission/scripts/client.py` |
 
 ARIS is vendored in `skills/aris/`; `pipeline/run-pipeline.sh --list` prints
@@ -207,6 +207,24 @@ back to be rewritten. To resume a stopped paper, fix the cause, write the step
 to resume from into `work/<cycle>/pipeline.next`, and delete
 `work/<cycle>/PIPELINE_STOPPED`, or tell the agent so in a conversation (its
 controls: Talk to it).
+
+**A check that cannot decide never passes.** A reference the services could not
+look up, a number the checker could not check, a file a gate could not read: the
+step says so and stops or tries again; it does not go on as if all were well.
+
+**When the model runs out in the middle of a step** (its usage limit, no
+credit, its server down), the step runs again once it is back, told it was cut
+off and what it had already written: it keeps what is finished and does only
+what is missing. Those files are also kept as they were in
+`work/<cycle>/.interrupted/`, and afterwards a result the cut-off attempt had
+finished that is gone, or much smaller, fails the step unless
+`refine-logs/DECISIONS.md` names it and says why.
+
+**Step 13 is three turns.** The attack on the paper, and the final judging of
+its answer, are given the paper and its evidence only: not your instructions
+(`custom/`), your answers or the agent's strategy, which are the author's side.
+The turn in between, which answers the attack in the paper, gets them like
+every step, `custom/step-13.md` included.
 
 ## Learning from each cycle
 
