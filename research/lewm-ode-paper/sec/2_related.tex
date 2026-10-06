@@ -1,0 +1,33 @@
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{JEPA world models and \LeWM{}.}
+JEPA methods learn predictive representations without pixel decoding
+\cite{assran2023jepa,bardes2024vjepa}.
+Collapse is a central failure mode; \LeWM{}~\cite{maes2026lewm}
+stabilizes end-to-end pixel JEPA training with SIGReg
+\cite{balestriero2023sigreg}, pairing MSE next-embedding prediction
+with a sketched isotropic-Gaussian regularizer.
+We adopt \LeWM{}'s official encoder, SIGReg recipe, and CEM planner,
+changing only the predictor dynamics.
+
+\paragraph{Continuous-time / ODE world models.}
+Neural ODEs~\cite{chen2018neuralode} parameterize continuous
+transformations via $\mathrm{d}z/\mathrm{d}t = v_\theta(z,t)$.
+\ODEWorld{}~\cite{liu2026odeworld} introduces Physical-Time Flow:
+a continuous latent velocity field integrated by an ODE solver for
+video and control, emphasizing dynamical representation structure
+beyond discrete next-step prediction.
+Our setting is narrower and deliberately comparable: we keep
+\LeWM{}'s JEPA loss and planning loop, and redefine a single discrete
+planning step as integrate $\tau{:}0\to 1$ under an
+action-conditioned velocity field.
+
+\paragraph{Latent MPC and CEM.}
+Cross-entropy method (CEM) planning in latent world models
+\cite{chua2018pets,hafner2019planet,maes2026lewm} samples action
+sequences, rolls out the predictor, and ranks by a goal-conditioned
+cost.
+We use the official \LeWM{} CEM evaluator on a fixed validation
+window set so discrete and ODE predictors share the same starts and
+feasibility filter.

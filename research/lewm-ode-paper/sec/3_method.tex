@@ -1,0 +1,117 @@
+\section{Method}
+\label{sec:method}
+
+We keep the \LeWM{} JEPA backbone~\cite{maes2026lewm} and replace only
+the discrete AR predictor with an ODE velocity field.
+Notation follows the official implementation (history length $H{=}3$,
+embedding dimension $D{=}192$).
+
+\subsection{Encoder and action embedding}
+\label{sec:encoder}
+
+Let $x_{t-H+1:t}$ be a stack of RGB observations (resolution
+$224{\times}224$).
+A ViT-tiny encoder $f_\phi$ (patch size 14, trained from scratch)
+maps each frame to a CLS token; an MLP projector $p$ yields latents
+\begin{equation}
+  z_t \;=\; p\bigl(f_\phi(x_t)\bigr) \in \mathbb{R}^{D}.
+  \label{eq:encode}
+\end{equation}
+Actions $u_t$ are mapped by an embedder $e_\psi$ to
+$a_t = e_\psi(u_t)\in\mathbb{R}^{D}$.
+Context tensors for one prediction step are
+$Z = (z_{t-H+1},\ldots,z_t)$ and $A = (a_{t-H+1},\ldots,a_t)$.
+
+\subsection{Discrete baseline predictor}
+\label{sec:ar}
+
+The official \LeWM{} predictor is an action-conditioned transformer
+(ConditionalBlock / AdaLN-zero) of depth 6, 16 heads, width $D$:
+\begin{equation}
+  \hat Z_{t+1}
+  \;=\;
+  g^{\mathrm{AR}}_\theta(Z, A),
+  \label{eq:ar}
+\end{equation}
+interpreted as the next latent window (same shape as $Z$).
+A prediction head MLP $q$ is applied after the predictor for the MSE
+term (unchanged in our ODE variant).
+
+\subsection{ODE predictor}
+\label{sec:ode}
+
+We reinterpret the same transformer capacity as a
+\textbf{velocity field} $v_\theta$, with a zero-initialized linear
+head $W_v$ (adds $D^2{+}D{=}37{,}056$ parameters):
+\begin{equation}
+  v_\theta(z, a)
+  \;=\;
+  W_v\,\mathrm{TF}_\theta\bigl(z + \mathrm{PE},\, a\bigr),
+  \label{eq:velocity}
+\end{equation}
+where $\mathrm{PE}$ is a learnable positional embedding over the
+history axis and actions $a$ condition AdaLN as in the AR baseline.
+Latent dynamics on a normalized step interval $\tau\in[0,1]$ are
+\begin{equation}
+  \frac{\mathrm{d}z}{\mathrm{d}\tau}
+  \;=\;
+  v_\theta\bigl(z(\tau),\, a\bigr),
+  \qquad
+  z(0) = Z,
+  \label{eq:ode}
+\end{equation}
+with $a$ \emph{held fixed} over the interval (piecewise-constant
+action, matching one CEM planning step).
+\textbf{One-step prediction} is the solution at $\tau{=}1$:
+\begin{equation}
+  \hat Z_{t+1}
+  \;=\;
+  z(1)
+  \;=\;
+  Z + \int_{0}^{1} v_\theta\bigl(z(\tau),\, a\bigr)\, \mathrm{d}\tau.
+  \label{eq:onestep}
+\end{equation}
+We approximate the integral with fixed-step classical RK4 using
+$N{=}4$ substeps ($h{=}1/N$):
+\begin{align}
+  k_1 &= v_\theta(z,a), \nonumber\\
+  k_2 &= v_\theta(z + \tfrac{h}{2}k_1,\, a), \nonumber\\
+  k_3 &= v_\theta(z + \tfrac{h}{2}k_2,\, a), \nonumber\\
+  k_4 &= v_\theta(z + h\,k_3,\, a), \nonumber\\
+  z &\leftarrow z + \tfrac{h}{6}(k_1 + 2k_2 + 2k_3 + k_4).
+  \label{eq:rk4}
+\end{align}
+Zero-init of $W_v$ yields $v\approx 0$ at initialization, hence
+$z(1)\approx z(0)$ (stable residual ODE).
+
+\subsection{Training objective (SIGReg + prediction)}
+\label{sec:loss}
+
+Following \LeWM{}, the total loss is
+\begin{equation}
+  \mathcal{L}
+  \;=\;
+  \mathcal{L}_{\mathrm{pred}}
+  \;+\;
+  \lambda\,\mathcal{L}_{\mathrm{SIGReg}},
+  \qquad
+  \lambda = 0.09,
+  \label{eq:loss}
+\end{equation}
+where $\mathcal{L}_{\mathrm{pred}}$ is MSE between projected
+predictions and target embeddings (stop-grad on targets), and
+$\mathcal{L}_{\mathrm{SIGReg}}$ is the sketched Epps--Pulley statistic
+over $M{=}1024$ random projections and 17 quadrature knots
+\cite{balestriero2023sigreg,maes2026lewm}.
+Only the predictor internals differ between discrete and ODE runs;
+encoder, projectors, SIGReg, and optimizer are shared.
+
+\subsection{Planning with CEM}
+\label{sec:cem}
+
+At evaluation, Cross-Entropy Method (CEM) samples action sequences,
+rolls out the predictor in latent space from encoded pixels, and
+selects the plan minimizing distance to a goal embedding (official
+PushT CEM config).
+For the ODE model, each rollout step applies
+\eqref{eq:onestep}--\eqref{eq:rk4} instead of \eqref{eq:ar}.

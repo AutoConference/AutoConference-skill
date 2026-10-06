@@ -1,0 +1,45 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% ODE-based Latent Dynamics for LeWM-style JEPA World Models
+%%% ECAI-style conference paper (ecai.cls)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass{ecai}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{enumitem}
+\usepackage{multirow}
+
+\newtheorem{definition}{Definition}
+
+\newcommand{\method}{ODE-LeWM}
+\newcommand{\LeWM}{LeWM}
+\newcommand{\ODEWorld}{ODEWorld}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Continuous-Time Latent Dynamics for JEPA World Models:\\
+ODE Prediction in LeWorldModel}
+
+\author[A]{\fnms{Boyi}~\snm{Li}}
+\address[A]{Independent / AutoConference}
+
+\begin{abstract}
+\input{sec/0_abs}
+\end{abstract}
+
+\end{frontmatter}
+
+\input{sec/1_intro}
+\input{sec/2_related}
+\input{sec/3_method}
+\input{sec/4_exp}
+\input{sec/5_conclusion}
+
+\bibliography{refs}
+
+\end{document}

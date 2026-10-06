@@ -1,0 +1,20 @@
+Joint Embedding Predictive Architecture (JEPA) world models such as
+LeWorldModel (\LeWM{}) learn compact latent dynamics for model-based
+control, typically with a discrete autoregressive (AR) next-embedding
+predictor.
+We replace that predictor with an action-conditioned neural ODE
+$\mathrm{d}z/\mathrm{d}\tau = v_\theta(z,a)$, where one planning step
+is a fixed-step RK4 integration from $\tau{=}0$ to $\tau{=}1$.
+Encoder, SIGReg anti-collapse regularizer, projectors, and the CEM
+planning loop are unchanged.
+On the official PushT expert dataset with a fixed
+1000-window subset (seed~3072; train~901 / val~99), both the discrete
+AR baseline and our ODE predictor achieve the same CEM success of
+\textbf{5/93 ($\approx$5.38\%)} on the val-tied protocol, while the ODE
+model attains lower train and validation losses
+(0.234 / 0.506 vs.\ 0.248 / 0.536).
+We report honest limitations: the 1k subset is far below the paper-scale
+regime that reports $\approx$96\% PushT success, and CEM is tied despite
+the loss improvement.
+All data are from the official Hugging Face release; no synthetic
+episodes are used.

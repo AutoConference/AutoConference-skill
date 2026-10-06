@@ -1,0 +1,46 @@
+\section{Introduction}
+\label{sec:intro}
+
+World models that plan in a compact latent space enable fast
+model-predictive control without decoding pixels at every step
+\cite{ha2018worldmodels,hafner2019planet}.
+Joint Embedding Predictive Architectures (JEPAs)
+\cite{assran2023jepa} push this idea further by predicting future
+\emph{embeddings} rather than reconstructions, and
+LeWorldModel (\LeWM{})~\cite{maes2026lewm} shows that a stable
+end-to-end JEPA can be trained from pixels with only two loss terms:
+next-embedding MSE and SIGReg isotropic-Gaussian regularization.
+
+In \LeWM{}, the predictor is a discrete autoregressive transformer
+block: given context latents $z_t$ and action embeddings $a_t$, it
+directly outputs $\hat z_{t+1}$.
+Physical dynamics, however, are continuous in time.
+Recent continuous-time world models such as
+\ODEWorld{}~\cite{liu2026odeworld} argue that latent velocity fields
+$\mathrm{d}z/\mathrm{d}t = v_\theta(\cdot)$ better capture underlying
+flow and support flexible temporal resolution.
+This raises a concrete question for planning JEPA models:
+
+\begin{quote}
+\emph{Can we replace \LeWM{}'s discrete AR predictor with an ODE
+integrate-to-next-step rule, keep the rest of the pipeline fixed, and
+retain competitive CEM planning on official PushT data?}
+\end{quote}
+
+\paragraph{Contributions.}
+(1)~We instantiate an \textbf{ODE predictor} inside the official
+\LeWM{} JEPA: $\mathrm{d}z/\mathrm{d}\tau = v_\theta(z,a)$, with
+one-step prediction defined as RK4 integration over $\tau\in[0,1]$
+(fixed $N{=}4$ steps), actions held constant on the interval, and a
+zero-initialized linear velocity head for residual stability.
+(2)~We evaluate on the \textbf{official} PushT expert HDF5 with a
+reproducible \textbf{1000-window} split (seed~3072; 901/99), matching
+encoder, SIGReg ($\lambda{=}0.09$, $M{=}1024$), optimizer, and CEM
+protocol between discrete and ODE runs ($\approx$18.07M parameters).
+(3)~Empirically, ODE lowers train/val loss relative to discrete AR,
+while CEM success on the val-99 protocol is \textbf{tied} at
+5/93~(5.38\%).
+We explicitly contrast this with the paper-reported
+$96{\pm}2.83\%$ PushT figure under full-data training, and treat the
+1k regime as a controlled ablation rather than a claim of
+paper-scale performance.

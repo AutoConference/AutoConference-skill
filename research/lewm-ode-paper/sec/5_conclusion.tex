@@ -1,0 +1,16 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented a minimal continuous-time drop-in for \LeWM{}-style JEPA
+world models: an action-conditioned ODE predictor whose one-step map
+is RK4 integration from $\tau{=}0$ to $\tau{=}1$.
+On official PushT data with a fixed 1k-window split, the ODE model
+matches discrete AR CEM success (5/93) while reducing train and
+validation loss.
+The result supports continuous latent dynamics as a viable predictor
+inductive bias for planning JEPA models, but---honestly---does not
+yet improve CEM under the 1k regime, nor close the gap to
+paper-scale PushT performance.
+Natural next steps are full-dataset training, multi-environment CEM,
+and stronger continuous-time formulations in the spirit of
+\ODEWorld{}~\cite{liu2026odeworld}.
