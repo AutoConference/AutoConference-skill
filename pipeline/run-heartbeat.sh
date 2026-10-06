@@ -897,6 +897,8 @@ pipeline_steps() {
     fi
     out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
     : > "$ws/.step-prompts"          # run-pipeline.sh appends what it asks the model
+    # A step that stops says why here (step 10 does): only this run's counts.
+    rm -f "$ws/refine-logs/STOP-step-$n.md"
     log "paper $cyc: pipeline step $n/15"
     env AC_WORKSPACE="$ws" ${MODEL:+AC_MODEL="$MODEL"} ${SUBMISSION_CLOSES_AT:+AC_SUBMISSION_CLOSES_AT="$SUBMISSION_CLOSES_AT"} \
       AC_PIPELINE="${PH_PIPE:-sync}" AC_LIVE_LABEL="paper step $n/15" \
@@ -1039,8 +1041,10 @@ UNTRACE
     # Any other failure of a step that does the work (not a gate that checks
     # it) gets two more tries before anyone is asked, each told what went
     # wrong the last time (owner, 2026-10-03: stop for a person as rarely as
-    # quality allows). The gates are never re-run unchanged: a reproduction
-    # that failed (10) is a finding, not bad luck, and the shape and number
+    # quality allows). The gates are never re-run unchanged: step 10 repairs
+    # by itself what kept it from comparing (a crash, the environment, the
+    # manifest) and stops only on a finding -- a number that did not
+    # reproduce -- or when its repairs did not fix it; the shape and number
     # gates (12, 14) and the gates out of go-backs above have had their tries;
     # step 15's refusals come from the platform and wait for the next wake.
     local rtries
@@ -1069,8 +1073,17 @@ UNTRACE
       {
         printf '\n## %s — the %s paper stopped at pipeline step %s/15 (exit %s)\n\n' \
           "$(date +%Y-%m-%dT%H:%M:%S%z)" "$cyc" "$n" "$rc"
+        # What the step itself says failed comes first, its last lines after
+        # (a tester's report, 2026-10-06: the last lines were timing drifts,
+        # and the two crashes that stopped the paper were above them).
+        local said=25
+        if [ -s "$ws/refine-logs/STOP-step-$n.md" ]; then
+          cat "$ws/refine-logs/STOP-step-$n.md"
+          printf '\nIts last lines:\n\n'
+          said=12
+        fi
         echo '```'
-        python3 -c 'import re,sys; sys.stdout.write(re.sub(r"\x1b\[[0-9;]*m", "", sys.stdin.read()))' <"$out" | tail -25
+        python3 -c 'import re,sys; sys.stdout.write(re.sub(r"\x1b\[[0-9;]*m", "", sys.stdin.read()))' <"$out" | tail -"$said"
         echo '```'
         echo
         echo "The lines above say what failed and, for a gate, which earlier step to redo."
@@ -1080,7 +1093,7 @@ UNTRACE
       log "paper $cyc: step $n failed (exit $rc); stopped — see state/ASK_HUMAN.md"
       rm -f "$out"; return 1
     fi
-    rm -f "$ws/.quota-count" "$ws/.retry-$n" "$ws/refine-logs/RETRY-step-$n.md"
+    rm -f "$ws/.quota-count" "$ws/.retry-$n" "$ws/refine-logs/RETRY-step-$n.md" "$ws/refine-logs/STOP-step-$n.md"
     unblock_model
     if [ "$n" -eq 15 ]; then
       if grep -q 'submitted: ' "$out"; then

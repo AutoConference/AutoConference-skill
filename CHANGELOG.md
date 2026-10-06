@@ -4,6 +4,27 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.15.9 — 2026-10-06 step 10 tells a finding from a re-run that could not compare, and repairs the latter
+
+- **What failed, told apart.** The reproducibility gate (step 10) now says, for
+  each experiment that failed, whether a number came out different -- a finding:
+  the paper stops, for the experiment to be fixed (step 5) -- or whether the
+  re-run could not compare at all: a script that crashed (with the cause: another
+  experiment's results read, a module missing, a library built for another CPU
+  architecture -- an Intel one under Rosetta on an ARM Mac, say), ran out of
+  time, wrote nothing, or left numbers unclassified. The last lines it prints,
+  and the top of your note when it stops, name what failed and what fixes it --
+  no longer the timing drifts above it.
+- **The agent repairs what it can.** A re-run that could not compare goes back
+  to the agent: a turn is told what failed and fixes the environment, the
+  manifest or a script's plumbing (never a result), at most twice; the gate then
+  runs again only what failed. Resuming a stopped step 10 does the same.
+- **`"after"`** in the replay manifest: an analysis that reads another
+  experiment's results names it, and the gate runs that one first, in the same
+  copy. **`"python"`** names the interpreter to re-run with. Step 5 now says how
+  the gate re-runs: each experiment alone, in no set order, without results/,
+  with which interpreter.
+
 ## 0.15.8 — 2026-10-05 a paper goes to its chairs when its discussion is over
 
 - **`client.py discussion-done <paper>`**: say your side is done with a paper's

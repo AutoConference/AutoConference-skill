@@ -43,6 +43,36 @@ Anything in the recorded output that is listed in none of the three is
 reported as UNCLASSIFIED and fails the gate: an unlabelled number is one
 nobody decided was reproducible.
 
+Each entry runs alone, in a fresh copy of the workspace without results/
+(nor data/, figures/ or any environment), so a script must compute what it
+reports. One that reads another entry's results names it in `after` (its
+script or its output): that entry runs first, in the same copy, and the
+script reads what it re-made -- a slow computation split from the analyses
+built on it reproduces as one chain (a tester's report, 2026-10-06: two
+analyses reading another entry's output crashed in the gate, which the agent
+was never told). `python` names the interpreter to re-run with (a path, or
+a command as a list), when it is not this one.
+
+A failed entry says how it failed (`failure`): `mismatch` -- a number came
+out different, a finding about the experiment -- or one the agent can repair:
+`crashed` (with its `cause`: another entry's output read without `after`, a
+module missing, a library built for another CPU architecture...), `timeout`,
+`no_output`, `no_recorded_output`, `blocked` (an entry it reads did not run),
+`unclassified`, a `manifest` that cannot be read. The last lines printed are
+the failures, not the report's tail (a tester's report, 2026-10-06: the stop
+note showed timing drifts; the two crashes that stopped the paper were above
+them). --summary reads the last report and says it for a person or a turn
+(exit 0 = the agent can repair it, 1 = a finding, 2 = no report).
+
+--retry-failed, after a repair: only what failed runs again, with what reads
+it, and the rest keeps its verdict -- unless anything else it ran with
+changed (another file of the workspace, an entry's script or recorded
+output, the manifest's env or python), when every entry runs again. The
+fingerprints are in .aris/repro-state.json, which running any earlier step
+removes, so a gate run after the experiments changed is always a full one.
+An entry that failed and was then taken out of the manifest fails as
+`removed`: an experiment that does not reproduce is not dropped to pass.
+
 The paper's printed numbers (submission.json, when there is one; always with
 --claims-only) must each trace to a result: by rounding, to a result number of
 the metric the paper prints it as when it names one the results declare, or
@@ -57,9 +87,11 @@ checker could not run) -- for a person, not a rewrite.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -500,16 +532,145 @@ def skipped_dir(parent: str, name: str) -> bool:
     return os.path.isfile(os.path.join(d, "pyvenv.cfg")) or os.path.isdir(os.path.join(d, "conda-meta"))
 
 
-def run_one(runs: str, exp: dict, env: dict, report: list) -> bool:
+# How a crash reads, so a failed entry says why and what would fix it: the
+# turn that repairs the gate (run-pipeline.sh, step 10) and its owner's note
+# both start from this. An architecture error comes first: it arrives inside
+# an ImportError, often with a path in quotes.
+ARCH_ERROR = re.compile(
+    r"incompatible architecture|have '[\w.-]+', need '[\w.-]+'|wrong ELF class|Exec format error|"
+    r"bad CPU type|cannot execute binary file|wrong architecture", re.I)
+LOAD_ERROR = re.compile(
+    r"Library not loaded|Symbol not found|cannot open shared object file|undefined symbol|"
+    r"DLL load failed|dlopen\(", re.I)
+NO_MODULE = re.compile(r"ModuleNotFoundError: No module named '([^']+)'")
+NO_FILE = re.compile(r"No such file or directory: '([^']+)'")
+
+# What a failure is. A `mismatch` is a finding about the experiment; the rest
+# kept the gate from comparing at all, and the agent can repair them.
+REPAIRABLE = {"crashed", "timeout", "no_output", "no_recorded_output", "blocked",
+              "unclassified", "manifest"}
+FAILURE_WORDS = {
+    "crashed": "crashed before it finished",
+    "timeout": "ran out of its time",
+    "no_output": "finished but wrote no output",
+    "no_recorded_output": "has no recorded output to compare with",
+    "blocked": "did not run: an entry it reads failed",
+    "unclassified": "has numbers nobody classified",
+    "manifest": "the replay manifest cannot be used",
+    "mismatch": "came out different",
+    "removed": "was taken out of the manifest after it failed",
+    "unsupported_claim": "the paper prints numbers no result holds",
+}
+
+
+def runs_relative(path: str) -> str:
+    """A path a script failed to open, relative to runs/ when it is under it."""
+    p = path.replace("\\", "/")
+    i = p.rfind("/runs/")
+    if i >= 0:
+        return p[i + len("/runs/"):]
+    if p.startswith("runs/"):
+        return p[len("runs/"):]
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+
+def diagnose(stderr: str, outputs: dict, own: str, python_cmd: list) -> dict:
+    """Why a script crashed, from what it printed: a cause, the line that
+    says it, and what would fix it. `outputs` maps every entry's output to its
+    script, so reading another entry's results is named as such."""
+    tail = (stderr or "")[-8000:]
+    lines = [ln.strip() for ln in tail.splitlines() if ln.strip()]
+    last = lines[-1][:300] if lines else ""
+    interp = " ".join(python_cmd)
+    machine = platform.machine() or "this machine's"
+    if ARCH_ERROR.search(tail):
+        return {"cause": "foreign_architecture", "last": last,
+                "hint": (f"a compiled library or program it loads was built for another CPU architecture "
+                         f"than this machine's ({machine}) -- built under Rosetta, say, or copied from "
+                         f"another machine. Rebuild or reinstall it here, or remove the cache it came "
+                         f"from; or name the interpreter the experiment ran with as \"python\" in the manifest.")}
+    if LOAD_ERROR.search(tail):
+        return {"cause": "library_load", "last": last,
+                "hint": f"a compiled library could not be loaded: rebuild or reinstall it for {interp}."}
+    m = NO_MODULE.search(tail)
+    if m:
+        return {"cause": "missing_module", "last": last,
+                "hint": (f"the gate runs scripts with {interp}, which has no module {m.group(1)}: install it "
+                         f"for that interpreter, or name the interpreter the experiment ran with as "
+                         f"\"python\" in the manifest.")}
+    found = list(NO_FILE.finditer(tail))
+    if found:
+        path = found[-1].group(1)
+        rel = runs_relative(path)
+        other = next((s for o, s in outputs.items() if o != own and (o == rel or rel.endswith("/" + o))), None)
+        if other is None:
+            base = os.path.basename(rel)
+            hits = {s for o, s in outputs.items() if o != own and os.path.basename(o) == base}
+            other = next(iter(hits)) if len(hits) == 1 else None
+        if other:
+            return {"cause": "reads_another_entrys_output", "last": last, "reads": other,
+                    "hint": (f"it reads {rel}, which {other} writes. Each entry re-runs alone, in a copy "
+                             f"without results/, in no set order: name that entry in its manifest entry -- "
+                             f"\"after\": [\"{other}\"] -- so it runs first, in the same copy; or compute "
+                             f"what it needs itself.")}
+        if "/results/" in "/" + rel:
+            return {"cause": "reads_recorded_results", "last": last,
+                    "hint": (f"it reads {rel}, a results file the clean copy does not have: a script computes "
+                             f"everything it reports. A results file another entry writes is read through "
+                             f"\"after\".")}
+        return {"cause": "missing_file", "last": last,
+                "hint": (f"it reads {path}, which the clean copy does not have: data/, figures/ and any "
+                         f"environment are left out of it. A script makes or fetches what it needs, or "
+                         f"reads it from a folder that is copied.")}
+    return {"cause": "crashed", "last": last,
+            "hint": (f"run it as the gate does -- in a clean copy, from its folder, with {interp} -- and fix "
+                     f"why it fails, without changing what it computes.")}
+
+
+def copy_workspace(work: str, tmp: str) -> None:
+    for dirpath, dirnames, filenames in os.walk(work):
+        dirnames[:] = [d for d in dirnames if not skipped_dir(dirpath, d)]
+        rel = os.path.relpath(dirpath, work)
+        dst = tmp if rel == "." else os.path.join(tmp, rel)
+        os.makedirs(dst, exist_ok=True)
+        for fn in filenames:
+            if fn.endswith(".json.tmp") or fn.endswith(".pyc"):
+                continue
+            try:
+                shutil.copy2(os.path.join(dirpath, fn), os.path.join(dst, fn))
+            except OSError:
+                pass
+
+
+def script_path(runs: str, script: str) -> str:
+    """Scripts are named relative to runs/ by convention, but may sit anywhere
+    in the tree; resolved against runs/ first, then the workspace root."""
+    work = os.path.dirname(os.path.abspath(runs))
+    cand = [os.path.join(runs, script), os.path.join(work, script)]
+    return next((c for c in cand if os.path.exists(c)), cand[0])
+
+
+def run_one(runs: str, exp: dict, env: dict, python_cmd: list, deps: dict | None = None,
+            keep: str | None = None, outputs: dict | None = None) -> tuple:
+    """Re-run one entry in a clean copy and diff what it makes against what
+    was recorded. `deps`: the re-made outputs of the entries it runs after
+    (output -> file), put in its copy first. `keep`: a folder to keep its own
+    re-made output in, for the entries that read it. Returns (the report's
+    entry, the kept output or None)."""
     script = exp["script"]
     out_rel = exp["output"]
+    base = {"script": script, "output": out_rel}
     recorded_path = os.path.join(runs, out_rel)
-    if not os.path.exists(recorded_path):
-        report.append({"script": script, "verdict": "FAIL",
-                       "why": f"no recorded output at {out_rel}"})
-        return False
-    with open(recorded_path, encoding="utf-8") as f:
-        recorded = json.load(f)
+    try:
+        with open(recorded_path, encoding="utf-8") as f:
+            recorded = json.load(f)
+    except (OSError, ValueError) as e:
+        why = f"no recorded output at {out_rel}" if not os.path.exists(recorded_path) else f"the recorded {out_rel} cannot be read ({e})"
+        return {**base, "verdict": "FAIL", "failure": "no_recorded_output", "why": why,
+                "hint": ("the manifest names an output step 5 did not write there: point it at the results "
+                         "file the script writes. If the experiment never ran, the gate cannot make it.")}, None
 
     # A clean copy of the WHOLE workspace, not just runs/: the sweep code has
     # lived in runs/scripts/ on one run and in a sibling code/ on the next, and
@@ -519,31 +680,22 @@ def run_one(runs: str, exp: dict, env: dict, report: list) -> bool:
     # own previous output fails here rather than in review.
     work = os.path.dirname(os.path.abspath(runs))
     tmp = tempfile.mkdtemp(prefix="reprogate-")
+    kept = None
     try:
-        for dirpath, dirnames, filenames in os.walk(work):
-            dirnames[:] = [d for d in dirnames if not skipped_dir(dirpath, d)]
-            rel = os.path.relpath(dirpath, work)
-            dst = tmp if rel == "." else os.path.join(tmp, rel)
-            os.makedirs(dst, exist_ok=True)
-            for fn in filenames:
-                if fn.endswith(".json.tmp") or fn.endswith(".pyc"):
-                    continue
-                try:
-                    shutil.copy2(os.path.join(dirpath, fn), os.path.join(dst, fn))
-                except OSError:
-                    pass
+        copy_workspace(work, tmp)
         # the output must be produced by the re-run, not inherited from it
         stale = os.path.join(tmp, "runs", out_rel)
         if os.path.exists(stale):
             os.remove(stale)
-        os.makedirs(os.path.join(tmp, "runs", os.path.dirname(out_rel) or "."),
-                    exist_ok=True)
+        os.makedirs(os.path.join(tmp, "runs", os.path.dirname(out_rel) or "."), exist_ok=True)
+        # What it runs `after`: their outputs as this replay re-made them.
+        for rel, src in (deps or {}).items():
+            dst = os.path.join(tmp, "runs", rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
 
-        # scripts are named relative to runs/ by convention, but may sit anywhere
-        # in the tree; resolve against runs/ first, then the workspace root.
-        cand = [os.path.join(tmp, "runs", script), os.path.join(tmp, script)]
-        script_abs = next((c for c in cand if os.path.exists(c)), cand[0])
-        cmd = [sys.executable, script_abs] + [str(x) for x in exp.get("args", [])]
+        script_abs = script_path(os.path.join(tmp, "runs"), script)
+        cmd = list(python_cmd) + [script_abs] + [str(x) for x in exp.get("args", [])]
         t0 = time.time()
         proc = subprocess.run(cmd, cwd=os.path.dirname(script_abs) or tmp,
                               env=dict(os.environ, **env),
@@ -551,21 +703,36 @@ def run_one(runs: str, exp: dict, env: dict, report: list) -> bool:
                               timeout=exp.get("timeout_s", 3600))
         dt = time.time() - t0
         if proc.returncode != 0:
-            report.append({"script": script, "verdict": "FAIL",
-                           "why": f"exit {proc.returncode}",
-                           "stderr_tail": proc.stderr[-1200:]})
-            return False
+            d = diagnose(proc.stderr, outputs or {}, out_rel, python_cmd)
+            entry = {**base, "verdict": "FAIL", "failure": "crashed",
+                     "why": f"exit {proc.returncode}" + (f": {d['last']}" if d["last"] else ""),
+                     "cause": d["cause"], "hint": d["hint"],
+                     "stderr_tail": (proc.stderr or "")[-1200:]}
+            if d.get("reads"):
+                entry["reads"] = d["reads"]
+            return entry, None
         fresh_path = os.path.join(tmp, "runs", out_rel)
         if not os.path.exists(fresh_path):
-            report.append({"script": script, "verdict": "FAIL",
-                           "why": f"the re-run produced no {out_rel}"})
-            return False
+            return {**base, "verdict": "FAIL", "failure": "no_output",
+                    "why": f"the re-run produced no {out_rel}",
+                    "hint": (f"it exited 0 and wrote nothing at runs/{out_rel}: a script writes its output where "
+                             f"the manifest says (relative to runs/), making the folder if it is missing."),
+                    "stdout_tail": (proc.stdout or "")[-600:]}, None
         with open(fresh_path, encoding="utf-8") as f:
             fresh = json.load(f)
+        if keep:
+            kept = os.path.join(keep, hashlib.sha256(out_rel.encode()).hexdigest()[:16], os.path.basename(out_rel))
+            os.makedirs(os.path.dirname(kept), exist_ok=True)
+            shutil.copy2(fresh_path, kept)
     except subprocess.TimeoutExpired:
-        report.append({"script": script, "verdict": "FAIL",
-                       "why": f"timed out after {exp.get('timeout_s', 3600)}s"})
-        return False
+        return {**base, "verdict": "FAIL", "failure": "timeout",
+                "why": f"timed out after {exp.get('timeout_s', 3600)}s",
+                "hint": ("a larger timeout_s in its manifest entry if the experiment simply takes that long "
+                         "here; never a smaller experiment.")}, None
+    except ValueError as e:
+        return {**base, "verdict": "FAIL", "failure": "no_output",
+                "why": f"the re-run's {out_rel} is not JSON ({e})",
+                "hint": "a script writes its output as one JSON document."}, None
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -613,26 +780,370 @@ def run_one(runs: str, exp: dict, env: dict, report: list) -> bool:
             problems.append({"kind": "unclassified", "key": k, "value": a})
 
     verdict = "PASS" if not problems else "FAIL"
-    entry = {"script": script, "verdict": verdict, "rerun_wall_s": round(dt, 1),
+    entry = {**base, "verdict": verdict, "rerun_wall_s": round(dt, 1),
              "checked": checked, "problems": problems}
+    if problems:
+        if all(p["kind"] == "unclassified" for p in problems):
+            entry["failure"] = "unclassified"
+            entry["hint"] = ("name each number in exact, tolerant or timing by what it is: exact for a "
+                             "computation with fixed seeds, tolerant (with a band) only if it really varies "
+                             "run to run, timing only for wall-clock time and throughput.")
+        else:
+            entry["failure"] = "mismatch"
     if float_noise:
         entry["float_precision_matches"] = float_noise
     if measured:
         entry["timing"] = measured[:20]
-    report.append(entry)
-    return verdict == "PASS"
+    return entry, kept
+
+
+class ManifestError(Exception):
+    pass
+
+
+def after_of(exp: dict) -> list:
+    a = exp.get("after", [])
+    return [a] if isinstance(a, str) else a
+
+
+def check_entries(exps: list) -> None:
+    for i, e in enumerate(exps):
+        if not isinstance(e, dict) or not isinstance(e.get("script"), str) or not e["script"] \
+                or not isinstance(e.get("output"), str) or not e["output"]:
+            raise ManifestError(f"entry {i + 1} of `experiments` needs a \"script\" and an \"output\", both strings.")
+        a = after_of(e)
+        if not isinstance(a, list) or not all(isinstance(x, str) and x for x in a):
+            raise ManifestError(f"{e['script']}: \"after\" is a list of the entries whose output it reads, "
+                                f"each named by its script or its output.")
+
+
+def dependencies(exps: list) -> list:
+    """For each entry, the entries it runs after (indices), named by script or
+    output -- or, failing that, by a file name only one entry has."""
+    deps = []
+    for e in exps:
+        mine = set()
+        for name in after_of(e):
+            hits = {j for j, o in enumerate(exps) if name in (o["script"], o["output"])}
+            if not hits:
+                hits = {j for j, o in enumerate(exps)
+                        if os.path.basename(name) in (os.path.basename(o["script"]), os.path.basename(o["output"]))}
+                if len(hits) > 1:
+                    hits = set()
+            if not hits:
+                raise ManifestError(f"{e['script']}: \"after\" names {name}, which is no entry's script or output.")
+            mine |= hits
+        deps.append(mine)
+    return deps
+
+
+def run_order(exps: list, deps: list) -> list:
+    """Indices in an order where every entry comes after those it reads; the
+    manifest's own order otherwise. A circle is a manifest error."""
+    done, order, visiting = set(), [], []
+
+    def visit(i: int) -> None:
+        if i in done:
+            return
+        if i in visiting:
+            loop = visiting[visiting.index(i):] + [i]
+            raise ManifestError("entries read each other's output in a circle: "
+                                + " -> ".join(exps[j]["script"] for j in loop) + ".")
+        visiting.append(i)
+        for j in sorted(deps[i]):
+            visit(j)
+        visiting.pop()
+        done.add(i)
+        order.append(i)
+
+    for i in range(len(exps)):
+        visit(i)
+    return order
+
+
+def closure(start: set, deps: list) -> set:
+    """`start` and everything it reads, however indirectly."""
+    out, todo = set(), list(start)
+    while todo:
+        i = todo.pop()
+        if i not in out:
+            out.add(i)
+            todo.extend(deps[i])
+    return out
+
+
+def interpreter(man: dict, work: str) -> list:
+    """The command scripts re-run with: the manifest's `python` -- a path (an
+    environment's interpreter, say, which the clean copy leaves out and is run
+    where it is) or a command as a list -- else this interpreter."""
+    p = man.get("python")
+    if p in (None, "", []):
+        return [sys.executable]
+    cmd = [p] if isinstance(p, str) else p
+    if not isinstance(cmd, list) or not all(isinstance(x, str) and x for x in cmd):
+        raise ManifestError("\"python\" is the interpreter to re-run with: a path, or a command as a list.")
+    exe = os.path.expanduser(cmd[0])
+    if os.path.isabs(exe):
+        found = exe
+    elif os.sep in exe or "/" in exe:
+        found = os.path.join(work, exe)
+    else:
+        found = shutil.which(exe)
+    if not found or not os.path.isfile(found) or not os.access(found, os.X_OK):
+        raise ManifestError(f"\"python\" names {cmd[0]}, which is not a program this machine can run.")
+    return [os.path.abspath(found)] + cmd[1:]
+
+
+# What a retry compares, kept beside ARIS's own state (.aris/ is never copied).
+STATE = os.path.join(".aris", "repro-state.json")
+MANIFEST_NAMES = ("REPLAY_MANIFEST.json", "replay_manifest.json", "manifest.json", "MANIFEST.json")
+# Written at the workspace's top by the gates and the loop between two runs of
+# the gate, never read by an experiment: the audits' verdict files, notes, and
+# the loop's own marks (dotfiles, pipeline.*, PIPELINE_STOPPED and the like).
+AUDIT_FILES = {"PAPER_CLAIM_AUDIT.json", "CITATION_AUDIT.json", "KILL_ARGUMENT.json",
+               "PROOF_AUDIT.json", "EXPERIMENT_AUDIT.json", "PAPER_SHAPE_AUDIT.json"}
+# What an agent CLI may keep in the folder it works in, during a repair turn.
+CLI_DIRS = {".codex", ".gemini", ".cursor", ".opencode", ".qwen", ".kimi", ".goose",
+            ".crush", ".factory", ".amp"}
+
+
+def file_sha(path: str) -> str:
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        return "unreadable"
+    return h.hexdigest()
+
+
+def entry_fingerprint(runs: str, exp: dict) -> str:
+    """An entry as the manifest states it, its script and its recorded output."""
+    h = hashlib.sha256(json.dumps(exp, sort_keys=True).encode())
+    h.update(file_sha(script_path(runs, exp["script"])).encode())
+    h.update(file_sha(os.path.join(runs, exp["output"])).encode())
+    return h.hexdigest()
+
+
+def shared_fingerprint(work: str, own_scripts: set) -> str:
+    """Every other file the clean copy carries, so a repair that changed one --
+    a module two scripts import, a cache -- runs every entry again."""
+    h = hashlib.sha256()
+    for dirpath, dirnames, filenames in os.walk(work):
+        top = os.path.abspath(dirpath) == os.path.abspath(work)
+        dirnames[:] = sorted(d for d in dirnames
+                             if not skipped_dir(dirpath, d) and not (top and (d == "refine-logs" or d in CLI_DIRS)))
+        rel_dir = os.path.relpath(dirpath, work)
+        for fn in sorted(filenames):
+            if fn.endswith((".json.tmp", ".pyc")):
+                continue
+            if top and (fn.startswith(".") or fn.startswith("pipeline.") or fn in AUDIT_FILES
+                        or fn.endswith(".md") or re.fullmatch(r"[A-Z][A-Z_]*", fn)):
+                continue
+            if rel_dir == "runs" and (fn in GATE_OUTPUTS or fn in MANIFEST_NAMES):
+                continue
+            p = os.path.join(dirpath, fn)
+            if os.path.abspath(p) in own_scripts:
+                continue
+            h.update(os.path.join(rel_dir, fn).encode() + b"\0" + file_sha(p).encode() + b"\n")
+    return h.hexdigest()
+
+
+def manifest_fingerprint(man: dict) -> str:
+    return hashlib.sha256(json.dumps({"env": man.get("env", {}), "python": man.get("python")},
+                                     sort_keys=True).encode()).hexdigest()
+
+
+def fingerprints(work: str, runs: str, man: dict, exps: list) -> dict:
+    own = {os.path.abspath(script_path(runs, e["script"])) for e in exps}
+    return {"manifest": manifest_fingerprint(man), "shared": shared_fingerprint(work, own),
+            "entries": [{"script": e["script"], "output": e["output"], "fingerprint": entry_fingerprint(runs, e)}
+                        for e in exps]}
+
+
+def plan_retry(work: str, runs: str, man: dict, exps: list, deps: list, now: dict) -> tuple:
+    """After a failed run: ((indices to run again, the earlier report's
+    entries to keep by index, when that report was made) -- or None, every
+    entry running --, the failed entries since taken out of the manifest, and
+    why every entry runs)."""
+    try:
+        with open(os.path.join(runs, "REPRO_GATE.json"), encoding="utf-8") as f:
+            prior = json.load(f)
+        with open(os.path.join(work, STATE), encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        return None, [], "there is no earlier run to go on from"
+    if prior.get("verdict") != "FAIL" or prior.get("mode") not in ("full", "retry"):
+        return None, [], "the last run did not fail"
+    prior_by = {(e.get("script"), e.get("output")): e for e in prior.get("experiments") or []
+                if e.get("script") not in ("(paper)", "(manifest)")}
+    # Taken out, whatever else changed: an entry that failed is gone when
+    # neither its script nor its output is any entry's now (a corrected output
+    # path, or a renamed script, keeps it).
+    scripts, outs = {e["script"] for e in exps}, {e["output"] for e in exps}
+    removed = [e for (sc, ou), e in prior_by.items()
+               if e.get("verdict") != "PASS" and sc not in scripts and ou not in outs]
+    if state.get("manifest") != now["manifest"]:
+        return None, removed, "the manifest's env or python changed"
+    if state.get("shared") != now["shared"]:
+        return None, removed, "files besides the entries' own scripts changed"
+    before = {(s.get("script"), s.get("output")): s.get("fingerprint") for s in state.get("entries") or []}
+    rerun, keep = set(), {}
+    for i, (e, fp) in enumerate(zip(exps, now["entries"])):
+        key = (e["script"], e["output"])
+        p = prior_by.get(key)
+        if p and p.get("verdict") == "PASS" and before.get(key) == fp["fingerprint"]:
+            keep[i] = p
+        else:
+            rerun.add(i)
+    # What reads an entry that runs again runs again; what it reads runs too.
+    grew = True
+    while grew:
+        grew = False
+        for i in list(keep):
+            if deps[i] & rerun or closure(deps[i], deps) & rerun:
+                rerun.add(i)
+                del keep[i]
+                grew = True
+        need = closure(rerun, deps)
+        for i in need - rerun:
+            rerun.add(i)
+            keep.pop(i, None)
+            grew = True
+    return (rerun, keep, prior.get("generated_at", "the earlier run")), removed, ""
+
+
+def failures_of(experiments: list) -> list:
+    out = []
+    for e in experiments:
+        if e.get("verdict") == "PASS":
+            continue
+        kind = e.get("failure") or ("unsupported_claim" if e.get("script") == "(paper)" else "mismatch")
+        f = {"script": e.get("script"), "failure": kind}
+        for k in ("why", "cause", "hint", "reads", "stderr_tail"):
+            if e.get(k):
+                f[k] = e[k]
+        if kind in ("mismatch", "unclassified"):
+            f["problems"] = (e.get("problems") or [])[:4]
+        elif kind == "unsupported_claim":
+            # Only the values: the step-14 go-back reads every unsupported_claim
+            # in the report, and a second copy here would list each twice.
+            f["values"] = [p.get("value") for p in (e.get("problems") or [])[:10]]
+        out.append(f)
+    return out
+
+
+def summarize(result: dict, markdown: bool) -> tuple:
+    """What failed, for a person or a turn: (text, exit code) -- 0 the agent
+    can repair it, 1 a finding, 3 nothing failed."""
+    fails = result.get("failures") or failures_of(result.get("experiments") or [])
+    if result.get("verdict") == "PASS":
+        return "The reproducibility gate passed.", 3
+    kinds = {f["failure"] for f in fails}
+    exps = [e for e in result.get("experiments") or [] if e.get("script") not in ("(paper)", "(manifest)")]
+    passed = sum(e.get("verdict") == "PASS" for e in exps)
+    if result.get("verdict") == "UNCHECKED":
+        head, code = "the paper's cited numbers could not be checked -- for a person, not a rewrite.", 1
+    elif not fails:
+        head, code = "it failed; runs/REPRO_GATE.json says how.", 1
+    elif kinds - REPAIRABLE:
+        head = ("a number did not reproduce: a finding about the experiment, which the gate does not repair. "
+                "Fix the experiment (step 5), not the paper.") if "mismatch" in kinds else \
+               ("an entry that failed was taken out of the manifest: an experiment that does not reproduce "
+                "is not dropped to pass.") if "removed" in kinds else \
+               "the paper prints numbers no result holds."
+        code = 1
+    else:
+        n = len([f for f in fails if f["script"] != "(manifest)"])
+        head = ("the replay manifest cannot be used, so nothing was re-run." if kinds == {"manifest"} else
+                f"{n} experiment(s) could not be re-run or compared, so nothing was compared for "
+                f"{'it' if n == 1 else 'them'}: this is not a finding about the numbers. The agent can repair it.")
+        code = 0
+    lines = [f"**The reproducibility gate (step 10): {head}**" if markdown else f"repro-gate: {head}", ""]
+    shown = fails[:6] if markdown else fails[:5]
+    for f in shown:
+        what = FAILURE_WORDS.get(f["failure"], f["failure"])
+        why = f": {f['why']}" if f.get("why") else ""
+        if markdown:
+            lines.append(f"- `{f['script']}` {what}{why}")
+            if f.get("hint"):
+                lines.append(f"  {f['hint']}")
+            for p in f.get("problems") or []:
+                if p.get("kind") == "exact_mismatch":
+                    lines.append(f"  - `{p['key']}`: recorded {p['recorded']}, re-run {p['rerun']}")
+                elif p.get("kind") == "outside_tolerance":
+                    lines.append(f"  - `{p['key']}`: recorded {p['recorded']}, re-run {p['rerun']} "
+                                 f"(moved {p['drift']}, allowed {p['allowed']})")
+                elif p.get("kind") == "unclassified":
+                    lines.append(f"  - `{p['key']}` ({p.get('value')}) is in none of exact, tolerant, timing")
+                elif p.get("kind") in ("vanished", "appeared"):
+                    lines.append(f"  - {p['kind']}: {', '.join(p.get('keys', [])[:5])}")
+            tail = [ln for ln in (f.get("stderr_tail") or "").splitlines() if ln.strip()][-6:]
+            if tail:
+                lines += ["  ```"] + [f"  {ln}" for ln in tail] + ["  ```"]
+        else:
+            lines.append(f"  FAIL {f['script']}: {what}{why}"[:400])
+            if f.get("hint"):
+                lines.append(f"       {f['hint']}"[:400])
+    if len(fails) > len(shown):
+        lines.append(f"{'- ' if markdown else '  '}and {len(fails) - len(shown)} more: runs/REPRO_GATE.json")
+    if exps:
+        lines += ["", f"{passed} of {len(exps)} experiment(s) reproduced"
+                      + (f"; the scripts ran with {result['interpreter']} on {result['machine']}."
+                         if result.get("interpreter") else ".")]
+    return "\n".join(lines), code
+
+
+def write_report(runs: str, result: dict) -> str:
+    out = os.path.join(runs, "REPRO_GATE.json")
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2)
+    return out
+
+
+def manifest_failure(runs: str, why: str, claims_only: bool) -> None:
+    """A manifest that cannot be used: said in the report, for the turn that
+    repairs it -- never over a full run's report from --claims-only."""
+    print(f"repro-gate: {why}", file=sys.stderr)
+    if not claims_only and os.path.isdir(runs):
+        write_report(runs, {
+            "verdict": "FAIL", "mode": "full", "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "experiments": [],
+            "failures": [{"script": "(manifest)", "failure": "manifest", "why": why,
+                          "hint": ("step 5 writes runs/REPLAY_MANIFEST.json: per script, the output it writes "
+                                   "and which of its numbers are exact, tolerant or timing.")}]})
+    sys.exit(2)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("workdir", help="work/<cycle>  (must contain runs/manifest.json)")
-    ap.add_argument("--only", help="run just this script name")
+    ap.add_argument("workdir", help="work/<cycle>  (must contain runs/REPLAY_MANIFEST.json)")
+    ap.add_argument("--only", help="run just this script (and the entries it runs after)")
     ap.add_argument("--claims-only", action="store_true",
                     help="skip the re-run; only check that the paper's cited "
                          "numbers appear in runs/results/ (needs submission.json)")
+    ap.add_argument("--retry-failed", action="store_true",
+                    help="after a failed run: re-run only what failed (and what reads it), unless "
+                         "anything else changed")
+    ap.add_argument("--summary", action="store_true",
+                    help="say what the last run found, and exit 0 if the agent can repair it, "
+                         "1 if it is a finding, 2 if there is no report, 3 if it passed")
     a = ap.parse_args()
 
     runs = os.path.join(a.workdir, "runs")
+    work = os.path.dirname(os.path.abspath(runs))
+    if a.summary:
+        try:
+            with open(os.path.join(runs, "REPRO_GATE.json"), encoding="utf-8") as f:
+                result = json.load(f)
+        except (OSError, ValueError):
+            print("The reproducibility gate left no report (runs/REPRO_GATE.json): see its output.")
+            sys.exit(2)
+        text, code = summarize(result, markdown=True)
+        print(text)
+        sys.exit(code)
+
     # The sweep code is written fresh each run and has picked both spellings, so
     # accept either rather than failing on a filename.
     # REPLAY_MANIFEST.json is the replay contract: script -> output -> which
@@ -640,22 +1151,21 @@ def main() -> None:
     # run (models, levels, caps, cells) -- a different, useful document that
     # happens to want the same name. Prefer the unambiguous name, accept the
     # others, and require the replay fields either way.
-    man_path = next((p for p in (os.path.join(runs, n) for n in
-                                 ("REPLAY_MANIFEST.json", "replay_manifest.json",
-                                  "manifest.json", "MANIFEST.json"))
+    man_path = next((p for p in (os.path.join(runs, n) for n in MANIFEST_NAMES)
                      if os.path.exists(p)), None)
     if not man_path:
-        print(f"repro-gate: no REPLAY_MANIFEST.json under {runs}. Step 5 must "
-              f"declare, per script, which output it writes and which fields must "
-              f"reproduce exactly.", file=sys.stderr)
-        sys.exit(2)
-    with open(man_path, encoding="utf-8") as f:
-        man = json.load(f)
+        manifest_failure(runs, f"no REPLAY_MANIFEST.json under {runs}. Step 5 must declare, per script, "
+                               f"which output it writes and which fields must reproduce exactly.", a.claims_only)
+    try:
+        with open(man_path, encoding="utf-8") as f:
+            man = json.load(f)
+    except (OSError, ValueError) as e:
+        manifest_failure(runs, f"{os.path.basename(man_path)} cannot be read ({e}).", a.claims_only)
+    if not isinstance(man, dict):
+        manifest_failure(runs, f"{os.path.basename(man_path)} is not a JSON object.", a.claims_only)
 
     exps = man.get("experiments", [])
-    if a.only:
-        exps = [e for e in exps if e["script"] == a.only]
-    if not exps:
+    if not isinstance(exps, list) or not exps:
         aris_audit.emit(a.workdir, "paper-claim-audit", "BLOCKED",
                         "no_replay_manifest",
                         f"{os.path.basename(man_path)} declares no `experiments`, so "
@@ -663,32 +1173,95 @@ def main() -> None:
                         f"run is BLOCKED, per ARIS's assurance contract.",
                         inputs=[man_path],
                         reasoning="Deterministic: the replay contract is absent.")
-        print(f"repro-gate: BLOCKED -- {os.path.basename(man_path)} has no "
-              f"`experiments` list, so no script can be replayed and no number can "
-              f"be verified. It looks like a run-provenance manifest, not a replay "
-              f"manifest. Step 5 must write runs/REPLAY_MANIFEST.json with, per "
-              f"script: script, output, exact[], tolerant{{}}.", file=sys.stderr)
-        sys.exit(2)
+        manifest_failure(runs, f"BLOCKED -- {os.path.basename(man_path)} has no "
+                               f"`experiments` list, so no script can be replayed and no number can "
+                               f"be verified. It looks like a run-provenance manifest, not a replay "
+                               f"manifest. Step 5 must write runs/REPLAY_MANIFEST.json with, per "
+                               f"script: script, output, exact[], tolerant{{}}.", a.claims_only)
+    try:
+        check_entries(exps)
+        deps = dependencies(exps)
+        order = run_order(exps, deps)
+        # --claims-only runs no script, so it needs no interpreter.
+        python_cmd = [sys.executable] if a.claims_only else interpreter(man, work)
+    except ManifestError as e:
+        manifest_failure(runs, f"{os.path.basename(man_path)}: {e}", a.claims_only)
 
-    report, allok = [], True
+    if a.only and not any(e["script"] == a.only for e in exps):
+        print(f"repro-gate: no entry runs {a.only}", file=sys.stderr)
+        sys.exit(2)
+    report, allok, mode, retried = [], True, "full", None
     if a.claims_only:
         print("repro-gate: --claims-only, skipping the execution replay")
     else:
-        for exp in exps:
-            print(f"repro-gate: re-running {exp['script']} ...", flush=True)
-            ok = run_one(runs, exp, man.get("env", {}), report)
-            # A replay whose only problem is drift -- every exact field matched,
-            # only `tolerant` fields moved past their bound -- runs once more
-            # before it fails: a result that varies run to run can land outside
-            # its band once. (Timing no longer fails at all: see `timing`.)
-            last = report[-1] if report else {}
-            if not ok and last.get("problems") and \
-                    all(p.get("kind") == "outside_tolerance" for p in last["problems"]):
-                print(f"repro-gate: only tolerant fields drifted; running {exp['script']} once more", flush=True)
-                first = report.pop()
-                ok = run_one(runs, exp, man.get("env", {}), report)
-                report[-1]["first_attempt"] = {"verdict": first["verdict"], "problems": first["problems"]}
-            allok &= ok
+        now = fingerprints(work, runs, man, exps)
+        wanted = set(range(len(exps)))
+        kept_from, keep, removed = None, {}, []
+        if a.only:
+            wanted = closure({i for i, e in enumerate(exps) if e["script"] == a.only}, deps)
+            mode = "only"
+        elif a.retry_failed:
+            plan, removed, why = plan_retry(work, runs, man, exps, deps, now)
+            if plan:
+                wanted, keep, kept_from = plan
+                mode = "retry"
+                retried = [exps[i]["script"] for i in sorted(wanted)]
+                print(f"repro-gate: running again what failed ({len(wanted)} of {len(exps)}); "
+                      f"{len(keep)} kept from {kept_from}", flush=True)
+            else:
+                print(f"repro-gate: every entry runs ({why})", flush=True)
+        env = man.get("env", {})
+        outputs = {e["output"]: e["script"] for e in exps}
+        readers = set().union(*(closure(deps[i], deps) for i in wanted)) if wanted else set()
+        scratch = tempfile.mkdtemp(prefix="reprogate-keep-")
+        made, entries = {}, {}
+        try:
+            for i in order:
+                if i not in wanted:
+                    continue
+                exp = exps[i]
+                missing = sorted(j for j in closure(deps[i], deps) - {i} if j not in made)
+                if missing:
+                    entries[i] = {"script": exp["script"], "output": exp["output"], "verdict": "FAIL",
+                                  "failure": "blocked",
+                                  "why": f"it runs after {exps[missing[0]]['script']}, which did not run to the end",
+                                  "hint": "repair the entry it reads; this one runs once that one does."}
+                    allok = False
+                    continue
+                feed = {exps[j]["output"]: made[j] for j in closure(deps[i], deps) - {i}}
+                print(f"repro-gate: re-running {exp['script']} ...", flush=True)
+                entry, kept = run_one(runs, exp, env, python_cmd, feed, scratch if i in readers else None, outputs)
+                # A replay whose only problem is drift -- every exact field matched,
+                # only `tolerant` fields moved past their bound -- runs once more
+                # before it fails: a result that varies run to run can land outside
+                # its band once. (Timing no longer fails at all: see `timing`.)
+                if entry["verdict"] != "PASS" and entry.get("problems") and \
+                        all(p.get("kind") == "outside_tolerance" for p in entry["problems"]):
+                    print(f"repro-gate: only tolerant fields drifted; running {exp['script']} once more", flush=True)
+                    first = entry
+                    entry, kept = run_one(runs, exp, env, python_cmd, feed, scratch if i in readers else None, outputs)
+                    entry["first_attempt"] = {"verdict": first["verdict"], "problems": first["problems"]}
+                if kept:
+                    made[i] = kept
+                entries[i] = entry
+                allok &= entry["verdict"] == "PASS"
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        for i, e in keep.items():
+            entries[i] = {**e, "kept": True, "kept_from": e.get("kept_from") or kept_from}
+            allok &= e.get("verdict") == "PASS"
+        report = [entries[i] for i in range(len(exps)) if i in entries]
+        for e in removed:
+            report.append({"script": e.get("script"), "output": e.get("output"), "verdict": "FAIL",
+                           "failure": "removed",
+                           "why": f"in the run before, it {FAILURE_WORDS.get(e.get('failure'), 'failed')}",
+                           "hint": ("an experiment that does not reproduce is not dropped to pass the gate; "
+                                    "dropped, its results and every claim on them go too -- step 5 again.")})
+            allok = False
+        if not a.only:
+            os.makedirs(os.path.join(work, ".aris"), exist_ok=True)
+            with open(os.path.join(work, STATE), "w", encoding="utf-8") as f:
+                json.dump({**now, "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}, f, indent=1)
 
     # Second half of the job, and ARIS already owns it: do the numbers the paper
     # prints actually appear in the results files? `evidence_check.py` answers
@@ -789,16 +1362,24 @@ def main() -> None:
             result["verdict"] = ("FAIL" if not (allok and replay_ok)
                                  else "UNCHECKED" if unchecked else "PASS")
             result["replay_from"] = prior.get("generated_at", "earlier full run")
+            for k in ("interpreter", "machine"):
+                if prior.get(k):
+                    result[k] = prior[k]
+    else:
+        result["interpreter"] = " ".join(python_cmd)
+        result["machine"] = platform.machine() or "unknown"
+    result["failures"] = failures_of(result["experiments"])
     result["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    result["mode"] = "claims_only" if a.claims_only else "full"
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+    result["mode"] = "claims_only" if a.claims_only else mode
+    if retried is not None:
+        result["retried"] = retried
+    write_report(runs, result)
 
     # Hand the verdict to ARIS's own enforcer in its own schema. This fills the
     # paper-claim-audit slot, which normally wants a zero-context cross-model
     # reviewer; we have no second model family here, and ARIS's contract already
     # allows a deterministic verifier to stand in.
-    nprob = sum(len(r.get("problems", [])) for r in report)
+    nprob = sum(len(r.get("problems", [])) or (r.get("verdict") != "PASS") for r in report)
     # A check that could not run is ERROR in ARIS's terms -- submission-blocking,
     # and never mistaken for a FAIL the paper can be rewritten out of.
     audit = aris_audit.emit(
@@ -820,6 +1401,12 @@ def main() -> None:
         extra={"experiments": report, "evidence_check": evidence})
 
     print(json.dumps(result, indent=2)[:4000])
+    # What failed comes last, so the end of this output -- which is what a
+    # stopped step shows its owner -- names it (a tester's report, 2026-10-06:
+    # the end was timing drifts, and the two crashes were above them).
+    if result["verdict"] != "PASS":
+        print()
+        print(summarize(result, markdown=False)[0])
     print(f"\nrepro-gate: {result['verdict']} -> {out}")
     print(f"repro-gate: ARIS verdict -> {audit}")
     sys.exit(1 if result["verdict"] == "FAIL" else 3 if result["verdict"] == "UNCHECKED" else 0)

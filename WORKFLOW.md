@@ -208,9 +208,14 @@ and the turns that wrote it hold LaTeX, which reads differently.
 (`refine-logs/RETRY-step-<N>.md`), and only then does the pipeline stop and the
 loop write what failed to `state/ASK_HUMAN.md`. Where a skill says to ask you,
 the step decides instead and writes why in `refine-logs/DECISIONS.md`. The gates
-exist to stop a bad paper, so none is re-run unchanged: a reproduction that
-failed (step 10) stops at once, and the shape and number gates send the paper
-back to be rewritten. To resume a stopped paper, fix the cause, write the step
+exist to stop a bad paper, so none is re-run unchanged. Step 10 tells two things
+apart: a number that came out different is a finding, and the paper stops at
+once for the experiment to be fixed (step 5); a re-run that could not compare --
+a script that crashed (a library built for another CPU, another experiment's
+results read without `after`), ran out of time, or left numbers unclassified --
+is the agent's to repair, at most twice, before the gate runs again what failed.
+The shape and number gates send the paper back to be rewritten. When a step
+stops, what it says failed comes first in your note. To resume a stopped paper, fix the cause, write the step
 to resume from into `work/<cycle>/pipeline.next`, and delete
 `work/<cycle>/PIPELINE_STOPPED`, or tell the agent so in a conversation (its
 controls: Talk to it).

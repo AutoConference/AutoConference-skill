@@ -75,6 +75,10 @@ export AC_MACHINE="$MACHINE"
 # jq is not installed on most Linux machines; the handful of filters used here
 # have a stand-in, so it is not a prerequisite.
 command -v jq >/dev/null 2>&1 || jq() { python3 "$ROOT/pipeline/mini_jq.py" "$@"; }
+# The interpreter the reproduction gate re-runs every script with (step 10),
+# and its CPU architecture: step 5 is told both, and so is step 10's repair.
+GATE_PY=$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null || echo python3)
+GATE_ARCH=$(python3 -c 'import platform; print(platform.machine() or "unknown")' 2>/dev/null || echo unknown)
 # macOS has no timeout(1); coreutils installs it as gtimeout. Without either,
 # a step runs unbounded rather than not at all.
 if ! command -v timeout >/dev/null 2>&1; then
@@ -382,6 +386,9 @@ want() { if [ -n "$STEP" ]; then [ "$STEP" = "$1" ]; else
 # paper (step 11 reads the mark).
 if [ -z "$DRY" ]; then
   for n in 1 2 3 4 5 6 7 8 9 10; do want "$n" && { rm -f "$W/.paper-ready"; break; }; done
+  # Step 10 re-runs only what failed only while nothing it re-runs has been
+  # made again: running any earlier step starts its next run afresh.
+  for n in 1 2 3 4 5 6 7 8 9; do want "$n" && { rm -f "$W/.aris/repro-state.json"; break; }; done
   # A resume note belongs to the pass its step was cut off in (pipeline/
   # resume.py): running an earlier step -- the loop going back, or the owner
   # moving pipeline.next -- starts a new pass, and the later steps' notes go.
@@ -707,7 +714,20 @@ Every leaf number in your results must be named in \`exact\`, \`tolerant\` or
 clean copy and FAILS on any number that is in none of them, because an
 unclassified number is one nobody decided was reproducible. \`timing\` fields
 measure the machine, so they are re-measured and never compared; report them in
-the paper as approximate, with the hardware. $S5_TAIL$PILOT" 25200 || exit 1
+the paper as approximate, with the hardware. $S5_TAIL
+
+How the gate re-runs them: each entry alone, in no set order, in a fresh copy of
+this workspace that has no runs/results/ -- nor data/, figures/ or any virtual
+environment -- from the script's own folder, with $GATE_PY ($GATE_ARCH). So a
+script computes everything it reports and never reads another entry's results
+file. One that does -- an analysis split from the slow computation it reads --
+names that entry in its manifest entry, \"after\": [\"<that entry's script>\"]:
+the gate then runs that entry first, in the same copy, and the script reads what
+it re-made. If your scripts need another interpreter than that one (a virtual
+environment's, say), name it at the top of the manifest as \"python\":
+\"<its path>\". Run your experiments with the interpreter the gate re-runs them
+with -- that one, or the one you name: a compiled library built under another
+(an Intel one under Rosetta on an ARM Mac, say) does not load in the re-run.$PILOT" 25200 || exit 1
 fi
 
 # ── 6 ─ ARIS: statistics, then what the numbers support ─────────────────────
@@ -865,10 +885,104 @@ works. Run it before you finish, and fix what it reports." || exit 1
 fi
 
 # ── 10 ─ ours: do the numbers survive a re-run? ─────────────────────────────
+# Two kinds of failure, told apart (a tester's report and a user's, 2026-10-06).
+# A number that came out different is a finding about the experiment: the step
+# stops at once, for the experiment to be fixed (step 5). A gate that could not
+# compare -- a script that crashed (another entry's output read without
+# `after`, a library built for another CPU architecture...), ran out of time or
+# wrote nothing, a number nobody classified, a manifest it cannot use -- says
+# nothing about the numbers yet, and the agent can fix it: a turn is told what
+# failed and repairs it, at most twice, and the gate runs again only what
+# failed (--retry-failed). Either way refine-logs/STOP-step-10.md says what
+# failed, and the loop puts it at the top of the owner's note.
+repro_repair_prompt() {
+  local tried=""
+  [ -s "$W/refine-logs/REPRO_REPAIR_HISTORY.md" ] && tried="
+What the last repair found and changed (refine-logs/REPRO_REPAIR_HISTORY.md):
+
+$(tail -c 4000 "$W/refine-logs/REPRO_REPAIR_HISTORY.md")
+"
+  cat <<PROMPT
+The reproducibility gate (step 10, research/scripts/check_reproduction.py) re-ran
+the experiments in runs/REPLAY_MANIFEST.json, and some could not be re-run or
+compared -- not because a number came out different. Find out why and fix it.
+When you stop, the gate runs again what failed. What it found
+(refine-logs/REPRO_FAILURES.md; runs/REPRO_GATE.json has every detail):
+
+$(cat "$W/refine-logs/REPRO_FAILURES.md")
+$tried
+How the gate runs an entry: alone, in no set order, in a fresh copy of this
+workspace that has no runs/results/ -- nor data/, figures/ or any virtual
+environment -- from the script's own folder, with $GATE_PY ($GATE_ARCH) unless
+the manifest names another interpreter as "python" (a path, or a command as a
+list; one in a virtual environment is run where it is). An entry that names
+other entries in "after" (by script or output) runs after them, in the same
+copy, and reads what they re-made.
+
+Yours to fix:
+- The environment: install, or rebuild for this machine ($GATE_ARCH), what a
+  script needs. A compiled library or a cache built for another CPU
+  architecture -- under Rosetta, say -- is rebuilt here or removed. Or name in
+  "python" the interpreter the experiment ran with.
+- The manifest: "after" for an entry that reads another entry's results; for an
+  UNCLASSIFIED number, the class it has -- exact for a computation with fixed
+  seeds, tolerant with a band only if it really varies from run to run, timing
+  only for wall-clock time and throughput; a larger timeout_s if an experiment
+  simply takes longer here.
+- A script's plumbing, so it runs in a clean copy: a path, a folder it must
+  create. Never what it computes.
+
+Never edit or write anything under runs/results/, take an entry out of the
+manifest, read recorded results or copy them into a script, call a number
+tolerant or timing to get past a difference, or touch the paper. Before you
+finish, run each failing script the way the gate does, to see it run to the end.
+
+Write what you found and what you changed to refine-logs/REPRO_REPAIR.md. If
+nothing here is yours to fix -- the experiment never wrote its results, say --
+make its first line "NOT REPAIRABLE: <why>" and change nothing.
+PROMPT
+}
 if want 10; then
-  gated "10/15 reproducibility gate (ours)" python3 "$ROOT/research/scripts/check_reproduction.py" "$W" || {
-    echo "research: the numbers did not reproduce. Fix the experiment, not the paper." >&2
-    exit 4; }
+  GATE="$ROOT/research/scripts/check_reproduction.py"
+  repairs=0; why=""
+  rm -f "$W/refine-logs/STOP-step-10.md"
+  while :; do
+    gated "10/15 reproducibility gate (ours)" python3 "$GATE" "$W" --retry-failed && break
+    mkdir -p "$W/refine-logs"
+    python3 "$GATE" "$W" --summary > "$W/refine-logs/REPRO_FAILURES.md"
+    case $? in
+      0) ;;
+      1) # A finding, or what only a person decides: as the summary says it.
+         why=$(head -1 "$W/refine-logs/REPRO_FAILURES.md" | sed -e 's/^\*\*The reproducibility gate (step 10): //' -e 's/\*\*$//')
+         case "$why" in *"step 5"*) why="$why To run the experiment again, write 5 to $W/pipeline.next." ;; esac
+         break ;;
+      *) why="the gate stopped without a report it could say (above)."; break ;;
+    esac
+    if [ "$repairs" -ge 2 ]; then
+      why="the gate could not compare every experiment, and two repairs did not fix it (refine-logs/REPRO_REPAIR_HISTORY.md says what they tried)."
+      break
+    fi
+    repairs=$((repairs + 1))
+    if [ -s "$W/refine-logs/REPRO_REPAIR.md" ]; then
+      { printf '\n## Repair before %s\n\n' "$(date +%Y-%m-%dT%H:%M:%S%z)"; cat "$W/refine-logs/REPRO_REPAIR.md"; } \
+        >> "$W/refine-logs/REPRO_REPAIR_HISTORY.md"
+      rm -f "$W/refine-logs/REPRO_REPAIR.md"
+    fi
+    skill "10r/15 reproduction repair (ours), $repairs of 2" "$(repro_repair_prompt)" 3600 || {
+      why="the turn repairing the gate failed (above)."; break; }
+    if head -1 "$W/refine-logs/REPRO_REPAIR.md" 2>/dev/null | grep -q '^NOT REPAIRABLE'; then
+      why="the agent found nothing it may fix: $(head -1 "$W/refine-logs/REPRO_REPAIR.md" | cut -c1-300)"
+      break
+    fi
+  done
+  [ -z "$why" ] && rm -f "$W/refine-logs/REPRO_FAILURES.md"
+  if [ -n "$why" ]; then
+    { cat "$W/refine-logs/REPRO_FAILURES.md" 2>/dev/null
+      printf '\n**Why it stopped:** %s\n' "$why"
+    } > "$W/refine-logs/STOP-step-10.md"
+    echo "research: step 10 stopped: $why" >&2
+    exit 4
+  fi
 fi
 
 # ── 11 ─ ours: write it ─────────────────────────────────────────────────────
