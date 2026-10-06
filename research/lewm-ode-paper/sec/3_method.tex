@@ -1,11 +1,46 @@
 \section{Method}
 \label{sec:method}
 
-We keep the \LeWM{} JEPA backbone~\cite{maes2026lewm} and replace only
-the discrete AR predictor with an ODE velocity field---this is
-\method{}.
-Notation follows the official implementation (history length $H{=}3$,
-embedding dimension $D{=}192$, number of predictions per window $1$).
+\method{} is a JEPA-style visual world model whose latent \emph{evolution}
+is continuous: we replace the discrete autoregressive next-window map with
+an action-conditioned velocity field integrated over a normalized step
+interval.
+Notation follows the official PushT implementation (history length
+$H{=}3$, embedding dimension $D{=}192$, one prediction per window).
+
+\subsection{Problem statement and objective}
+\label{sec:problem}
+
+Let $f_\phi$ be the pixel encoder, $p$ and $q$ the representation and
+prediction projectors, and $\mathcal{L}_{\mathrm{SIGReg}}$ the SIGReg
+anti-collapse term.
+From a history of observations $x_{t-H+1:t}$ and actions $u_{t-H+1:t}$ we
+form context latents $Z_t$ and action embeddings $A_t$ (detailed in
+\Cref{sec:encoder}).
+The \emph{discrete} baseline predictor $g^{\mathrm{AR}}_\theta$ maps
+\begin{equation}
+  \hat Z_{t+1} = g^{\mathrm{AR}}_\theta(Z_t, A_t).
+  \label{eq:prob-ar}
+\end{equation}
+\method{} instead defines a velocity field $v_\theta$ and integrates
+\begin{equation}
+  \hat Z_{t+1}
+  \;=\;
+  \mathrm{ODESolve}\bigl(v_\theta;\, Z_t, A_t;\, \tau{:}0\to 1\bigr),
+  \label{eq:prob-ode}
+\end{equation}
+with piecewise-constant actions on $[0,1]$ (one CEM planning tick).
+Both variants are trained to minimize the same JEPA + SIGReg objective
+(\Cref{sec:loss}) on identical official PushT windows and evaluated with
+the same val-tied CEM starts.
+We do \emph{not} redesign the encoder, change SIGReg hyperparameters,
+introduce pixel reconstruction, or alter planner costs: any difference is
+attributable to how latent state advances between steps.
+
+\begin{quote}
+\emph{Can continuous integrate-to-next-step dynamics match discrete AR
+under matched JEPA training and CEM planning on official PushT data?}
+\end{quote}
 
 \subsection{Encoder and action embedding}
 \label{sec:encoder}
@@ -37,9 +72,10 @@ $(B,H,D)$).
 \subsection{Discrete baseline predictor}
 \label{sec:ar}
 
-The official \LeWM{} predictor is an action-conditioned transformer
+The discrete baseline is an action-conditioned transformer
 (ConditionalBlock / AdaLN-zero) of depth 6, 16 heads, width $D$, MLP
-dimension 2048, and dropout 0.1:
+dimension 2048, and dropout 0.1---the same architectural family used in
+prior JEPA PushT stacks~\cite{maes2026lewm}:
 \begin{equation}
   \hat Z_{t+1}
   \;=\;
@@ -115,7 +151,7 @@ horizon, action blocking, or cost.
 \subsection{Training objective (JEPA + SIGReg)}
 \label{sec:loss}
 
-Following \LeWM{}, the total loss is
+The total loss is
 \begin{equation}
   \mathcal{L}
   \;=\;
@@ -144,8 +180,8 @@ statistic over $M{=}1024$ random projections and 17 quadrature knots
 Writing $P$ for projected embedding coordinates and $t_k$ for
 quadrature nodes, SIGReg accumulates a discrepancy between the
 empirical characteristic function of $P$ and that of
-$\mathcal{N}(0,1)$ across random directions; we use the official
-\LeWM{} implementation unchanged (weight $\lambda{=}0.09$).
+$\mathcal{N}(0,1)$ across random directions; we use the reference
+implementation unchanged (weight $\lambda{=}0.09$).
 Only the predictor internals differ between discrete and ODE runs;
 encoder, projectors, SIGReg, and optimizer are shared.
 

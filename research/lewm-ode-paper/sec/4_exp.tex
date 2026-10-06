@@ -86,10 +86,10 @@ Paper PushT success is under full-data training, shown for context only.}
 \toprule
 Method & Params & fit/loss & val/loss & CEM val-99 \\
 \midrule
-Discrete AR (\LeWM{}) & 18.03M & 0.248 & 0.536 & 5/93 (5.38\%) \\
-ODE RK4 0$\to$1 (ours) & 18.07M & \textbf{0.234} & \textbf{0.506} & 5/93 (5.38\%) \\
+Discrete AR baseline~\cite{maes2026lewm} & 18.03M & 0.248 & 0.536 & 5/93 (5.38\%) \\
+ODE RK4 0$\to$1 (\method{}) & 18.07M & \textbf{0.234} & \textbf{0.506} & 5/93 (5.38\%) \\
 \midrule
-\LeWM{} paper (full data) & $\sim$15M & --- & --- & $96{\pm}2.83$\%$^\dagger$ \\
+Prior full-data JEPA~\cite{maes2026lewm} & $\sim$15M & --- & --- & $96{\pm}2.83$\%$^\dagger$ \\
 \bottomrule
 \multicolumn{5}{l}{\footnotesize $^\dagger$Reported PushT success; not comparable to our 1k protocol.} \\
 \end{tabular}
@@ -217,7 +217,7 @@ should be read as a point estimate under this protocol.
 The matched comparison supports three practical takeaways.
 
 First, continuous latent dynamics are a \emph{compatible} inductive
-bias for \LeWM{}-style JEPA training: the ODE predictor trains stably
+bias for JEPA + SIGReg training: the ODE predictor trains stably
 for 100 epochs under the same SIGReg weight, reaches lower fit/val
 loss, and requires only a small parameter delta (+37{,}056).
 
