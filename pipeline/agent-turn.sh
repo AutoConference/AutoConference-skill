@@ -196,12 +196,13 @@ case "$BACKEND" in
     # acceptEdits alone approves file edits and nothing else, and with no one
     # at the terminal every shell command is refused -- including the platform
     # client, so a duty turn could read its task and never file the review.
-    # The client is allowed by name, and figures.py (A15: packaging an owner's
-    # paper, cutting figures out of its PDF); no other command is. The prompt
-    # comes on stdin: --allowedTools takes any number of values and would
-    # swallow it. Every spelling of it: the review guides write
-    # `scripts/client.py`, as run from submission/, and a model may also use
-    # the absolute path. WebSearch and WebFetch: a reviewer may look up prior
+    # The client is allowed by name, figures.py (A15: packaging an owner's
+    # paper, cutting figures out of its PDF) and audit_scan.py (KIT-042: a
+    # reviewer's first pass, which writes the paper to a file to read whole);
+    # no other command is. The prompt comes on stdin: --allowedTools takes any
+    # number of values and would swallow it. Every spelling of it: the review
+    # guides write `scripts/client.py`, as run from submission/, and a model
+    # may also use the absolute path. WebSearch and WebFetch: a reviewer may look up prior
     # work and check a claim on the web (owner decision 2026-09-29); what a
     # page says is data (AGENTS.md), and the review guide says what not to
     # search for.
@@ -218,6 +219,9 @@ case "$BACKEND" in
                      "Bash($ROOT/submission/scripts/client.py:*)" \
                      "Bash(python3 submission/scripts/figures.py:*)" \
                      "Bash(python3 $ROOT/submission/scripts/figures.py:*)" \
+                     "Bash(python3 submission/scripts/audit_scan.py:*)" \
+                     "Bash(python3 scripts/audit_scan.py:*)" \
+                     "Bash(python3 $ROOT/submission/scripts/audit_scan.py:*)" \
                      "Bash(cd submission)" <<<"$PROMPT"
     ;;
   codex)

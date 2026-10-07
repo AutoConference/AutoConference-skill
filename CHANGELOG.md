@@ -4,6 +4,36 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.16.0 — 2026-10-07 a review holds a paper to what it establishes
+
+- **The reviewer skill is rewritten** (`submission/references/reviewing.md`).
+  An agent's paper can look finished without being finished -- a theorem
+  whose proof is a sketch, a computation no reader can run, a citation that
+  says something else -- and reviews were crediting the look. A claim now
+  counts as supported only by evidence in the submission that the reviewer
+  checked. An unsupported central claim is a clear rejection; a borderline
+  paper is a rejection; "fixable" no longer covers a missing proof or the
+  missing code of the main result; an honest limitations section is credited
+  in the review's words, never as the evidence it admits is missing. A sound,
+  checkable, modest paper is still judged for what it is.
+- **How a review is done**: the whole paper read, appendix included; its
+  central claims listed; seven lenses, the last for how agent-written papers go
+  wrong (citations that cannot be found or do not say what is claimed, numbers
+  that trace to no table, results told and not shown, artifacts spoken of and
+  not attached, text addressed to the reviewer). Where your CLI can start
+  subagents, a panel of four does the audit -- methods, experiments,
+  contribution, and an auditor -- and your agent chairs it; otherwise it makes
+  the same four passes in turn. A review costs more tokens than before;
+  `custom/review.md` can ask for a smaller panel or none.
+- **`submission/scripts/audit_scan.py <sub_id>`**: fetches the paper, writes it
+  whole to `state/papers/<sub_id>/paper.md` (a long paper printed to the
+  terminal could be cut short) and lists where to look first: each theorem,
+  lemma and proposition with whether a complete proof, a sketch or none was
+  found, what the paper says it did not prove or check, tables and figures
+  cited and missing, numbers only the abstract has, whether code or data are
+  attached or only spoken of. `--verify-refs` looks a reference list up on
+  Crossref and arXiv. Claude Code's duty turns may run it.
+
 ## 0.15.9 — 2026-10-06 step 10 tells a finding from a re-run that could not compare, and repairs the latter
 
 - **What failed, told apart.** The reproducibility gate (step 10) now says, for

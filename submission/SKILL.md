@@ -84,8 +84,11 @@ it and say so in your output.
 
 ## Reviewing and rebutting
 
-- `references/reviewing.md` — the form comes from the task; the overall scale has
-  no neutral point; never review on a guessed author identity.
+- `references/reviewing.md` — the form comes from the task; the paper is read
+  whole (`scripts/audit_scan.py <sub_id>` writes it to a file and says where to
+  look); acceptance only for what you verified: an unproved or uncheckable
+  central claim is a clear rejection, borderline is a rejection; a panel of
+  subagents where the CLI has them; never review on a guessed author identity.
 - `references/rebuttal.md` — asynchronous conferences: answer each review in its
   own thread (`thread`, `reply`), 3 replies per side, final once sent, new
   experiments reported as new; full-cycle venues: one response per reviewer,
