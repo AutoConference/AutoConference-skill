@@ -585,7 +585,7 @@ wake() {
   return "$rc"
 }
 
-# upload_turn <backend> <model> <prompt> <mode> <output file> <exit> <started> <seconds> [<paper's cycle>]
+# upload_turn <backend> <model> <prompt> <mode> <output file> <exit> <started> <seconds> [<paper's cycle>] [<step n/15>]
 #
 # Fire and forget. An upload that fails must never cost the agent its work, so
 # this is best-effort and its own errors are swallowed. The whole turn goes, in
@@ -606,7 +606,7 @@ upload_turn() {
   tok=$(turn_tokens "$5" "$1"); tin=${tok% *}; tout=${tok#* }
   AC_TURN_BACKEND="$1" AC_TURN_MODEL="$2" AC_TURN_PROMPT_FILE="$pf" AC_TURN_MODE="$4" \
   AC_TURN_FILE="$5" AC_TURN_EXIT="$6" AC_TURN_START="$7" AC_TURN_MS="$(( $8 * 1000 ))" \
-  AC_TURN_TOKENS_IN="$tin" AC_TURN_TOKENS_OUT="$tout" AC_TURN_PAPER="${9:-}" \
+  AC_TURN_TOKENS_IN="$tin" AC_TURN_TOKENS_OUT="$tout" AC_TURN_PAPER="${9:-}" AC_TURN_STEP="${10:-}" \
   AC_TURN_PHASE="${PHASE:-}" python3 "${ROOT:-$PWD}/pipeline/turn_upload.py" >>"$LOG" 2>&1 || true
   # And a line in this machine's own ledger, which the weekly cap is kept by,
   # a paper's statement sums, and the activity report counts (owner,
@@ -911,7 +911,7 @@ pipeline_steps() {
     asked=$(cat "$ws/.step-prompts" 2>/dev/null)
     upload_turn "$BACKEND" "${MODEL:-}" \
       "${asked:-run-pipeline.sh step $n/15: a deterministic check, no model call}" \
-      writing "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "$cyc"
+      writing "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "$cyc" "$n/15"
     # A step that ran again after the model came back (below: the usage-limit
     # wait) has not succeeded until nothing its cut-off attempt had finished
     # is gone or shrunk without a reason (pipeline/resume.py; a tester's
@@ -1310,7 +1310,19 @@ them. Its files are in state/own-paper/source/. You only prepare it; the loop
 submits it. Do not call the platform.
 
 Convert, never rewrite. The paper's own text, in its own words: do not
-summarise, shorten, reorder or improve it. Write, in state/own-paper/:
+summarise, shorten, reorder or improve it. One exception: review is
+double-blind, and the platform refuses a paper whose text says who wrote it.
+Take out exactly this, and nothing else:
+  - the author block: names, affiliations, emails, ORCIDs, "equal
+    contribution" and correspondence notes;
+  - acknowledgments and funding (thanks, grant numbers, "supported by");
+  - links to the authors' own pages, repositories or project sites: write
+    [link removed for review] in their place;
+  - the authors speaking of their own earlier work ("in our previous work
+    [12] we showed"): cite it in the third person ("[12] showed"), the
+    citation kept.
+Write state/own-paper/ANONYMIZED.md: one line for each thing taken out and
+where (never the removed text itself). Write, in state/own-paper/:
 
   body.md             everything after the abstract, as markdown: sections,
                       equations ($...$ and $$...$$), tables, references

@@ -682,6 +682,24 @@ summing in another order is fine). A result that really varies from run to run
 -- a nondeterministic GPU kernel, thread timing -- goes in \`tolerant\` with the
 band you saw across two runs; wall-clock time and throughput go in \`timing\`."
   fi
+  # How the paper is made is reviewed too (KIT-043, owner 2026-10-07; Luo,
+  # Kasirzadeh and Shah, PNAS 2026): the kit attaches runs/ and refine-logs/,
+  # and the platform shows the committee this step's turn.
+  S5_PROCESS="How this work is done is reviewed too: the kit attaches runs/ and refine-logs/
+to the paper as its research record, and the platform shows its committee this
+step's turn. A choice the record shows and the paper hides counts against it:
+  * Choose between variants -- configurations, checkpoints, prompts, seeds -- on
+    training or validation data, never on the test set. Evaluate the test set
+    once, for what you chose, and say so in runs/manifest.json's \`notes\`.
+  * Keep every run's results under runs/results/, the failed and the discarded
+    ones too: a reviewer compares what was tried with what is reported.
+  * Use the data the plan names, whole. A subsample, a substitute, synthetic or
+    simulated data, a benchmark swapped for another: only with the reason
+    written in refine-logs/DECISIONS.md, so the paper can say it.
+  * Compute every metric the plan names, and keep each one's result; a metric
+    dropped because it looks worse is the selective reporting reviewers look for.
+  * Write in refine-logs/DECISIONS.md which benchmarks you considered, which you
+    used, and why."
   skill "5/15 experiment-bridge (ARIS)" \
 "/experiment-bridge refine-logs/EXPERIMENT_PLAN.md — gpu: local — reviewer: manual — effort: balanced
 
@@ -694,6 +712,8 @@ $QBAR
 $S5_HW
 
 $S5_AUDIT
+
+$S5_PROCESS
 
 Write results as JSON under runs/results/.
 
@@ -1104,6 +1124,20 @@ Three more files, for the steps after you:
   * paper.json gains \"keywords\": 1-10 specific phrases.
   * REPRODUCIBILITY.md, 50-5000 characters: how to re-run it, from
     runs/REPLAY_MANIFEST.json and runs/REPRO_GATE.json.
+
+How the paper was made is reviewed too: the kit attaches runs/ and refine-logs/
+as its research record, and the platform shows the committee every turn that
+wrote it. A choice those show and the paper hides counts against the paper. So
+the experimental setup, and REPRODUCIBILITY.md, say -- from runs/ and
+refine-logs/DECISIONS.md, as it happened:
+  * the data actually used: whole, or a subsample (how many, drawn how), and any
+    synthetic or simulated data, with why;
+  * which benchmarks were considered, which were used, and why those;
+  * every metric computed, and the result on each;
+  * how the reported configuration was chosen -- on which split -- how often the
+    test set was evaluated, and how many variants and seeds were tried, the
+    failed ones included;
+  * where in runs/ each reported result lives.
   * METHOD_CODE_MAP.json:
       {\"mechanisms\": [{\"mechanism\": \"<a sentence from the Method section>\",
                         \"anchor\": \"<a distinctive string in the code>\",

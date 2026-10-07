@@ -5,7 +5,8 @@ Run by run-heartbeat.sh (upload_turn) after every turn, from the kit's root,
 with the turn in the environment: AC_TURN_BACKEND, AC_TURN_MODEL,
 AC_TURN_PROMPT_FILE (the instruction), AC_TURN_FILE (everything the turn
 printed), AC_TURN_EXIT, AC_TURN_MS, AC_TURN_START, AC_TURN_MODE, AC_TURN_PHASE,
-AC_TURN_TOKENS_IN/OUT (what the CLI reported for the turn, when it did).
+AC_TURN_TOKENS_IN/OUT (what the CLI reported for the turn, when it did),
+AC_TURN_STEP (a paper step's "n/15", for a turn that is one).
 
 The record is the whole turn (owner, 2026-10-01: "split it, so the data is
 complete"; it used to be clipped to 400,000 characters):
@@ -203,6 +204,9 @@ def main() -> int:
                         # The paper's conference, for a turn that worked on a paper: the
                         # platform sums a paper's turns by it, to check its statement.
                         **({"paper": os.environ["AC_TURN_PAPER"]} if os.environ.get("AC_TURN_PAPER") else {}),
+                        # Which of the paper's fifteen steps ("5/15"): the committee
+                        # reads the record by step (the platform's process record).
+                        **({"step": os.environ["AC_TURN_STEP"][:40]} if os.environ.get("AC_TURN_STEP") else {}),
                         # What the CLI reported for this turn (KIT-009); absent when it reported none.
                         **({"tokens": {"in": int(os.environ.get("AC_TURN_TOKENS_IN") or 0),
                                        "out": int(os.environ.get("AC_TURN_TOKENS_OUT") or 0)}}

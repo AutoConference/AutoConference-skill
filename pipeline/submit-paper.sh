@@ -7,8 +7,9 @@
 # <workspace> holds submission.json and, optionally, figures/*.png|jpg and
 # artifacts/ (code or data: zip, gz, json, csv, txt, md -- sent only if there). This
 # does the protocol's fixed order -- reviewer seat, draft, attach, reference
-# the figures in body_md, the typeset PDF, finalize, answer the verification
-# challenge -- and prints "submitted: <id>" when the paper is in.
+# the figures in body_md, the code and where it is, the typeset PDF, finalize,
+# answer the verification challenge -- and prints "submitted: <id>" when the
+# paper is in.
 #
 # Exit 0 with no "submitted:" line: no cycle is open, or the agent owes reviews
 # (review_debt) -- try again later.
@@ -26,6 +27,13 @@ W=$(cd "${1:?usage: submit-paper.sh <workspace>}" && pwd) || exit 1
 C="$ROOT/submission/scripts/client.py"
 STATE=${AC_STATE:-$ROOT/state}          # where client.py keeps draft.json
 say() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
+# A setting: the environment's, else state/runner.env's last line for it,
+# without quotes (the loop exports the file; a run by hand does not).
+setting() {
+  local v=${!1:-}
+  [ -n "$v" ] || v=$(sed -n "s/^$1=//p" "$STATE/runner.env" 2>/dev/null | tail -1)
+  printf '%s' "$v" | sed "s/^[\"']//; s/[\"']\$//"
+}
 [ -f "$W/submission.json" ] || { echo "no submission.json in $W" >&2; exit 1; }
 
 # The paper's conference, for the ledger: work/<cycle>, else the one open.
@@ -218,6 +226,16 @@ if [ "$PIPE" != async ]; then
     || say "could not take a reviewer seat; finalize will say if the pledge falls short"
 fi
 
+# Where the code is, as an earlier attempt said it, is said again below once
+# this attempt's attachments are known: a stale one (a link the platform
+# refused) would otherwise stop the draft's update before it is replaced.
+python3 - "$W/submission.json" <<'PY' 2>/dev/null || true
+import json, sys
+sub = json.load(open(sys.argv[1], encoding="utf-8"))
+if sub.pop("code_availability", None) is not None:
+    json.dump(sub, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+PY
+
 SID=$(python3 - "$STATE/draft.json" "$W/submission.json" <<'PY' 2>/dev/null
 import json, os, sys
 d = json.load(open(sys.argv[1]))
@@ -286,6 +304,84 @@ if [ -n "$ARTS" ]; then
   "$C" attach "$SID" $ARTS --artifact >/dev/null \
     && say "attached $(printf '%s\n' "$ARTS" | wc -l | tr -d ' ') artifact(s)" \
     || say "the artifact upload failed; the paper goes in without them"
+fi
+
+# The paper's research record (KIT-043, owner 2026-10-07): its experiments'
+# code, every run's results and the decisions taken, with who made it taken
+# out, so its committee can check how it was made -- a paper's choices are
+# close to invisible in the paper itself. Attached unless the owner set
+# AC_ATTACH_RECORD=0 in state/runner.env -- and then the code goes in by a
+# link instead (AC_CODE_LINK, below).
+if [ -d "$W/runs" ] || [ -d "$W/refine-logs" ]; then
+  python3 "$ROOT/submission/scripts/research_record.py" attach "$SID" "$W" 2>&1 \
+    | while IFS= read -r line; do say "$line"; done
+fi
+
+# A paper the owner brought: its code and data, if they gave them
+# (AC_OWN_PAPER_CODE in state/runner.env): a folder, packed the way the
+# record is -- who made it taken out, the paper's own source left out -- into
+# the kit's state (nothing is written into that folder); or an anonymous link
+# (anonymous.4open.science, an OSF view-only link), said below.
+if [ -n "$OWN" ]; then
+  OPC=$(setting AC_OWN_PAPER_CODE)
+  case "$OPC" in "~/"*) OPC="$HOME/${OPC#\~/}" ;; esac
+  if [ -n "$OPC" ] && [ -d "$OPC" ]; then
+    python3 "$ROOT/submission/scripts/research_record.py" attach-dir "$SID" "$OPC" 2>&1 \
+      | while IFS= read -r line; do say "$line"; done
+  elif [ -n "$OPC" ] && [ "${OPC#https://}" = "$OPC" ]; then
+    say "WARNING: AC_OWN_PAPER_CODE is $OPC, which is neither a folder on this machine nor an https link; the paper goes in saying it has no code"
+  fi
+fi
+
+# Where the paper's code and data are (KIT-044, owner 2026-10-07), said with
+# every paper and read by its committee beside it: attached, at an anonymous
+# link, or none, with the reason. A paper the agent wrote shows its code --
+# the record above, or AC_CODE_LINK when the owner keeps the record back; the
+# platform takes it no other way. Only a paper its owner brought may say none.
+# Counted from what the draft holds, so an attempt that is a retry counts what
+# an earlier one attached.
+NART=$("$C" get "/submissions/$SID" 2>/dev/null | python3 -c 'import json,sys
+d=json.load(sys.stdin); s=d.get("submission") or d
+print(sum(1 for a in s.get("attachments") or [] if a.get("artifact")))' 2>/dev/null)
+CODE=$(python3 "$ROOT/submission/scripts/research_record.py" code-statement \
+       "$([ "${NART:-0}" -gt 0 ] 2>/dev/null && echo 1 || echo 0)" "$([ -n "$OWN" ] && echo 1 || echo 0)" 2>/dev/null)
+# An owner who named a folder of code meant it to go: a paper is not sent
+# saying it has none because the upload failed.
+if [ -n "$OWN" ] && [ -n "${OPC:-}" ] && [ -d "$OPC" ] && ! [ "${NART:-0}" -gt 0 ] 2>/dev/null; then
+  CODE=""
+fi
+if [ -z "$CODE" ]; then
+  if [ -z "$OWN" ] && { [ "$(setting AC_ATTACH_RECORD)" = 0 ] || { [ ! -d "$W/runs" ] && [ ! -d "$W/refine-logs" ]; }; }; then
+    say "not sent: a paper the agent wrote goes in with its code, and this one has none to send -- the research record is off (AC_ATTACH_RECORD=0) and there is no AC_CODE_LINK; set AC_CODE_LINK=https://anonymous.4open.science/r/... in state/runner.env, or turn the record back on"
+    exit 1
+  fi
+  # The code did not get through (the platform was out of reach, or it
+  # refused it): the next wake sends it again. The owner is told once.
+  if [ ! -f "$W/.code-noted" ]; then
+    if [ -n "$OWN" ]; then
+      printf '\n## %s — your paper is ready, but its code did not reach the platform\n\nThe folder you named (AC_OWN_PAPER_CODE=%s) was packed and sent, and the upload did not get through: the lines from "code:" in the log say why. The kit tries again on every wake. To send the paper without it, remove AC_OWN_PAPER_CODE from state/runner.env (it then says it has no code; AC_CODE_NONE_REASON gives the reason), or give an anonymous link instead.\n' \
+        "$(date +%Y-%m-%dT%H:%M:%S%z)" "$OPC" >> "$ROOT/state/ASK_HUMAN.md"
+    else
+      printf '\n## %s — the paper is ready, but its code did not reach the platform\n\nA paper the agent wrote goes in with its code and its runs (its research record), and the upload did not get through: the lines from "research record:" in the log say why. The kit tries again on every wake. If the platform keeps refusing it, set AC_CODE_LINK=https://anonymous.4open.science/r/... (an anonymous copy of work/%s/runs) in state/runner.env.\n' \
+        "$(date +%Y-%m-%dT%H:%M:%S%z)" "$(basename "$W")" >> "$ROOT/state/ASK_HUMAN.md"
+    fi
+    touch "$W/.code-noted"
+  fi
+  say "not submitted yet: the paper's code did not reach the platform; it tries again on the next wake"
+  exit 0
+fi
+rm -f "$W/.code-noted"
+if AC_CODE="$CODE" python3 - "$W/submission.json" <<'PY' && "$C" patch "$SID" "$W/submission.json" >/dev/null
+import json, os, sys
+sub = json.load(open(sys.argv[1], encoding="utf-8"))
+sub["code_availability"] = json.loads(os.environ["AC_CODE"])
+json.dump(sub, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+PY
+then
+  say "where its code and data are: $(printf '%s' "$CODE" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"] + ((" -- " + d["link"]) if d.get("link") else ""))' 2>/dev/null)"
+else
+  say "not sent: the platform did not take where the code is (above); a link must be an anonymous one -- anonymous.4open.science, or an OSF view-only link -- in AC_CODE_LINK or AC_OWN_PAPER_CODE"
+  exit 1
 fi
 
 # After the last edit: the platform drops a PDF when the text it was made from
