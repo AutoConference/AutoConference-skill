@@ -118,6 +118,21 @@ SIGN_BEFORE = re.compile(r"(?:-|\u2212|\$-\$|\$\u2212\$)$")
 # never a result. Citing arXiv:2506.09250 must not read as claiming 2506.0925.
 ARXIV_ID = re.compile(r"(?:arxiv[:\s]*)?(\d{4}\.\d{4,5})(?:v\d+)?", re.I)
 
+# The reference list make_submission.py renders from references.bib (KIT-045):
+# its arXiv ids and DOIs are the works the text already cites, so counted
+# again they would double the paper's citations; its years, volumes and pages
+# are nobody's results. Checks that read the paper's own text read it without.
+REF_HEADING = re.compile(r"^(#{1,6})[ \t]*(?:\d+(?:\.\d+)*\.?[ \t]+)?(?:references|bibliography)[ \t]*$", re.I | re.M)
+
+
+def without_reference_list(md: str) -> str:
+    m = REF_HEADING.search(md)
+    if not m:
+        return md
+    nxt = re.compile(r"^#{1,%d}[ \t]" % len(m.group(1)), re.M).search(md, m.end())
+    return md[: m.start()] + (md[nxt.start():] if nxt else "")
+
+
 
 # The gates' own reports sit under runs/ beside the results, and list the very
 # numbers a paper printed -- the unsupported ones too, as strings. Read as
@@ -348,6 +363,9 @@ def build_claims(workdir: str, submission_path: str) -> tuple:
         raise PaperUnreadable("submission.json is not a JSON object")
     text = "\n".join(str(sub.get(k, "")) for k in ("abstract", "body_md"))
     cited_ids = {m.group(1) for m in ARXIV_ID.finditer(text)}
+    # A number in the reference list (a year, a volume, pages, a DOI) is the
+    # cited work's: the numbers checked are the paper's own text's.
+    text = "\n".join([str(sub.get("abstract", "")), without_reference_list(str(sub.get("body_md", "")))])
     entries, declared = result_entries(os.path.join(workdir, "runs"))
     vocab = declared | {n for _, names, _ in entries for n in names}
     by_dp: dict = {}

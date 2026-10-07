@@ -263,6 +263,9 @@ def parse_bib(path: Path) -> dict[str, str]:
             if raw is None:
                 q = re.match(r'\s*"([^"]*)"', body[am.end():])
                 raw = q.group(1) if q else ""
+            # Accents first: stripping the braces and backslashes of
+            # `Matou{\v{s}}ek` left "Matouvsek" in every citation of him.
+            raw = latex_accents(raw)
             authors = [a.strip() for a in re.split(r"\s+and\s+", raw) if a.strip()]
             if authors:
                 first = authors[0]
@@ -278,6 +281,194 @@ def parse_bib(path: Path) -> dict[str, str]:
         elif author:
             out[key] = author
     return out
+
+
+# ------------------------------------------------------- the reference list ----
+# Rendered from references.bib where the paper has its \bibliography (owner,
+# 2026-10-07): with the citations resolved to "Author et al., 2023" and no list
+# behind them, a reviewer could look up none of them -- and checking that a
+# cited work exists and says what the paper says is half of how a fabricated
+# paper is caught. Only the works the paper cites (or \nocite's), sorted by
+# first author and year, as natbib's author-year styles list them.
+REFS_MARK = "ACREFERENCELISTGOESHERE"
+REFS_AUTHORS_MAX = 10
+
+
+def parse_bib_entries(path: Path) -> dict[str, dict[str, str]]:
+    """key -> {"type": ..., field: value as written} for every entry."""
+    if not path.exists():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    field = re.compile(r"\s*([A-Za-z][\w\-:]*)\s*=\s*")
+    out: dict[str, dict[str, str]] = {}
+    for m in re.finditer(r"@(\w+)\s*[{(]\s*", text):
+        kind = m.group(1).lower()
+        if kind in ("comment", "preamble", "string"):
+            continue
+        km = re.compile(r"([^,\s{}()]+)\s*,").match(text, m.end())
+        if not km:
+            continue
+        entry = {"type": kind}
+        i = km.end()
+        while True:
+            fm = field.match(text, i)
+            if not fm:
+                break
+            j = fm.end()
+            if text.startswith("{", j):
+                value = read_group(text, j) or ""
+                j = end_of_group(text, j)
+            elif text.startswith('"', j):
+                k, depth = j + 1, 0
+                while k < len(text) and not (text[k] == '"' and depth == 0):
+                    depth += {"{": 1, "}": -1}.get(text[k], 0)
+                    k += 1
+                value, j = text[j + 1:k], k + 1
+            else:
+                vm = re.compile(r"[^,}\n]*").match(text, j)
+                value, j = vm.group(0).strip(), vm.end()
+            entry[fm.group(1).lower()] = re.sub(r"\s+", " ", value).strip()
+            cm = re.compile(r"\s*,").match(text, j)
+            if not cm:
+                break
+            i = cm.end()
+        out[km.group(1)] = entry
+    return out
+
+
+def split_top(s: str, sep: str) -> list[str]:
+    """`s` split on the regex `sep` outside braces: `{Barnes and Noble}` is one name."""
+    parts, depth, last = [], 0, 0
+    for m in re.finditer(r"[{}]|" + sep, s):
+        if m.group(0) == "{":
+            depth += 1
+        elif m.group(0) == "}":
+            depth -= 1
+        elif depth == 0:
+            parts.append(s[last:m.start()])
+            last = m.end()
+    parts.append(s[last:])
+    return [p.strip() for p in parts if p.strip()]
+
+
+def bib_text(value: str, macros: Macros) -> str:
+    r"""A field as text: accents, \emph and the rest of inline LaTeX, protective
+    braces gone -- with any math kept as written."""
+    out = []
+    for k, part in enumerate(re.split(r"(\$[^$]*\$)", value)):
+        if k % 2:
+            out.append(part)
+            continue
+        part = inline_to_md(part.replace("~", " "), macros)
+        # What a bibliography may still hold: a logo (\TeX), a command with
+        # no argument. Its name reads; a backslash would not.
+        part = re.sub(r"\\(LaTeXe|LaTeX|BibTeX|TeX)\b\s*(?:\{\})?", lambda m: {"LaTeXe": "LaTeX2e"}.get(m.group(1), m.group(1)), part)
+        out.append(re.sub(r"\\([A-Za-z]+)\s*", r"\1 ", part).replace("{", "").replace("}", ""))
+    return re.sub(r"\s+", " ", "".join(out)).strip()
+
+
+def bib_names(value: str, macros: Macros) -> list[tuple[str, str]]:
+    """(as printed, surname) for each author: "Last, First" printed "First Last"."""
+    names = []
+    for name in split_top(value, r"\s+and\s+"):
+        if name.lower() == "others":
+            names.append(("et al.", ""))
+            continue
+        parts = split_top(name, r",")
+        if len(parts) >= 2:
+            last, first = parts[0], parts[-1]
+            if len(parts) == 3:          # Last, Jr, First
+                last = f"{parts[0]}, {parts[1]}"
+            shown, surname = f"{first} {last}", parts[0]
+        else:
+            shown = name
+            words = split_top(name, r"\s+")
+            surname = words[-1] if words else name
+        names.append((bib_text(shown, macros), bib_text(surname, macros)))
+    return names
+
+
+def format_reference(e: dict[str, str], macros: Macros) -> str:
+    names = bib_names(e.get("author") or e.get("editor") or "", macros)
+    shown = [n for n, _ in names if n != "et al."]
+    more = len(shown) > REFS_AUTHORS_MAX or any(n == "et al." for n, _ in names)
+    shown = shown[:REFS_AUTHORS_MAX]
+    if not shown:
+        who = ""
+    elif len(shown) == 1:
+        who = shown[0]
+    else:
+        who = ", ".join(shown[:-1]) + (", " if more else " and ") + shown[-1]
+    if more and who:
+        who += " et al."
+    if e.get("editor") and not e.get("author") and who:
+        who += " (ed.)"
+    year = re.search(r"(?:19|20)\d{2}", e.get("year", "") or e.get("date", ""))
+    parts = [f"{who} ({year.group(0) if year else 'n.d.'})." if who else f"({year.group(0) if year else 'n.d.'})."]
+    title = bib_text(e.get("title", ""), macros).rstrip(".")
+    if title:
+        parts.append(title + ".")
+    kind = e.get("type", "misc")
+    venue = ""
+    if e.get("journal"):
+        venue = "*" + bib_text(e["journal"], macros) + "*"
+        if e.get("volume"):
+            venue += " " + bib_text(e["volume"], macros)
+            if e.get("number"):
+                venue += "(" + bib_text(e["number"], macros) + ")"
+    elif e.get("booktitle"):
+        venue = "In *" + bib_text(e["booktitle"], macros) + "*"
+    elif kind in ("phdthesis", "mastersthesis"):
+        venue = ("PhD thesis" if kind == "phdthesis" else "Master's thesis") + (
+            ", " + bib_text(e.get("school", ""), macros) if e.get("school") else "")
+    elif kind == "techreport":
+        venue = "Technical report" + (", " + bib_text(e.get("institution", ""), macros) if e.get("institution") else "")
+    elif e.get("howpublished") and not re.match(r"\s*\\url", e["howpublished"]):
+        venue = bib_text(e["howpublished"], macros)
+    if e.get("pages"):
+        venue += (", " if venue else "") + "pp. " + bib_text(e["pages"], macros).replace("--", "\u2013")
+    if e.get("publisher") and kind in ("book", "inbook", "incollection", "proceedings"):
+        venue += (". " if venue else "") + bib_text(e["publisher"], macros)
+    if venue:
+        parts.append(venue.rstrip(".") + ".")
+    ids = []
+    if e.get("doi"):
+        ids.append("doi:" + re.sub(r"^https?://(dx\.)?doi\.org/", "", e["doi"]))
+    eprint = e.get("eprint", "")
+    if eprint and (e.get("archiveprefix", "").lower() == "arxiv" or re.fullmatch(r"\d{4}\.\d{4,5}(v\d+)?", eprint)):
+        ids.append("arXiv:" + eprint)
+    if not ids and e.get("url"):
+        ids.append(e["url"])
+    if ids:
+        parts.append(" ".join(ids))
+    line = " ".join(p for p in parts if p)
+    # One line a work: a line break in a field would start a new paragraph.
+    return re.sub(r"\s+", " ", line).strip()
+
+
+def reference_list(keys: list[str], entries: dict[str, dict[str, str]], macros: Macros, compact: bool = False) -> str:
+    """The markdown "## References" section for `keys`, in order of first author and year."""
+    rows = []
+    for k in dict.fromkeys(keys):
+        e = entries.get(k)
+        if not e:
+            continue
+        names = bib_names(e.get("author") or e.get("editor") or "", macros)
+        surname = next((s for _, s in names if s), "")
+        fold = unicodedata.normalize("NFKD", surname).encode("ascii", "ignore").decode().lower()
+        year = re.search(r"(?:19|20)\d{2}", e.get("year", "")) or None
+        if compact:
+            first = names[0][0] if names else ""
+            short = dict(e, author=(first + (" and others" if len(names) > 1 else "")) if first else "")
+            for f in ("volume", "number", "pages", "publisher", "url"):
+                short.pop(f, None)
+            text = format_reference(short, macros)
+        else:
+            text = format_reference(e, macros)
+        rows.append(((fold, year.group(0) if year else "", text.lower()), "- " + text))
+    if not rows:
+        return ""
+    return "## References\n\n" + "\n".join(r for _, r in sorted(rows)) + "\n"
 
 
 # ---------------------------------------------------------------- tables ----
@@ -480,7 +671,11 @@ LETTERS = {"ss": "\u00df", "ae": "\u00e6", "AE": "\u00c6", "oe": "\u0153", "OE":
 
 
 def _accent(mark: str, letter: str) -> str:
-    if letter.startswith("\\"):
+    # `\'\i` is the dotless i so the accent sits where the dot was: accented,
+    # it is the plain letter's accented form (í), which NFC can compose.
+    if letter in ("\\i", "\\j"):
+        letter = letter[1]
+    elif letter.startswith("\\"):
         letter = LETTERS.get(letter[1:], letter[1:])
     return unicodedata.normalize("NFC", letter + ACCENTS[mark])
 
@@ -568,6 +763,7 @@ def strip_bare_braces(text: str) -> str:
     unhandled-construct report has to be able to name it."""
     out: list[str] = []
     stack: list[bool] = []          # per open brace: is it bare?
+    bare_close = -1                 # where the last bare group closed
     i, n = 0, len(text)
     while i < n:
         c = text[i]
@@ -579,11 +775,17 @@ def strip_bare_braces(text: str) -> str:
             k = i - 1
             while k >= 0 and (text[k].isalpha() or text[k] == "@"):
                 k -= 1
-            argument = (k >= 0 and k < i - 1 and text[k] == "\\") or (i > 0 and text[i - 1] in "}]")
+            # After a group that was itself bare -- `{\v{r}}{\'\i}` in a
+            # name, once composed -- a brace is not a second argument.
+            argument = (k >= 0 and k < i - 1 and text[k] == "\\") or (
+                i > 0 and text[i - 1] in "}]" and bare_close != i - 1)
             stack.append(not argument)
             out.append("{" if argument else "")
         elif c == "}" and stack:
-            out.append("" if stack.pop() else "}")
+            bare = stack.pop()
+            if bare:
+                bare_close = i
+            out.append("" if bare else "}")
         else:
             out.append(c)
         i += 1
@@ -903,6 +1105,8 @@ class Converter:
         self.figures: list[tuple[str, str]] = []   # (label, caption)
         self.figure_files: dict[str, str] = {}     # label -> PNG name (paper_figures.file_name)
         self.missing_cites: set[str] = set()
+        self.cited: list[str] = []          # every key cited, in order; "*" for \nocite{*}
+        self.references = 0                 # entries in the rendered reference list
         self.unknown_cmds: set[str] = set()
         self._math: list[str] = []
         self.thm_styles = theorem_styles(self.paper)
@@ -1055,6 +1259,7 @@ class Converter:
             for k in keys:
                 if k in self.bib:
                     resolved.append(self.bib[k])
+                    self.cited.append(k)
                 else:
                     self.missing_cites.add(k)
             if not resolved:
@@ -1083,6 +1288,12 @@ class Converter:
                 return inner
             return "(" + inner + ")"
 
+        def listed(m: re.Match) -> str:
+            # \nocite prints nothing and puts its works in the reference list.
+            self.cited.extend(k.strip() for k in m.group(1).split(",") if k.strip())
+            return ""
+
+        text = re.sub(r"\\nocite\s*\{([^}]*)\}", listed, text)
         return re.sub(
             r"\\((?:[cC]ite(?:p|t|alp|alt|author|year|yearpar|num)?)|parencite|textcite|autocite"
             r"|Parencite|Textcite|Autocite)\*?\s*(\[[^\]]*\])?\s*(\[[^\]]*\])?\s*\{([^}]*)\}",
@@ -1238,8 +1449,9 @@ class Converter:
           actually read**, with nothing reporting it.
 
         The abstract is cut because it is its own field on the platform and
-        would otherwise print twice. The bibliography is cut because citations
-        are already resolved inline to author-year.
+        would otherwise print twice. The bibliography keeps its place: the
+        reference list is rendered there from references.bib (reference_list),
+        so a reviewer can look up every work the paper cites.
         """
         main = strip_comments((self.paper / "main.tex").read_text(encoding="utf-8"))
         start = main.find(r"\maketitle")
@@ -1247,8 +1459,15 @@ class Converter:
         end = main.find(r"\end{document}")
         body = main[start : end if end > 0 else len(main)]
         body = re.sub(r"\\begin\{abstract\}.*?\\end\{abstract\}", "", body, flags=re.S)
-        body = re.sub(r"\\(bibliographystyle|bibliography|printbibliography)\s*(\{[^}]*\})?", "", body)
-        return body
+        return self.bibliography(body)
+
+    @staticmethod
+    def bibliography(text: str) -> str:
+        r"""`\bibliography{...}` and `\printbibliography` -> the list's mark;
+        `\bibliographystyle{...}` -> nothing."""
+        text = re.sub(r"\\bibliographystyle\s*\{[^}]*\}", "", text)
+        return re.sub(r"\\(?:bibliography\s*\{[^}]*\}|printbibliography\b(?:\s*\[[^\]]*\])?)",
+                      "\n\n" + REFS_MARK + "\n\n", text)
 
     def body(self, _unused: list[Path] | None = None) -> str:
         raw = self.document_body()
@@ -1279,6 +1498,8 @@ class Converter:
             raw = if_file_exists(raw, self.paper)
             raw = self.resolve_inputs(raw)
             raw = self.macros.expand(raw)
+        # A \bibliography in a section file arrives with the inputs.
+        raw = self.bibliography(raw)
         # Only now: the picture code itself, which no later pass should see.
         raw = drop_drawings(raw)
         raw = wrap_manual_floats(raw)
@@ -1321,8 +1542,27 @@ class Converter:
 
         text = inline_to_md_block(text, self.macros, self)
         text = self.restore_math(text)
+        text = self.with_references(text)
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip() + "\n"
+
+    def with_references(self, text: str, compact: bool = False) -> str:
+        """The reference list where the paper put its bibliography -- or, with
+        none, before the appendix, else at the end -- listing every work the
+        paper cites. `compact`: first author, year, title and venue only, for a
+        paper the full list would take past the platform's size."""
+        entries = parse_bib_entries(self.paper / "references.bib")
+        keys = list(entries) if "*" in self.cited else self.cited
+        refs = reference_list(keys, entries, self.macros, compact) if keys else ""
+        self.references = len(re.findall(r"^- ", refs, re.M))
+        first, rest = text.partition(REFS_MARK)[::2]
+        if REFS_MARK in text:
+            # One list, at the first place it was asked for.
+            return first + refs + rest.replace(REFS_MARK, "")
+        if not refs:
+            return text
+        m = re.search(r"^#{1,2}\s*(?:appendix|appendices|supplementary)\b", text, re.I | re.M)
+        return text[:m.start()] + refs + "\n" + text[m.start():] if m else text.rstrip() + "\n\n" + refs
 
 
 def inline_to_md_block(text: str, macros: Macros, conv: Converter) -> str:
@@ -1588,6 +1828,15 @@ def main() -> int:
             figure_problems.append(f"figure {label} could not be taken from the PDF ({got[7:]}) and has no data of its own"
                                    + (f" (paper/data/{stem}.dat would be another figure's too)" if own.exists() and shared else ""))
 
+    if len(body_md) > LIMITS["body_md"][1] and conv.references:
+        # The full list would take the paper past the platform's size: the
+        # works are still all listed, each by its first author, year, title
+        # and venue.
+        body_md = re.sub(r"\n## References\n\n(?:- [^\n]*\n?)+", "\n" + REFS_MARK + "\n", body_md, count=1)
+        body_md = re.sub(r"\n{3,}", "\n\n", conv.with_references(body_md, compact=True))
+        warn(f"the reference list is in its short form (first author, year, title, venue): "
+             f"in full it took body_md past {LIMITS['body_md'][1]:,} characters")
+
     sub = {
         "title": title,
         "abstract": abstract,
@@ -1612,6 +1861,7 @@ def main() -> int:
     print(f"  body_md          {len(body_md)} chars")
     print(f"  keywords         {len(keywords)}")
     print(f"  reproducibility  {len(repro)} chars")
+    print(f"  references       {conv.references} listed (every work it cites, from references.bib)")
     print(f"  figures          {len(made)} rendered {made if made else ''}")
     print(f"  platform pages   {pc['pages']} of {limit:g} (main text: {pc['words']} words, "
           f"{pc['figures']} figures, {pc['tables']} tables)")

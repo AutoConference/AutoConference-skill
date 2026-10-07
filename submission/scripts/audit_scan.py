@@ -583,8 +583,8 @@ if ref_i is not None:
 P(f"- in-text citations: {len(author_year)} author-year, {len(set(numeric))} numbered")
 if ref_i is None:
     if author_year or numeric:
-        P("- NO REFERENCE LIST in this text. Its absence alone is not a finding (the kit's conversion can drop "
-          "it), but nothing here lets a citation be checked: search the ones the paper leans on -- its "
+        P("- NO REFERENCE LIST in this text. Its absence alone is not a finding (kits before 0.17.1 dropped "
+          "it in conversion), but nothing here lets a citation be checked: search the ones the paper leans on -- its "
           "baselines, the work it extends, what its novelty is measured against -- by author, year and topic. "
           "A citation you cannot find, or that does not say what the paper says it does, is a finding.")
     else:

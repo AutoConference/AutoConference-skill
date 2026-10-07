@@ -54,6 +54,21 @@ CITE_BRACKET = re.compile(r"\[(\d{1,3})\]")
 CITE_DOI = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.I)
 CITE_AUTHORYEAR = re.compile(r"\(([A-Z][A-Za-z\-]+(?: et al\.?)?),? (?:19|20)\d{2}[a-z]?\)")
 
+# The reference list make_submission.py renders from references.bib (KIT-045):
+# its arXiv ids and DOIs are the works the text already cites, so counted
+# again they would double the paper's citations; its years, volumes and pages
+# are nobody's results. Checks that read the paper's own text read it without.
+REF_HEADING = re.compile(r"^(#{1,6})[ \t]*(?:\d+(?:\.\d+)*\.?[ \t]+)?(?:references|bibliography)[ \t]*$", re.I | re.M)
+
+
+def without_reference_list(md: str) -> str:
+    m = REF_HEADING.search(md)
+    if not m:
+        return md
+    nxt = re.compile(r"^#{1,%d}[ \t]" % len(m.group(1)), re.M).search(md, m.end())
+    return md[: m.start()] + (md[nxt.start():] if nxt else "")
+
+
 # Author-year citations as paper-writing renders them, counted one work at a
 # time. The pattern above takes a parenthesis holding exactly one citation, so
 # "(Bubeck et al., 2012; Agrawal et al., 2021)" counted as nothing, and nor did
@@ -337,10 +352,11 @@ def main() -> None:
             f"the id from the attach response rather than building the path.")
 
     # ---- citations ------------------------------------------------------
-    cites = set(m.group(0).lower() for m in CITE_ARXIV.finditer(hay))
-    cites |= set(m.group(0).lower() for m in CITE_DOI.finditer(hay))
-    cites |= author_year_cites(hay)
-    brackets = set(CITE_BRACKET.findall(hay))
+    own = abstract + "\n" + without_reference_list(body)
+    cites = set(m.group(0).lower() for m in CITE_ARXIV.finditer(own))
+    cites |= set(m.group(0).lower() for m in CITE_DOI.finditer(own))
+    cites |= author_year_cites(own)
+    brackets = set(CITE_BRACKET.findall(own))
     total_cites = len(cites) + len(brackets)
     chk("citations", total_cites >= shape["min_citations"],
         f"{total_cites} distinct citations ({len(cites)} identifier-style, "
@@ -354,8 +370,9 @@ def main() -> None:
             f"{stats['ci_method']} interval to be reported, not just point estimates.")
 
     # ---- length and sections -------------------------------------------
-    chk("body_length", len(body) >= shape["min_body_chars"],
-        f"body_md is {len(body)} chars, need >= {shape['min_body_chars']}")
+    prose = len(without_reference_list(body))
+    chk("body_length", prose >= shape["min_body_chars"],
+        f"body_md is {prose} chars without its reference list, need >= {shape['min_body_chars']}")
     heads = [h.lower() for h in re.findall(r"^#{1,4}\s*(?:\d+\.?\s*)?(.+)$", body, re.M)]
     missing = [s for s in shape["required_sections"]
                if not any(s in h for h in heads)]

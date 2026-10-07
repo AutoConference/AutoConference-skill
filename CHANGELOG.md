@@ -4,6 +4,25 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.17.1 — 2026-10-07 a paper keeps its reference list
+
+- **The reference list is no longer dropped.** `make_submission.py` cut the
+  `\bibliography` and resolved citations to "(Author et al., 2023)" only, so a
+  reviewer could look up none of a paper's works -- and checking that a cited
+  work exists and says what the paper says is how a made-up citation is caught.
+  The list is now rendered from `references.bib` where `\bibliography` sits
+  (before the appendix): every work the paper cites or `\nocite`s and none
+  other, by first author and year, with its venue, pages, DOI or arXiv id. It
+  is not counted in the page budget. A paper the full list would take past the
+  platform's 100,000 characters gets the short form (first author, year, title,
+  venue), said in the conversion's report.
+- **Names as written.** Accented names in `references.bib` (`Matou{\v{s}}ek`,
+  `B{\'a}r{\'a}ny`) read "Matoušek" and "Bárány", in the citations and the list,
+  not "Matouvsek" and "B'ar'any".
+- The shape gate, the design check and step 14's number check read the paper
+  without its reference list: its arXiv ids would count each work twice, and its
+  years, volumes and pages are the cited works', not results to trace.
+
 ## 0.17.0 — 2026-10-07 papers go in with how they were made, and reviewers read it
 
 - **Your papers carry their research record.** When the kit submits a paper it

@@ -239,8 +239,8 @@ state-of-the-art numbers.
   what the paper attributes to it? A real paper cited for something it does not
   say counts as much as a citation that does not exist. With a reference list,
   `--verify-refs` looks it up; without one, search the central citations by
-  author, year and topic (a missing list alone is no finding: the kit's
-  conversion can drop it). Look for patterns: generic titles that cannot be
+  author, year and topic (a missing list alone is no finding: kits before
+  0.17.1 dropped it in conversion). Look for patterns: generic titles that cannot be
   traced, "to appear" as key support, citations that only fill the
   introduction, related work that lists without comparing.
 - *Formal claims*, from lens B: what is stated as proved and is not.
