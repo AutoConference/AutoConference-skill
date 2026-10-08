@@ -107,7 +107,11 @@ NUM = (int, float)
 # A number worth checking: has a decimal point, or is at least three digits.
 # Below that the paper is saying "3 seeds" or "Table 2", and demanding those
 # appear in a results file produces noise that hides the real failures.
-MEANINGFUL = re.compile(r"(?<![\w.])(\d+\.\d+|\d{4,})(?![\w.])")
+# A number may end its sentence: "reaches 0.81." -- the old pattern refused a
+# following "." and so never checked the number a sentence ends on, which is
+# where a headline result usually sits (found 2026-10-08). A version, 1.2.3,
+# is still not one.
+MEANINGFUL = re.compile(r"(?<![\w.])(\d+\.\d+|\d{4,})(?![\w]|\.\d)")
 # The sign in front of a printed number, when there is one: ASCII hyphen, the
 # Unicode minus, or LaTeX's $-$. A difference table prints "-95.9 [-98.8,-92.6]";
 # read without its sign, -95.9 in the results never matched, and every
@@ -133,12 +137,35 @@ def without_reference_list(md: str) -> str:
     return md[: m.start()] + (md[nxt.start():] if nxt else "")
 
 
+def blank_reference_list(md: str) -> str:
+    """The reference list's characters as spaces (its line breaks kept): read
+    as without it, while every other character keeps its offset -- which is
+    how the evidence ledger says where each \\ev value stands."""
+    m = REF_HEADING.search(md)
+    if not m:
+        return md
+    nxt = re.compile(r"^#{1,%d}[ \t]" % len(m.group(1)), re.M).search(md, m.end())
+    end = nxt.start() if nxt else len(md)
+    return md[: m.start()] + re.sub(r"[^\n]", " ", md[m.start():end]) + md[end:]
+
+
 
 # The gates' own reports sit under runs/ beside the results, and list the very
 # numbers a paper printed -- the unsupported ones too, as strings. Read as
 # evidence, a second check passed every number the first had found unsupported
 # (found 2026-10-05). A report is never evidence.
 GATE_OUTPUTS = {"REPRO_GATE.json"}
+
+# What a paper's numbers may come from, and what a gate reads
+# (interfaces/evidence-interface.md): the experiments' declared outputs, the
+# aggregates and DESIGN.json, this machine -- summaries, each at most
+# EVIDENCE_FILE_MAX. Never the raw data beside them: a tester's 834 MB of
+# per-prediction JSONL, read whole, took WSL down (2026-10-08), and searched,
+# almost any number is somewhere among millions.
+EVIDENCE_FILE_MAX = 32 * 1024 * 1024
+RAW_FILE_MAX = 8 * 1024 * 1024       # a paper begun before the chain (§6): a raw file read for a number
+RAW_TOTAL_MAX = 128 * 1024 * 1024
+EVIDENCE_STATE = os.path.join(".aris", "evidence.json")
 
 # What a result number is called, so a paper's number is matched only to a
 # result of the metric it is printed as (a tester's report, 2026-10-05: a
@@ -169,11 +196,13 @@ def is_stat(key) -> bool:
     return all(t in STAT_WORDS or t.isdigit() for t in toks)
 
 
-def entries_of(doc, where: str, out: list, declared: set) -> None:
+def entries_of(doc, where: str, out: list, declared: set, keep=None) -> None:
     """Every leaf number in a parsed results file, with the names it is stored
     under: its own key; for a statistic (mean, ci_low, values...), the metric
     beside it or above it; and any metric a dict around it declares
-    ("metric": "accuracy", as every aggregate does)."""
+    ("metric": "accuracy", as every aggregate does). `keep`: only the numbers
+    it accepts are kept -- the ones that could be a number the paper prints --
+    so a check's memory grows with the paper, never with the results."""
     def walk(obj, path: str, parent: str, metrics: frozenset) -> None:
         if isinstance(obj, dict):
             own = {canon(obj[k]) for k in ("metric", "metric_display", "metric_name")
@@ -187,6 +216,8 @@ def entries_of(doc, where: str, out: list, declared: set) -> None:
                 if isinstance(v, (dict, list)):
                     walk(v, p, k, metrics)
                 elif isinstance(v, NUM) and not isinstance(v, bool):
+                    if keep is not None and not keep(v):
+                        continue
                     names = set(metrics)
                     if not is_stat(k):
                         names.add(canon(k))
@@ -201,6 +232,8 @@ def entries_of(doc, where: str, out: list, declared: set) -> None:
                 if isinstance(v, (dict, list)):
                     walk(v, p, parent, metrics)
                 elif isinstance(v, NUM) and not isinstance(v, bool):
+                    if keep is not None and not keep(v):
+                        continue
                     names = set(metrics)
                     if parent and not is_stat(parent):
                         names.add(canon(parent))
@@ -208,46 +241,51 @@ def entries_of(doc, where: str, out: list, declared: set) -> None:
     walk(doc, "", "", frozenset())
 
 
-def result_entries(runs: str) -> tuple:
-    """Every leaf number in every results file -- (value, names, where) -- so
-    a paper's ROUNDED figure can be matched against the full-precision value it
-    came from, and the metrics the results declare."""
-    out, declared = [], set()
-    # Walk the whole results tree, not two fixed directories: the sweep decides its
-    # own layout and CALIBRATION.json sitting one level up was being missed.
+def config_files() -> list:
+    """This machine's description and the quality bar: a paper legitimately
+    states hardware facts and configuration constants that are not results
+    (AC_MACHINE, default state/machine.json; interfaces/quality.example.json)."""
+    kit = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return [p for p in (os.environ.get("AC_MACHINE") or os.path.join(kit, "state", "machine.json"),
+                        os.path.join(kit, "interfaces", "quality.example.json")) if os.path.isfile(p)]
+
+
+def raw_matches(runs: str, keep, skip: set) -> tuple:
+    """A paper begun before the evidence chain (interfaces/evidence-interface.md
+    §6): the results files under runs/ that are not evidence, read for the
+    numbers `keep` accepts only. A file over RAW_FILE_MAX is not read, nor
+    anything past RAW_TOTAL_MAX in all: a raw file is data, and the paper's
+    numbers belong in its summaries. Returns (entries, declared, skipped)."""
+    out, declared, skipped, total = [], set(), [], 0
     for dirpath, dirnames, names in os.walk(runs):
-        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__" and not d.startswith("."))
         for name in sorted(names):
             if not name.endswith((".json", ".jsonl")) or name in GATE_OUTPUTS:
                 continue
             path = os.path.join(dirpath, name)
             where = os.path.relpath(path, os.path.dirname(os.path.abspath(runs)))
+            if where in skip or os.path.islink(path):
+                continue
             try:
-                if name.endswith(".jsonl"):
-                    with open(path, encoding="utf-8") as f:
+                size = os.path.getsize(path)
+            except OSError:
+                continue
+            if size > RAW_FILE_MAX or total + size > RAW_TOTAL_MAX:
+                skipped.append(f"{where} ({size / 1048576:.1f} MiB)")
+                continue
+            total += size
+            try:
+                with open(path, encoding="utf-8") as f:
+                    if name.endswith(".jsonl"):
                         for line in f:
                             line = line.strip()
                             if line:
-                                entries_of(json.loads(line), where, out, declared)
-                else:
-                    with open(path, encoding="utf-8") as f:
-                        entries_of(json.load(f), where, out, declared)
-            except (OSError, ValueError):
+                                entries_of(json.loads(line), where, out, declared, keep)
+                    else:
+                        entries_of(json.load(f), where, out, declared, keep)
+            except (OSError, ValueError, RecursionError):
                 continue
-    # A paper legitimately states hardware facts and configuration constants that
-    # are not experimental results: the machine description (AC_MACHINE, default
-    # state/machine.json) and the quality bar. Treat those as sources too rather
-    # than reporting them as unsupported claims. (These were looked for under a
-    # config/ directory that the reorganised kit no longer has.)
-    kit = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    for path in (os.environ.get("AC_MACHINE") or os.path.join(kit, "state", "machine.json"),
-                 os.path.join(kit, "interfaces", "quality.example.json")):
-        try:
-            with open(path, encoding="utf-8") as f:
-                entries_of(json.load(f), os.path.basename(path), out, set())
-        except (OSError, ValueError):
-            pass
-    return out, declared
+    return out, declared, skipped
 
 
 def rounds_to(value: str, pool: list) -> bool:
@@ -338,19 +376,269 @@ def read_with(text: str, start: int, end: int) -> str:
     return text[max(0, a):b]
 
 
-def build_claims(workdir: str, submission_path: str) -> tuple:
-    """Split the paper's printed numbers into (to check literally,
-    matched_by_rounding, printed_as_another_metric).
+def sha256_of(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
-    ARIS's evidence_check.py is the checker of record, but it searches literally,
-    so it cannot see that 0.067 came from 0.06666666666666667. Anything it would
-    miss for that reason is resolved here instead of being reported as a
-    fabricated number -- but only by a result of the metric the paper prints it
-    as. Where the paper names a metric the results declare (an aggregate's
-    `metric`) beside the number -- its sentence, or its table column and
-    caption -- a result of another metric that happens to round to it does not
-    count; the number is reported, with what the results do hold it as. Where
-    the paper names none, any result number will do, as before.
+
+def load_state(work: str) -> dict:
+    """What each gate verified, by hash (EVIDENCE_STATE): the declared outputs
+    step 10 re-made, the files the aggregation replay re-made, its script and
+    the manifest it ran from."""
+    try:
+        with open(os.path.join(work, EVIDENCE_STATE), encoding="utf-8") as f:
+            st = json.load(f)
+        return st if isinstance(st, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(work: str, section: str, value) -> None:
+    st = load_state(work)
+    st[section] = value
+    os.makedirs(os.path.join(work, ".aris"), exist_ok=True)
+    tmp = os.path.join(work, EVIDENCE_STATE + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(st, f, indent=1, sort_keys=True)
+    os.replace(tmp, os.path.join(work, EVIDENCE_STATE))
+
+
+def aggregation_of(man: dict):
+    """The manifest's `aggregation` entry, checked; None when it has none (a
+    paper begun before the evidence chain)."""
+    agg = man.get("aggregation")
+    if agg is None:
+        return None
+    if not isinstance(agg, dict) or not isinstance(agg.get("script"), str) or not agg["script"]:
+        raise ManifestError("`aggregation` must be {\"script\": \"aggregate.py\", \"outputs\": [\"aggregate__*.json\", "
+                            "\"DESIGN.json\"]}: the script that writes the aggregates from the declared outputs")
+    outs = agg.get("outputs")
+    if isinstance(outs, str):
+        outs = [outs]
+    if not isinstance(outs, list) or not outs or not all(isinstance(o, str) and o for o in outs):
+        raise ManifestError("`aggregation.outputs` names the files aggregate.py writes, relative to runs/ "
+                            "(\"aggregate__*.json\", \"DESIGN.json\")")
+    for o in outs + [agg["script"]]:
+        if not contained(o):
+            raise ManifestError(f"`aggregation`: {o} must be a path inside runs/")
+    return {**agg, "outputs": outs}
+
+
+def within(root: str, path: str) -> bool:
+    """`path` is a file under `root` once every link on the way is followed:
+    a linked folder under runs/ must not bring another tree's files in."""
+    r = os.path.realpath(root)
+    return os.path.realpath(path).startswith(r + os.sep)
+
+
+def aggregation_outputs(runs: str, agg: dict) -> list:
+    """The files under runs/ the aggregation writes, as runs/-relative paths."""
+    import glob
+    found = set()
+    for pat in agg["outputs"]:
+        for p in glob.glob(os.path.join(runs, pat)):
+            if os.path.isfile(p) and not os.path.islink(p) and within(runs, p):
+                found.add(os.path.relpath(p, runs))
+    return sorted(found)
+
+
+def evidence_files(work: str, runs: str, man: dict, aggregation: dict | None = None) -> tuple:
+    """What a paper's numbers may come from (interfaces/evidence-interface.md):
+    the declared outputs step 10 verified, the files the aggregation replay
+    verified, this machine's description. Returns (files, legacy, notes):
+    each file {rel, path, role}; `legacy` when the manifest has no aggregation
+    (a paper begun before the chain: its aggregates count, unverified); notes
+    say what was left out and why. `aggregation`: the hashes a replay made
+    just now, which step 14 trusts over what .aris/evidence.json says."""
+    state = load_state(work)
+    if aggregation is not None:
+        state = {**state, "aggregation": aggregation}
+    files, notes, seen = [], [], set()
+    try:
+        agg = aggregation_of(man)
+    except ManifestError as e:
+        agg, notes = None, notes + [str(e)]
+    legacy = agg is None
+
+    def add(rel: str, role: str, verified) -> None:
+        path = os.path.join(work, rel)
+        if rel in seen or not os.path.isfile(path) or os.path.islink(path):
+            return
+        if not within(runs, path):
+            notes.append(f"{rel} is not a file under runs/: not evidence")
+            return
+        seen.add(rel)
+        size = os.path.getsize(path)
+        if size > EVIDENCE_FILE_MAX:
+            notes.append(f"{rel} is {size / 1048576:.0f} MiB: not a summary, so not read as evidence "
+                         f"(interfaces/evidence-interface.md, link 1)")
+            return
+        if verified is not None and verified != sha256_of(path):
+            notes.append(f"{rel} changed after it was verified ({role}): not evidence until the gate verifies it again")
+            return
+        files.append({"rel": rel, "path": path, "role": role})
+
+    declared = state.get("declared") or {}
+    for e in man.get("experiments") or []:
+        if isinstance(e, dict) and isinstance(e.get("output"), str):
+            rel = "runs/" + e["output"].lstrip("/")
+            add(rel, "declared output", None if legacy and rel not in declared else declared.get(rel, ""))
+    if legacy:
+        for rel in sorted(glob_rel(runs, "aggregate__*.json")) + (["DESIGN.json"] if os.path.isfile(os.path.join(runs, "DESIGN.json")) else []):
+            add("runs/" + rel, "aggregate (unverified: begun before the evidence chain)", None)
+    else:
+        verified = (state.get("aggregation") or {}).get("outputs") or {}
+        for rel in aggregation_outputs(runs, agg):
+            add("runs/" + rel, "aggregation output", verified.get("runs/" + rel, ""))
+    for p in config_files():
+        rel = os.path.basename(p)
+        if rel not in seen:
+            seen.add(rel)
+            files.append({"rel": rel, "path": p, "role": "configuration"})
+    return files, legacy, notes
+
+
+def glob_rel(runs: str, pattern: str) -> list:
+    import glob
+    return [os.path.relpath(p, runs) for p in glob.glob(os.path.join(runs, pattern))
+            if os.path.isfile(p) and not os.path.islink(p) and within(runs, p)]
+
+
+def ev_format(value, places=None, pct: bool = False) -> str:
+    """What \\ev prints (interfaces/evidence-interface.md §2), as
+    paper-writing/scripts/make_paper_data.py writes it: an integer as it is;
+    any other number to `places` decimals -- 3 by default, 1 for a percentage
+    -- rounded half up from the number as the file writes it."""
+    from decimal import ROUND_HALF_UP, Decimal
+    d = Decimal(repr(value)) if isinstance(value, float) else Decimal(value)
+    if pct:
+        d *= 100
+        places = 1 if places is None else places
+    elif places is None:
+        if isinstance(value, int):
+            return str(value)
+        places = 3
+    q = d.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+    s = format(q, "f")
+    return s[1:] if s.startswith("-") and q == 0 else s
+
+
+def field_value(doc, field):
+    for k in field:
+        if isinstance(doc, dict) and isinstance(k, str) and k in doc:
+            doc = doc[k]
+        elif isinstance(doc, list) and isinstance(k, int) and not isinstance(k, bool) and 0 <= k < len(doc):
+            doc = doc[k]
+        else:
+            return None
+    return doc if isinstance(doc, NUM) and not isinstance(doc, bool) and math.isfinite(doc) else None
+
+
+LEDGER_MAX = 8 * 1024 * 1024
+EV_PLACES = {False: range(0, 5), True: range(0, 3)}    # what \\ev and \\evpct take
+
+
+def verify_ledger(work: str, files: list, parts: dict) -> tuple:
+    """The values the paper printed with \\ev (evidence-ledger.json), each
+    re-read from the file and field the converter recorded, and found in the
+    paper's text exactly where the ledger says it stands (`parts`: the
+    abstract and the body as submitted). Returns ({(part, offset): digits} for
+    each value so found -- a number typed by hand anywhere else is checked
+    like any other, even where it is equal to one -- and the entries that are
+    not sourced)."""
+    path = os.path.join(work, "evidence-ledger.json")
+    try:
+        if os.path.getsize(path) > LEDGER_MAX:
+            return {}, [{"value": None, "why": "evidence-ledger.json is larger than any paper's ledger: render the paper again (step 11c)"}]
+        with open(path, encoding="utf-8") as f:
+            ledger = json.load(f)
+    except FileNotFoundError:
+        return {}, []
+    except (OSError, ValueError, RecursionError) as e:
+        return {}, [{"value": None, "why": f"evidence-ledger.json cannot be read ({e.__class__.__name__}): render the paper again (step 11c)"}]
+    allowed = {f["rel"]: f for f in files}
+    docs: dict = {}
+    sourced, bad = {}, []
+    for e in (ledger.get("entries") if isinstance(ledger, dict) else None) or []:
+        if not isinstance(e, dict):
+            continue
+        printed, rel = str(e.get("printed", "")), str(e.get("file") or "")
+        key = str(e.get("key"))[:200]
+        claim = f"\\ev{{{key}}}"
+        rel = os.path.normpath(rel).replace("\\", "/") if rel else rel
+        if rel not in allowed:
+            bad.append({"value": printed, "claim": claim,
+                        "why": (f"{claim} came from {rel or 'no file'}, which is not evidence the gates verified"
+                                f" -- an aggregate, DESIGN.json or a declared output")})
+            continue
+        if rel not in docs:
+            try:
+                with open(allowed[rel]["path"], encoding="utf-8") as f:
+                    docs[rel] = json.load(f)
+            except (OSError, ValueError, RecursionError):
+                docs[rel] = None
+        field = e.get("field") if isinstance(e.get("field"), list) else []
+        value = field_value(docs[rel], field[:64])
+        places, pct = e.get("places", "d"), e.get("pct") is True
+        if places != "d" and not (isinstance(places, (int, str)) and str(places).isdigit() and int(places) in EV_PLACES[pct]):
+            bad.append({"value": printed, "claim": claim, "why": f"{claim}: {places!r} is not a precision \\ev prints"})
+            continue
+        try:
+            want = None if value is None else ev_format(value, None if places == "d" else int(places), pct)
+        except (ValueError, TypeError, ArithmeticError):
+            want = None
+        if want is None or want != printed:
+            bad.append({"value": printed, "claim": claim,
+                        "why": (f"{claim} printed {printed}, and {rel} holds "
+                                f"{'no such number' if value is None else repr(value)} there"
+                                f"{'' if value is None else ' (' + str(want) + ' at that precision)'}: "
+                                f"paper/data/evidence.tex is stale or was edited -- run make_paper_data.py --evidence again")})
+            continue
+        at = e.get("at")
+        if not isinstance(at, list) or not at:
+            bad.append({"value": printed, "claim": claim,
+                        "why": f"{claim}: the ledger does not say where it is printed -- render the paper again (step 11c)"})
+            continue
+        for spot in at[:10_000]:
+            ok = (isinstance(spot, list) and len(spot) == 2 and spot[0] in parts
+                  and isinstance(spot[1], int) and not isinstance(spot[1], bool) and spot[1] >= 0)
+            if ok:
+                ok = parts[spot[0]][spot[1]:spot[1] + len(printed)] == printed
+            if not ok:
+                bad.append({"value": printed, "claim": claim,
+                            "why": (f"{claim}: the paper does not print {printed} where the ledger says it does -- "
+                                    f"submission.json or evidence-ledger.json was changed after the paper was "
+                                    f"rendered: render it again (step 11c)")})
+                break
+            neg = printed.startswith("-")
+            sourced[(spot[0], spot[1] + (1 if neg else 0))] = printed[1:] if neg else printed
+    return sourced, bad
+
+
+def build_claims(workdir: str, submission_path: str, man: dict | None = None, aggregation: dict | None = None) -> tuple:
+    """Split the paper's printed numbers into (to check literally,
+    matched_by_rounding, printed_as_another_metric, the chain's own report).
+
+    Along the evidence chain (interfaces/evidence-interface.md): a value the
+    paper printed with \\ev is re-read from its file and field (the ledger).
+    Every other number is looked up in the evidence only -- the declared
+    outputs, the aggregates, DESIGN.json, this machine -- never the raw data
+    beside them, and only the numbers the paper prints are collected, so the
+    check's memory grows with the paper and never with the results.
+
+    ARIS's evidence_check.py is the checker of record for what is left, but it
+    searches literally, so it cannot see that 0.067 came from
+    0.06666666666666667. Anything it would miss for that reason is resolved
+    here instead of being reported as a fabricated number -- but only by a
+    result of the metric the paper prints it as. Where the paper names a metric
+    the results declare (an aggregate's `metric`) beside the number -- its
+    sentence, or its table column and caption -- a result of another metric
+    that happens to round to it does not count; the number is reported, with
+    what the results do hold it as. Where the paper names none, any evidence
+    number will do.
     """
     try:
         with open(submission_path, encoding="utf-8") as f:
@@ -361,17 +649,74 @@ def build_claims(workdir: str, submission_path: str) -> tuple:
         raise PaperUnreadable(f"submission.json cannot be read ({e})")
     if not isinstance(sub, dict):
         raise PaperUnreadable("submission.json is not a JSON object")
-    text = "\n".join(str(sub.get(k, "")) for k in ("abstract", "body_md"))
-    cited_ids = {m.group(1) for m in ARXIV_ID.finditer(text)}
+    abstract, body = str(sub.get("abstract", "")), str(sub.get("body_md", ""))
+    cited_ids = {m.group(1) for m in ARXIV_ID.finditer(abstract + "\n" + body)}
     # A number in the reference list (a year, a volume, pages, a DOI) is the
-    # cited work's: the numbers checked are the paper's own text's.
-    text = "\n".join([str(sub.get("abstract", "")), without_reference_list(str(sub.get("body_md", "")))])
-    entries, declared = result_entries(os.path.join(workdir, "runs"))
+    # cited work's: the numbers checked are the paper's own text's. Blanked,
+    # not cut, so each character keeps the offset the ledger knows it by.
+    text = abstract + "\n" + blank_reference_list(body)
+    runs = os.path.join(workdir, "runs")
+    files, legacy, notes = evidence_files(workdir, runs, man or {}, aggregation)
+    sourced, ledger_bad = verify_ledger(workdir, files, {"abstract": abstract, "body": body})
+
+    def where(pos: int) -> tuple:
+        return ("abstract", pos) if pos < len(abstract) else ("body", pos - len(abstract) - 1)
+
+    spans = [m.span() for rx in CITATION_SPANS for m in rx.finditer(text)]
+
+    def in_citation(pos: int) -> bool:
+        return any(a <= pos < b for a, b in spans)
+
+    # The numbers to look for, before anything is read: each printed number,
+    # as printed, at the precision it was printed with.
+    found = []
+    for m in MEANINGFUL.finditer(text):
+        v = m.group(1)
+        if v in cited_ids:
+            continue
+        if YEAR.fullmatch(v) and in_citation(m.start()):
+            continue    # this occurrence is a cited work's year; others still count
+        neg = bool(SIGN_BEFORE.search(text[max(0, m.start() - 3):m.start()]))
+        key = ("-" if neg else "") + v
+        if sourced.get(where(m.start())) == v:
+            continue    # printed with \ev just here, and re-read from its field
+        found.append((m, v, neg, key))
+    wanted: dict = {}
+    for _, v, _, _ in found:
+        try:
+            want = float(v)
+        except ValueError:
+            continue
+        dp = len(v.split(".")[1]) if "." in v else 0
+        wanted.setdefault(dp, set()).update({round(want, dp), round(-want, dp)})
+
+    def keep(n) -> bool:
+        try:
+            f = float(n)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(f):
+            return False
+        return any(round(f, dp) in vals for dp, vals in wanted.items())
+
+    entries, declared = [], set()
+    for ev in files:
+        try:
+            with open(ev["path"], encoding="utf-8") as f:
+                if ev["path"].endswith(".jsonl"):
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            entries_of(json.loads(line), ev["rel"], entries, declared, keep)
+                else:
+                    entries_of(json.load(f), ev["rel"], entries, declared, keep)
+        except (OSError, ValueError, RecursionError) as e:
+            notes.append(f"{ev['rel']} could not be read ({e.__class__.__name__}): not evidence")
     vocab = declared | {n for _, names, _ in entries for n in names}
     by_dp: dict = {}
 
     def candidates(value: str) -> list:
-        """Results that round to `value` at the precision it is printed."""
+        """Evidence numbers that round to `value` at the precision it is printed."""
         try:
             want = float(value)
         except ValueError:
@@ -384,25 +729,11 @@ def build_claims(workdir: str, submission_path: str) -> tuple:
             by_dp[dp] = idx
         return by_dp[dp].get(round(want, dp), [])
 
-    spans = [m.span() for rx in CITATION_SPANS for m in rx.finditer(text)]
-
-    def in_citation(pos: int) -> bool:
-        return any(a <= pos < b for a, b in spans)
-
     # Each place a number is printed is read on its own: the same value may be
     # a cited work's in one sentence, an accuracy in another, a loss in a third.
     claims, rounded, other_metric = [], [], []
     literal, plain, judged = set(), set(), set()
-    for m in MEANINGFUL.finditer(text):
-        v = m.group(1)
-        if v in cited_ids:
-            continue
-        if YEAR.fullmatch(v) and in_citation(m.start()):
-            continue    # this occurrence is a cited work's year; others still count
-        # A signed number must match with its sign; an unsigned one may be a
-        # magnitude ("regret falls by 95.9"), so either sign will do.
-        neg = bool(SIGN_BEFORE.search(text[max(0, m.start() - 3):m.start()]))
-        key = ("-" if neg else "") + v
+    for m, v, neg, key in found:
         ctx = text[max(0, m.start() - 70):m.end() + 30].replace("\n", " ")
         # A number inside a sentence that cites another paper is that paper's
         # number, not a claim about this experiment.
@@ -423,7 +754,7 @@ def build_claims(workdir: str, submission_path: str) -> tuple:
         if not named:
             if key not in plain:
                 plain.add(key)
-                rounded.append({"value": key, "matched": "rounded_to_a_result_number"})
+                rounded.append({"value": key, "matched": "rounded_to_a_result_number", "found_at": cands[0][2]})
             continue
         here = {n for n in vocab if named_in(n, words)}
         if (key, frozenset(here)) in judged:
@@ -436,32 +767,224 @@ def build_claims(workdir: str, submission_path: str) -> tuple:
             continue
         held = sorted({n for e in cands for n in e[1]})
         other_metric.append({"value": key, "claim": ctx, "status": "other_metric",
-                             "why": (f"printed as {' / '.join(sorted(named))}; the results hold {key} only as "
+                             "why": (f"printed as {' / '.join(sorted(named))}; the evidence holds {key} only as "
                                      f"{', '.join(held[:6])} ({', '.join(e[2] for e in cands[:3])})")})
     rounded = list({(r["value"], r["matched"]): r for r in rounded}.values())
-    return claims, rounded, other_metric
+
+    # A paper begun before the chain: what the evidence does not carry may be
+    # in a small raw results file, as the old check allowed -- said, not failed.
+    in_raw, skipped = [], []
+    if legacy and claims:
+        wanted.clear()
+        for c in claims:
+            dp = len(c["value"].split(".")[1]) if "." in c["value"] else 0
+            wanted.setdefault(dp, set()).update({round(float(c["value"]), dp), round(-float(c["value"]), dp)})
+        raw, _, skipped = raw_matches(runs, keep, {f["rel"] for f in files})
+        rest = []
+        for c in claims:
+            dp = len(c["value"].split(".")[1]) if "." in c["value"] else 0
+            hit = next((e for e in raw if round(float(e[0]), dp) == round(float(c["value"]), dp)), None)
+            if hit:
+                in_raw.append({"value": c["value"], "found_at": hit[2],
+                               "why": "found only in a raw results file: the evidence (aggregates, DESIGN.json, "
+                                      "declared outputs) does not carry it -- allowed for a paper begun before the "
+                                      "evidence chain, not after"})
+            else:
+                rest.append(c)
+        claims = rest
+
+    chain = {
+        "mode": "legacy (begun before the evidence chain)" if legacy else "evidence chain",
+        "evidence_files": [{"file": f["rel"], "role": f["role"]} for f in files],
+        "printed_with_ev": len(sourced),
+        "ledger_problems": ledger_bad,
+        "notes": notes,
+        "found_only_in_raw_files": in_raw,
+        "raw_files_not_read": skipped[:20],
+        "_files": files,
+    }
+    return claims, rounded, other_metric, chain
 
 
-def evidence_root(workdir: str) -> str:
-    """runs/ as the literal search may read it: every results file but the
-    gates' own reports (GATE_OUTPUTS), linked into .aris/evidence-root/."""
+def evidence_root(workdir: str, files: list) -> str:
+    """The evidence as the literal search may read it, linked into
+    .aris/evidence-root/ under the same relative paths: the declared outputs,
+    the aggregates, DESIGN.json -- never the raw data beside them."""
     root = os.path.join(workdir, ".aris", "evidence-root")
     shutil.rmtree(root, ignore_errors=True)
-    runs = os.path.join(workdir, "runs")
-    for dirpath, dirnames, names in os.walk(runs):
-        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
-        for name in names:
-            if not name.endswith((".json", ".jsonl")) or name in GATE_OUTPUTS:
-                continue
-            src = os.path.join(dirpath, name)
-            dst = os.path.join(root, "runs", os.path.relpath(src, runs))
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            try:
-                os.link(src, dst)
-            except OSError:
-                shutil.copy2(src, dst)
+    for f in files:
+        if not f["rel"].startswith("runs/"):
+            continue
+        dst = os.path.join(root, f["rel"])
+        if not os.path.abspath(dst).startswith(os.path.abspath(root) + os.sep):
+            continue
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        try:
+            os.link(f["path"], dst)
+        except OSError:
+            shutil.copy2(f["path"], dst)
     os.makedirs(os.path.join(root, "runs"), exist_ok=True)
     return root
+
+
+def json_leaves(obj, prefix=""):
+    """Every leaf of a JSON document -- numbers, strings, booleans, nulls --
+    by dotted path: an aggregate is compared whole, its labels too."""
+    out = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            out.update(json_leaves(v, f"{prefix}.{k}" if prefix else str(k)))
+    elif isinstance(obj, list):
+        if not obj:
+            out[prefix + "[]"] = "[]"
+        for i, v in enumerate(obj):
+            out.update(json_leaves(v, f"{prefix}[{i}]"))
+    else:
+        out[prefix] = obj
+    return out
+
+
+CODE_EXT = (".py", ".sh", ".r", ".R", ".jl", ".m", ".c", ".cc", ".cpp", ".h", ".hpp", ".cu", ".js", ".ts",
+            ".toml", ".yaml", ".yml", ".cfg", ".ini", ".txt", ".lock")
+
+
+def replay_aggregation(work: str, runs: str, man: dict, python_cmd: list) -> dict:
+    """Link 2 of the chain: run aggregate.py again in a clean copy that holds
+    the code and the experiments' declared outputs -- as step 10 verified
+    them -- and nothing else from runs/, and compare every file it writes with
+    the one there, every leaf. An aggregate cannot carry a number its inputs
+    do not produce, and none is made by hand."""
+    base = {"script": "(aggregation)", "output": "aggregate__*.json, DESIGN.json"}
+    try:
+        agg = aggregation_of(man)
+    except ManifestError as e:
+        return {**base, "verdict": "FAIL", "failure": "manifest", "why": str(e),
+                "hint": "fix the manifest's `aggregation` entry (interfaces/evidence-interface.md §1)."}
+    if agg is None:
+        return {**base, "verdict": "FAIL", "failure": "no_aggregation",
+                "why": "the manifest names no `aggregation`: the aggregates were not made by a script the gate can re-run",
+                "hint": ("write runs/aggregate.py, which writes every runs/aggregate__*.json and runs/DESIGN.json from "
+                         "the declared outputs, run it, and add to runs/REPLAY_MANIFEST.json: \"aggregation\": "
+                         "{\"script\": \"aggregate.py\", \"outputs\": [\"aggregate__*.json\", \"DESIGN.json\"]}.")}
+    base["script"] = agg["script"]
+    outs = aggregation_outputs(runs, agg)
+    if not outs:
+        return {**base, "verdict": "FAIL", "failure": "no_recorded_output",
+                "why": f"no file under runs/ matches {', '.join(agg['outputs'])}",
+                "hint": "run aggregate.py, so the files it writes are there to compare with."}
+    # Every aggregate, and DESIGN.json, is the script's: one written by hand
+    # beside it would be evidence nobody re-made.
+    stray = sorted({r for r in glob_rel(runs, "aggregate__*.json") + (["DESIGN.json"] if os.path.isfile(os.path.join(runs, "DESIGN.json")) else [])} - set(outs))
+    if stray:
+        return {**base, "verdict": "FAIL", "failure": "unmade",
+                "why": f"{', '.join(stray[:5])} {'is' if len(stray) == 1 else 'are'} not among what aggregate.py writes",
+                "hint": "every aggregate and DESIGN.json comes from aggregate.py: list it in `aggregation.outputs` and write it there."}
+    declared = {"runs/" + e["output"].lstrip("/") for e in man.get("experiments") or [] if isinstance(e, dict) and isinstance(e.get("output"), str)}
+    verified = load_state(work).get("declared") or {}
+    for rel in sorted(declared):
+        path = os.path.join(work, rel)
+        if rel in verified and os.path.isfile(path) and sha256_of(path) != verified[rel]:
+            return {**base, "verdict": "FAIL", "failure": "evidence_changed",
+                    "why": f"{rel} changed after step 10 verified it",
+                    "hint": "a declared output is the experiment's, as re-made: run step 10 again rather than edit it."}
+    problems = []
+    for rel in outs:
+        if not rel.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(runs, rel), encoding="utf-8") as f:
+                doc = json.load(f)
+        except (OSError, ValueError):
+            continue
+        for inp in (doc.get("primary_inputs") or []) if isinstance(doc, dict) else []:
+            p = os.path.normpath(str(inp)).replace("\\", "/")
+            p = p if p.startswith("runs/") else "runs/" + p
+            if p not in declared:
+                problems.append({"kind": "undeclared_input", "key": f"{rel}: primary_inputs", "value": str(inp)})
+    if problems:
+        return {**base, "verdict": "FAIL", "failure": "undeclared_input", "problems": problems[:20],
+                "why": f"an aggregate combines {problems[0]['value']}, which no experiment declares as its output",
+                "hint": ("aggregate from the experiments' declared outputs -- the files step 10 re-made -- and list "
+                         "those in primary_inputs. Raw data beside them (predictions, logits) is summarised by the "
+                         "experiment into its declared output.")}
+
+    tmp = tempfile.mkdtemp(prefix="reprogate-agg-")
+    try:
+        copy_workspace(work, tmp)
+        # runs/ in the copy: its code only, then the declared outputs as verified.
+        for dirpath, dirnames, names in os.walk(os.path.join(tmp, "runs")):
+            for name in names:
+                if not name.endswith(CODE_EXT) or name in MANIFEST_NAMES:
+                    os.remove(os.path.join(dirpath, name))
+        for rel in sorted(declared):
+            src = os.path.join(work, rel)
+            if os.path.isfile(src):
+                dst = os.path.join(tmp, rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
+        man_src = next((os.path.join(runs, n) for n in MANIFEST_NAMES if os.path.exists(os.path.join(runs, n))), None)
+        if man_src:
+            shutil.copy2(man_src, os.path.join(tmp, "runs", os.path.basename(man_src)))
+        script_abs = script_path(os.path.join(tmp, "runs"), agg["script"])
+        if not os.path.isfile(script_abs):
+            return {**base, "verdict": "FAIL", "failure": "crashed", "why": f"there is no {agg['script']}",
+                    "hint": "aggregate.py sits in runs/ (or the path the manifest names), with the experiments' code."}
+        cmd = list(python_cmd) + [script_abs] + [str(x) for x in agg.get("args", [])]
+        t0 = time.time()
+        try:
+            proc = subprocess.run(cmd, cwd=os.path.dirname(script_abs) or tmp, env=dict(os.environ, **(man.get("env") or {})),
+                                  capture_output=True, text=True, timeout=agg.get("timeout_s", 900))
+        except subprocess.TimeoutExpired:
+            return {**base, "verdict": "FAIL", "failure": "timeout", "why": f"timed out after {agg.get('timeout_s', 900)}s",
+                    "hint": "aggregation reads summaries; a longer timeout_s only if it truly takes that long."}
+        dt = time.time() - t0
+        if proc.returncode != 0:
+            d = diagnose(proc.stderr, {}, "aggregate__*.json", python_cmd)
+            return {**base, "verdict": "FAIL", "failure": "crashed", "why": f"exit {proc.returncode}" + (f": {d['last']}" if d["last"] else ""),
+                    "cause": d["cause"], "hint": ("it runs with only the code and the declared outputs under runs/: "
+                                                  "it reads nothing else. " + d["hint"]),
+                    "stderr_tail": (proc.stderr or "")[-1200:]}
+        made = aggregation_outputs(os.path.join(tmp, "runs"), agg)
+        for rel in sorted(set(outs) - set(made)):
+            problems.append({"kind": "vanished", "keys": [rel]})
+        for rel in sorted(set(made) - set(outs)):
+            problems.append({"kind": "appeared", "keys": [rel]})
+        for rel in sorted(set(outs) & set(made)):
+            try:
+                with open(os.path.join(runs, rel), encoding="utf-8") as f:
+                    old = json_leaves(json.load(f))
+                with open(os.path.join(tmp, "runs", rel), encoding="utf-8") as f:
+                    new = json_leaves(json.load(f))
+            except (OSError, ValueError) as e:
+                problems.append({"kind": "unreadable", "key": rel, "value": str(e)})
+                continue
+            for k in sorted(set(old) - set(new))[:10]:
+                problems.append({"kind": "vanished", "keys": [f"{rel}: {k}"]})
+            for k in sorted(set(new) - set(old))[:10]:
+                problems.append({"kind": "appeared", "keys": [f"{rel}: {k}"]})
+            for k in sorted(set(old) & set(new)):
+                a, b = old[k], new[k]
+                if isinstance(a, NUM) and isinstance(b, NUM) and not isinstance(a, bool) and not isinstance(b, bool):
+                    if not same_number(a, b)[0]:
+                        problems.append({"kind": "exact_mismatch", "key": f"{rel}: {k}", "recorded": a, "rerun": b})
+                elif a != b:
+                    problems.append({"kind": "exact_mismatch", "key": f"{rel}: {k}", "recorded": a, "rerun": b})
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    entry = {**base, "verdict": "PASS" if not problems else "FAIL", "rerun_wall_s": round(dt, 1),
+             "checked": {"files": len(outs)}, "problems": problems[:40]}
+    if problems:
+        entry["failure"] = "aggregate_mismatch"
+        entry["hint"] = ("what aggregate.py writes from the declared outputs is not what is under runs/: an aggregate "
+                         "edited by hand, or made from other files. Run aggregate.py and let it write them.")
+    else:
+        verified_now = {"runs/" + rel: sha256_of(os.path.join(runs, rel)) for rel in outs}
+        save_state(work, "aggregation", {
+            "outputs": verified_now,
+            "script": sha256_of(script_path(runs, agg["script"])) if os.path.isfile(script_path(runs, agg["script"])) else None,
+        })
+        entry["_outputs"] = verified_now
+    return entry
 
 
 def flatten(obj, prefix=""):
@@ -566,7 +1089,8 @@ NO_FILE = re.compile(r"No such file or directory: '([^']+)'")
 # What a failure is. A `mismatch` is a finding about the experiment; the rest
 # kept the gate from comparing at all, and the agent can repair them.
 REPAIRABLE = {"crashed", "timeout", "no_output", "no_recorded_output", "blocked",
-              "unclassified", "manifest"}
+              "unclassified", "manifest", "output_too_large", "no_aggregation", "unmade",
+              "undeclared_input", "evidence_changed", "aggregate_mismatch"}
 FAILURE_WORDS = {
     "crashed": "crashed before it finished",
     "timeout": "ran out of its time",
@@ -578,6 +1102,12 @@ FAILURE_WORDS = {
     "mismatch": "came out different",
     "removed": "was taken out of the manifest after it failed",
     "unsupported_claim": "the paper prints numbers no result holds",
+    "output_too_large": "writes an output too large to be a run's summary",
+    "no_aggregation": "has no aggregation script to re-run",
+    "unmade": "has an aggregate aggregate.py does not write",
+    "undeclared_input": "aggregates from a file no experiment declares",
+    "evidence_changed": "reads evidence that changed after it was verified",
+    "aggregate_mismatch": "writes aggregates different from the ones under runs/",
 }
 
 
@@ -648,14 +1178,25 @@ def diagnose(stderr: str, outputs: dict, own: str, python_cmd: list) -> dict:
 
 
 def copy_workspace(work: str, tmp: str) -> None:
+    runs_dir = os.path.join(work, "runs")
     for dirpath, dirnames, filenames in os.walk(work):
         dirnames[:] = [d for d in dirnames if not skipped_dir(dirpath, d)]
         rel = os.path.relpath(dirpath, work)
         dst = tmp if rel == "." else os.path.join(tmp, rel)
         os.makedirs(dst, exist_ok=True)
+        in_runs = os.path.abspath(dirpath).startswith(os.path.abspath(runs_dir))
         for fn in filenames:
             if fn.endswith(".json.tmp") or fn.endswith(".pyc"):
                 continue
+            # A large recorded file under runs/ (per-instance data) never feeds
+            # a re-run -- runs/results/ is left out for the same reason -- and
+            # copying it for every entry is what made a big study's gate crawl.
+            if in_runs and not fn.endswith(CODE_EXT):
+                try:
+                    if os.path.getsize(os.path.join(dirpath, fn)) > EVIDENCE_FILE_MAX:
+                        continue
+                except OSError:
+                    continue
             try:
                 shutil.copy2(os.path.join(dirpath, fn), os.path.join(dst, fn))
             except OSError:
@@ -681,6 +1222,14 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, deps: dict | None
     out_rel = exp["output"]
     base = {"script": script, "output": out_rel}
     recorded_path = os.path.join(runs, out_rel)
+    if os.path.isfile(recorded_path) and os.path.getsize(recorded_path) > EVIDENCE_FILE_MAX:
+        mib = os.path.getsize(recorded_path) / 1048576
+        return {**base, "verdict": "FAIL", "failure": "output_too_large",
+                "why": f"its output {out_rel} is {mib:.0f} MiB, past the {EVIDENCE_FILE_MAX >> 20} MiB a run's summary may take",
+                "hint": ("the declared output is the run's summary -- its metrics and settings, every number compared "
+                         "on a re-run. Write per-instance data (predictions, logits, labels) to another file beside it, "
+                         "not declared; the summary carries what is computed from it "
+                         "(interfaces/evidence-interface.md, link 1).")}, None
     try:
         with open(recorded_path, encoding="utf-8") as f:
             recorded = json.load(f)
@@ -824,11 +1373,23 @@ def after_of(exp: dict) -> list:
     return [a] if isinstance(a, str) else a
 
 
+def contained(p: str) -> bool:
+    """A manifest path names a file of this workspace: relative, and never
+    climbing out of it ("..")."""
+    q = p.replace("\\", "/")
+    return bool(q) and not q.startswith("/") and not re.match(r"^[A-Za-z]:", q) and ".." not in q.split("/")
+
+
 def check_entries(exps: list) -> None:
     for i, e in enumerate(exps):
         if not isinstance(e, dict) or not isinstance(e.get("script"), str) or not e["script"] \
                 or not isinstance(e.get("output"), str) or not e["output"]:
             raise ManifestError(f"entry {i + 1} of `experiments` needs a \"script\" and an \"output\", both strings.")
+        # An output outside runs/ would be read as evidence from anywhere on
+        # this machine, and a script outside the workspace is not this paper's.
+        if not contained(e["output"]) or not contained(e["script"]):
+            raise ManifestError(f"{e['script']}: \"script\" and \"output\" are paths inside the workspace, the "
+                                f"output relative to runs/ -- not absolute, and with no \"..\".")
         a = after_of(e)
         if not isinstance(a, list) or not all(isinstance(x, str) and x for x in a):
             raise ManifestError(f"{e['script']}: \"after\" is a list of the entries whose output it reads, "
@@ -1138,6 +1699,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("workdir", help="work/<cycle>  (must contain runs/REPLAY_MANIFEST.json)")
     ap.add_argument("--only", help="run just this script (and the entries it runs after)")
+    ap.add_argument("--aggregation", action="store_true",
+                    help="re-run the manifest's `aggregation` (aggregate.py) in a clean copy holding the code and the "
+                         "declared outputs only, and compare every file it writes (link 2 of the evidence chain)")
     ap.add_argument("--claims-only", action="store_true",
                     help="skip the re-run; only check that the paper's cited "
                          "numbers appear in runs/results/ (needs submission.json)")
@@ -1208,6 +1772,32 @@ def main() -> None:
     if a.only and not any(e["script"] == a.only for e in exps):
         print(f"repro-gate: no entry runs {a.only}", file=sys.stderr)
         sys.exit(2)
+    if a.aggregation:
+        entry = replay_aggregation(work, runs, man, interpreter(man, work))
+        entry.pop("_outputs", None)
+        out = os.path.join(runs, "REPRO_GATE.json")
+        try:
+            with open(out, encoding="utf-8") as f:
+                prior = json.load(f)
+        except (OSError, ValueError):
+            prior = {}
+        prior = prior if isinstance(prior, dict) else {}
+        exps_prior = [e for e in (prior.get("experiments") or []) if isinstance(e, dict)
+                      and e.get("script") not in ("(paper)", "(aggregation)") and not e.get("aggregation")]
+        entry["aggregation"] = True
+        result = {**prior, "experiments": exps_prior + [entry]}
+        replay_ok = all(e.get("verdict") == "PASS" for e in exps_prior)
+        result["verdict"] = "PASS" if entry["verdict"] == "PASS" and replay_ok else "FAIL"
+        result["failures"] = failures_of(result["experiments"])
+        result["generated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        result["mode"] = "aggregation"
+        write_report(runs, result)
+        print(json.dumps(entry, indent=2)[:3000])
+        if entry["verdict"] != "PASS":
+            print()
+            print(summarize(result, markdown=False)[0])
+        print(f"\nrepro-gate: aggregation {entry['verdict']} -> {out}")
+        sys.exit(0 if entry["verdict"] == "PASS" else 1)
     report, allok, mode, retried = [], True, "full", None
     if a.claims_only:
         print("repro-gate: --claims-only, skipping the execution replay")
@@ -1280,6 +1870,12 @@ def main() -> None:
             os.makedirs(os.path.join(work, ".aris"), exist_ok=True)
             with open(os.path.join(work, STATE), "w", encoding="utf-8") as f:
                 json.dump({**now, "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}, f, indent=1)
+            # Link 1 of the evidence chain: the declared outputs this replay
+            # re-made, by hash -- evidence only while they stay as verified.
+            save_state(work, "declared", {
+                "runs/" + e["output"].lstrip("/"): sha256_of(os.path.join(runs, e["output"]))
+                for e in report if e.get("verdict") == "PASS" and isinstance(e.get("output"), str)
+                and os.path.isfile(os.path.join(runs, e["output"]))})
 
     # Second half of the job, and ARIS already owns it: do the numbers the paper
     # prints actually appear in the results files? `evidence_check.py` answers
@@ -1296,18 +1892,44 @@ def main() -> None:
     unchecked: list = []
     sub_path = os.path.join(a.workdir, "submission.json")
     if os.path.exists(sub_path) or a.claims_only:
+        chain: dict = {"_files": []}
+        # Link 2 again, now (interfaces/evidence-interface.md): what this check
+        # reads is what the declared outputs make today -- not what
+        # .aris/evidence.json says was made, which is a file like any other.
+        fresh = None
         try:
-            claims, rounded, other_metric = build_claims(a.workdir, sub_path)
+            agg_spec = aggregation_of(man)
+        except ManifestError:
+            agg_spec = None    # build_claims says why in its notes
+        if agg_spec is not None:
+            try:
+                agg_entry = replay_aggregation(work, runs, man, interpreter(man, work) if a.claims_only else python_cmd)
+            except ManifestError as e:
+                agg_entry = {"script": agg_spec["script"], "output": "aggregate__*.json, DESIGN.json", "verdict": "FAIL",
+                             "failure": "manifest", "why": str(e)}
+            fresh = {"outputs": agg_entry.pop("_outputs", None) or {}}
+            report.append({**agg_entry, "aggregation": True})
+            if agg_entry.get("verdict") != "PASS":
+                allok = False
+                print(f"repro-gate: the aggregates are not what aggregate.py makes from the results: {agg_entry.get('why')}")
+        try:
+            claims, rounded, other_metric, chain = build_claims(a.workdir, sub_path, man, fresh)
         except PaperUnreadable as e:
             claims, rounded, other_metric = [], [], []
             unchecked.append({"value": None, "status": "not_checked", "detail": str(e)})
             print(f"repro-gate: {e}")
-        print(f"repro-gate: {len(rounded)} paper figure(s) matched a result number "
-              f"by rounding; {len(other_metric)} printed as a metric the results do not "
+        files = chain.pop("_files", [])
+        print(f"repro-gate: {chain.get('mode', 'evidence chain')}: {len(files)} evidence file(s); "
+              f"{chain.get('printed_with_ev', 0)} value(s) printed with \\ev and re-read from their field"
+              f"{'; ' + str(len(chain.get('ledger_problems') or [])) + ' that do not match' if chain.get('ledger_problems') else ''}")
+        for n in (chain.get("notes") or [])[:6]:
+            print(f"repro-gate: note: {n}")
+        print(f"repro-gate: {len(rounded)} paper figure(s) matched an evidence number "
+              f"by rounding; {len(other_metric)} printed as a metric the evidence does not "
               f"hold them as; {len(claims)} still to verify literally")
-        bad = list(other_metric)
+        bad = list(other_metric) + list(chain.get("ledger_problems") or [])
         if claims:
-            mirror = evidence_root(a.workdir)
+            mirror = evidence_root(a.workdir, files)
             try:
                 evidence = aris_audit.evidence_check(mirror, claims)
             finally:
@@ -1328,10 +1950,13 @@ def main() -> None:
                     unchecked.append({**c, "status": status or "not_checked",
                                       "detail": (r or {}).get("detail") or why_not})
             print(f"repro-gate: evidence check on {len(claims)} cited number(s): "
-                  f"{len(bad) - len(other_metric)} unsupported, {len(unchecked)} could not be checked")
+                  f"{len(bad) - len(other_metric) - len(chain.get('ledger_problems') or [])} unsupported, "
+                  f"{len(unchecked)} could not be checked")
         if not claims:
             evidence = {"available": not unchecked, "results": []}
-        evidence = {**evidence, "rounded_matches": rounded, "other_metric": other_metric}
+        evidence = {**evidence, "rounded_matches": rounded, "other_metric": other_metric, "chain": chain}
+        for w in (chain.get("found_only_in_raw_files") or [])[:10]:
+            print(f"repro-gate: warning: {w['value']} is found only in {w['found_at']} -- {w['why']}")
         if not claims and not other_metric and not unchecked:
             evidence["note"] = "every printed figure traced to a result number"
         if bad:
@@ -1371,10 +1996,10 @@ def main() -> None:
         # one failed check could never be passed again, however the paper was
         # fixed.
         prior_exps = [e for e in (prior.get("experiments") or [])
-                      if e.get("script") != "(paper)"]
+                      if e.get("script") != "(paper)" and not e.get("aggregation")]
         if prior_exps:
             result["experiments"] = prior_exps + [r for r in report
-                                                  if r.get("script") == "(paper)"]
+                                                  if r.get("script") == "(paper)" or r.get("aggregation")]
             # the replay verdict still stands; this pass can only add claim failures
             replay_ok = all(e.get("verdict") == "PASS" for e in prior_exps)
             result["verdict"] = ("FAIL" if not (allok and replay_ok)

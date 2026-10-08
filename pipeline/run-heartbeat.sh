@@ -977,7 +977,10 @@ def walk(o):
         for v in o:
             yield from walk(v)
 items = list(walk(gate))
-print(f"# Numbers the paper printed that no file under runs/ carries (check {attempt})\n")
+print(f"# Numbers the paper printed that the evidence does not carry (check {attempt})\n")
+print("The evidence is the aggregates, DESIGN.json and the experiments' declared outputs "
+      "(interfaces/evidence-interface.md). A number the paper needs is a field aggregate.py "
+      "computes from the declared outputs, printed with \\ev; the rest goes.\n")
 for it in items:
     why = f" -- {it['why']}" if it.get("why") else ""
     print(f"- `{it.get('value')}` in: ...{it.get('claim', '').strip()}...{why}")

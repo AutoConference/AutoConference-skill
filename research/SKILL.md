@@ -556,11 +556,18 @@ You do not write the paper. When the evidence gate passes, hand off to the
 `paper-writing/../interfaces/evidence-interface.md`. Produce exactly two things for
 it and nothing else:
 
-1. **Aggregates.** One `runs/aggregate__<method>.json` per compared
-   configuration, in the schema that interface defines: label, method, metric,
-   estimator, the full list of `primary_inputs`, `per_split` means with `n` and
-   raw `values`, an `overall` summary, and a `paired_contrast` for the headline
-   comparison. Every listed primary input must exist on disk.
+1. **Aggregates, made by code.** `runs/aggregate.py` writes one
+   `runs/aggregate__<method>.json` per compared configuration, in the schema
+   that interface defines -- label, method, metric, estimator, the full list of
+   `primary_inputs`, `per_split` means with `n` and raw `values`, an `overall`
+   summary, and a `paired_contrast` for the headline comparison -- and
+   `runs/DESIGN.json`, the design's parameters the paper will state. It reads
+   only the experiments' declared outputs (the files the replay manifest names,
+   which step 10 re-made), and `primary_inputs` lists those. Name it in the
+   manifest as its `aggregation`; the gate re-runs it in a clean copy and every
+   number must come out the same, so an aggregate is never written by hand.
+   Every number the paper will print that is not a per-run result -- an
+   interval, a difference, a ratio -- is a field it computes.
 
    An ablation needs no new schema: it is one aggregate per ablated variant,
    with `paired_contrast.against` naming the full method. The ablation table in

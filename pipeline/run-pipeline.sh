@@ -368,14 +368,14 @@ skill(){ local label=$1 prompt=$2 tmo
          [ "$rc" -eq 0 ] || { echo "research: step failed (exit $rc)" >&2; return "$rc"; }; }
 # The research side's hand-off to the writer: every aggregate and the verdict.
 evidence_digest() {
-  ( cd "$W" && for f in readiness.json runs/aggregate__*.json; do
+  ( cd "$W" && for f in readiness.json runs/aggregate__*.json runs/DESIGN.json runs/aggregate.py runs/REPLAY_MANIFEST.json; do
       [ -f "$f" ] && printf '%s  %s\n' "$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$f")" "$f"
     done )
 }
 verify_evidence() {
   [ -f "$W/.evidence.sha" ] || return 0
   if [ "$(evidence_digest)" != "$(cat "$W/.evidence.sha")" ]; then
-    echo "research: the evidence changed $1 -- readiness.json or an aggregate was edited" >&2
+    echo "research: the evidence changed $1 -- readiness.json, an aggregate, DESIGN.json, aggregate.py or the manifest was edited" >&2
     echo "  by the writing side, which evidence-interface.md forbids. Re-run step 11." >&2
     return 1
   fi
@@ -715,7 +715,13 @@ $S5_AUDIT
 
 $S5_PROCESS
 
-Write results as JSON under runs/results/.
+Write results as JSON under runs/results/. Each experiment's output -- the one
+file its manifest entry names -- is the run's summary: its metrics and the
+settings it ran with (seeds, sizes, horizons), at most 32 MiB. Per-instance data
+(predictions, logits, per-example labels) goes in other files beside it, which
+nothing re-reads as evidence: the summary carries what is computed from them,
+and the paper's numbers come from the summaries only
+(interfaces/evidence-interface.md).
 
 Then write runs/REPLAY_MANIFEST.json — note the name; it is the REPLAY contract and
 is separate from any run-provenance manifest you may also want to write:
@@ -1034,27 +1040,37 @@ $ROOT/interfaces/evidence-interface.md; read it, then the section \"Handing off
 to the writing skill\" in $ROOT/research/SKILL.md, and produce exactly the two
 things it names, in this workspace:
 
-  1. runs/aggregate__<method>.json — one per compared configuration (each model
-     x condition the plan compares, and each ablated variant), from the raw
-     results under runs/results/ and runs/*.jsonl. per_split is keyed by the
-     plan's condition (for a language-model study, its complexity level);
-     values are the per-seed results, raw;
-     state the estimator. Carry each cell's interval from runs/results/summary.json
-     as ci_low / ci_high beside its mean (null for an exact computation). primary_inputs lists the files each
-     aggregate reads, and every one must exist on disk.
+  1. runs/aggregate.py, and what it writes: runs/aggregate__<method>.json, one
+     per compared configuration (each model x condition the plan compares, and
+     each ablated variant), and runs/DESIGN.json. It reads ONLY the experiments'
+     declared outputs -- the files runs/REPLAY_MANIFEST.json names as each
+     entry's output, which step 10 re-made -- never other files under runs/
+     (per-instance predictions and logits are summarised by the experiment into
+     its output). per_split is keyed by the plan's condition (for a
+     language-model study, its complexity level); values are the per-seed
+     results, raw; state the estimator. Carry each cell's interval as ci_low /
+     ci_high beside its mean (null for an exact computation). primary_inputs
+     lists the declared outputs each aggregate reads, as runs/... paths.
+     Run it, then add to runs/REPLAY_MANIFEST.json:
+       \"aggregation\": {\"script\": \"aggregate.py\", \"outputs\": [\"aggregate__*.json\", \"DESIGN.json\"]}
+     Right after this step the gate re-runs it in a clean copy holding only the
+     code and the declared outputs, and every number it writes must come out
+     the same: an aggregate written or edited by hand fails it.
   2. readiness.json — READY or BLOCKED, one claim per intended headline claim.
 
 The writer may print only numbers these files carry, and step 14 checks every
-number the paper prints against the files under runs/. So store, computed here
-and not left to the writer: every interval the paper will show, as ci_low /
-ci_high (a paired contrast's too, not only its uncertainty), and the design's
-own parameters the paper will state (noise orders, horizons, sample sizes) in
-runs/DESIGN.json.
+number the paper prints against them (the aggregates, DESIGN.json, the declared
+outputs) and nothing else. So aggregate.py computes, and stores, what the paper
+will print and is not a per-run result: every interval the paper will show, as
+ci_low / ci_high (a paired contrast's too, not only its uncertainty), every
+difference, ratio or percentage change, and in runs/DESIGN.json the design's
+own parameters the paper will state (noise orders, horizons, sample sizes), as
+the declared outputs record them.
 
 If refine-logs/UNTRACEABLE.md exists, the last paper printed the numbers listed
-there and no file under runs/ carried them. Add the ones that are legitimate
-results or parameters, computed from the raw results; the rest the writer will
-drop.
+there and the evidence did not carry them. Add the ones that are legitimate
+results or parameters to what aggregate.py computes, from the declared
+outputs; the rest the writer will drop.
 
 Decide 'supported' the way step 6 was told to: a claim whose
 $(jq -r .statistics.ci_method "$QUALITY") interval contains the baseline is not
@@ -1070,10 +1086,21 @@ not reproduce -- runs/REPRO_GATE.json missing, or any entry in its \"experiments
 list not PASS -- or no cell has a measured interval. Then fill blocked_on. An
 \"experiments\" entry whose script is \"(paper)\" is not a reproduction result: it
 is step 14's verdict on an earlier draft's printed numbers, which is what a
-rewrite fixes, and it does not block.
+rewrite fixes, and it does not block. Nor does one marked \"aggregation\": true,
+the gate's check of your aggregate.py, which you fix here.
 
 You may not write LaTeX, touch the paper, or phrase a result for it. Do not run
-new experiments and do not edit anything under runs/results/." 3600 || exit 1
+new experiments and do not edit anything under runs/results/ or any declared
+output." 3600 || exit 1
+
+  # Link 2 of the evidence chain (interfaces/evidence-interface.md): the
+  # aggregates are what aggregate.py makes from the declared outputs step 10
+  # re-made, re-made again here in a clean copy -- an aggregate written or
+  # edited by hand, or made from other files, is caught before the writer
+  # reads it.
+  gated "11a/15 the aggregates come from the results (ours)" \
+        python3 "$ROOT/research/scripts/check_reproduction.py" "$W" --aggregation || {
+    echo "research: the aggregates are not what runs/aggregate.py makes from the declared outputs; runs/REPRO_GATE.json says how. Re-run step 11." >&2; exit 5; }
 
   # The hand-off is frozen here. The writer runs with its approvals off in the
   # same workspace, so the interface's rule that the writing side may not edit
@@ -1106,9 +1133,16 @@ to have reproduced it),
 runs/REPRO_GATE.json (what reproduced). figures/ holds step 7's plots; your
 figures come from paper/data, generated from the aggregates, as the skill says.
 
-Print only numbers an aggregate or a file under runs/ carries, rounded as you
-like: never compute a new one in the paper -- an interval endpoint, a
-difference, a ratio. Step 14 fails the paper for each number it cannot trace.
+Print every number from the evidence with \\ev. Once the paper tree exists,
+run python3 $ROOT/paper-writing/scripts/make_paper_data.py --evidence runs/aggregate__*.json runs/DESIGN.json
+(again whenever the aggregates change): paper/data/EVIDENCE.md lists every key.
+Write \\ev{<key>} for the value (\\ev[2]{<key>} for 2 decimals, \\evpct{<key>} for
+a percentage) instead of typing it, in tables, prose and captions alike: a
+mistyped key stops the build, so a wrong number cannot reach the paper. A
+number typed by hand must equal an evidence value -- of the metric its sentence
+or column names -- and is checked the same way. Never compute a new one in the
+paper -- an interval endpoint, a difference, a ratio: aggregate.py computes
+those. Step 14 fails the paper for each number it cannot trace.
 If refine-logs/UNTRACEABLE.md exists, the previous draft printed the numbers
 listed there without a source; each must now come from a file, or go. If
 refine-logs/SHAPE_FAILURES.md exists, the previous draft failed the platform
@@ -1219,6 +1253,8 @@ PAGES
     rm -rf "$W/figures"; mkdir -p "$W/figures"
     cp "$W/.submission-build/figures/"* "$W/figures/" 2>/dev/null || true
     cp "$W/.submission-build/submission.json" "$W/submission.json"
+    # Where each \\ev it prints came from, for step 14 to re-read.
+    cp "$W/.submission-build/evidence-ledger.json" "$W/evidence-ledger.json" 2>/dev/null || rm -f "$W/evidence-ledger.json"
     # A new rendering is a new paper to attack: step 13's attack on the last
     # one, and the answers to it, go.
     rm -rf "$W/.kill-argument" "$W/KILL_ARGUMENT.json" "$W/KILL_ARGUMENT.md" "$W/refine-logs/KILL_ARGUMENT_ANSWERS.md"
@@ -1404,11 +1440,11 @@ fi
 # the check's: it could not read the paper or run its checker, which no
 # rewrite fixes -- the paper stops for a person (exit 1).
 if want 14; then
-  gated "14/15 cited-number check (ARIS evidence_check via ours)" \
+  gated "14/15 every printed number traced along the evidence chain (ours)" \
         python3 "$ROOT/research/scripts/check_reproduction.py" "$W" --claims-only
   case $? in
     0) ;;
-    1) echo "research: the paper cites numbers that are not in runs/results/." >&2; exit 4 ;;
+    1) echo "research: the paper prints numbers the evidence (the aggregates, DESIGN.json, the declared outputs) does not carry." >&2; exit 4 ;;
     *) echo "research: the cited numbers could not be checked (above); a rewrite cannot fix that." >&2; exit 1 ;;
   esac
 fi

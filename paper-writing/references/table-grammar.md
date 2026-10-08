@@ -271,7 +271,10 @@ get every `mean [lo, hi]` pre-computed and precision-matched
 the table's own `generator:` comment). This does not make table-filling
 automatic -- a table's layout stays too bespoke per grammar for a script to
 lay out, same as before -- it just removes the mental arithmetic of
-rounding `lo`/`hi` to match the mean by hand.
+rounding `lo`/`hi` to match the mean by hand. Each line also gives the cell
+as `\ev` macros (`\ev[3]{random/per_split/1/mean} [\ev[3]{...values/0}, ...]`):
+paste those, not the numbers, and the cell can never disagree with its
+aggregate (`interfaces/evidence-interface.md` §2).
 
 **What never gets bracketed.** A grammar's Overall/Average/Mean summary
 column, where one exists, stays a point estimate. That column's own `std`,

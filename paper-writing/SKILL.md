@@ -122,7 +122,8 @@ prose; see its module docstring and `references/audit-protocol.md`.
 **Slots.** Every value evidence must supply is written `\slot{...}`. A draft
 build renders it as a grey marker; a `--final` build raises a LaTeX error on the
 first one it meets. A placeholder cannot reach a submission artifact by
-oversight. Fill a slot only from an aggregate, never from prose, memory, a
+oversight. Fill a slot only from an aggregate -- a number with `\ev` (below) --
+never from prose, memory, a
 narrative Markdown file, or an agent log.
 
 **The figure ladder.** Tables and equations are mandatory. Figures degrade:
@@ -169,6 +170,8 @@ for this paper's domain, renew it once in `paper/macros.tex` from the lists in
 `references/figure-icons.md`. Do not write a glyph name into the figure itself.
 
 1. Generate `paper/data/*` from the aggregates:
+   `make_paper_data.py --evidence runs/aggregate__*.json runs/DESIGN.json` writes
+   every evidence value for `\ev` (`paper/data/EVIDENCE.md` lists the keys), and
    `make_paper_data.py --config paper.json --opening runs/aggregate__*.json --primary <arm> [--direction up|down] [--metric <name>]`.
    This writes the opening figure's data (bars with per-condition deltas, a
    radar when there are five or more conditions) and the secondary figure's
@@ -180,13 +183,19 @@ for this paper's domain, renew it once in `paper/macros.tex` from the lists in
    (`references/table-grammar.md` has all six) and `paper/tables/ablations.tex`
    in its ablation grammar. Use the semantic markers `\best`, `\second`,
    `\rankone`…, `\deltarow`, `\worse`, `\deltacell`; the design renders
-   them.
+   them. Every number in a cell is `\ev{<key>}` -- `\ev[2]{random/per_split/1/mean}`
+   to two decimals, `\evpct{<key>}` as a percentage -- never typed: a
+   mistyped key stops the build, and the converter records where each value
+   came from for step 14 to re-read (`interfaces/evidence-interface.md` §2).
 3. Fill `paper/figures/opening.tex`'s slots (only `composite` has any) and the
    secondary figure's caption slot; delete nothing the design installed.
 4. Write the captions now. A caption you cannot write is a float you do not need.
 
 Every quantitative visual carries a `% source-data:` / `% generator:` manifest.
-Never draw a chart from values copied out of prose.
+Never draw a chart from values copied out of prose. In the prose too, a number
+from the evidence is `\ev{<key>}`; a number typed by hand must equal an
+evidence value and is checked as one, and a number the evidence does not carry
+-- a difference, a ratio -- is asked of the research side, not computed here.
 
 ### 4. Write
 

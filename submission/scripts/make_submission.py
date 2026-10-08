@@ -92,6 +92,8 @@ class Macros:
         text = strip_comments(path.read_text(encoding="utf-8"))
         for m in self.DEF.finditer(text):
             name, argc = m.group(1), int(m.group(2) or 0)
+            if name in EV_MACROS:
+                continue    # printed by Converter.evidence, with its source
             body = read_group(text, m.end())
             if body is not None:
                 # Strip \xspace HERE rather than at use. A body ending in
@@ -281,6 +283,29 @@ def parse_bib(path: Path) -> dict[str, str]:
         elif author:
             out[key] = author
     return out
+
+
+# ------------------------------------------------------ evidence values ----
+# `\ev[p]{key}` and `\evpct[p]{key}` print a number from the evidence, as
+# paper/data/evidence.tex (make_paper_data.py --evidence) defines it; each one
+# printed is written to the ledger with the file and field it came from, and
+# step 14 re-reads that field (interfaces/evidence-interface.md §2).
+EV_MACROS = {"ev", "evpct", "ac@ev"}
+EV_USE = re.compile(r"\\(evpct|ev)(?![A-Za-z@])\s*(?:\[([^\]]*)\])?\s*\{([^{}]*)\}")
+# While the paper is converted, a value stands as a mark -- private-use
+# characters no conversion step reads, folds or treats as space -- and is put
+# in when the text is final, so the ledger says exactly where each value
+# stands. Step 14 then checks a number typed by hand even where it is equal to
+# a value printed with \ev somewhere else.
+EV_MARK = re.compile("\ue000([\ue010-\ue019]+)\ue001")
+
+
+def ev_mark(i: int) -> str:
+    return "\ue000" + "".join(chr(0xE010 + int(d)) for d in str(i)) + "\ue001"
+
+
+def ev_index(digits: str) -> int:
+    return int("".join(str(ord(c) - 0xE010) for c in digits))
 
 
 # ------------------------------------------------------- the reference list ----
@@ -1106,12 +1131,70 @@ class Converter:
         self.figure_files: dict[str, str] = {}     # label -> PNG name (paper_figures.file_name)
         self.missing_cites: set[str] = set()
         self.cited: list[str] = []          # every key cited, in order; "*" for \nocite{*}
+        self.ledger: list[dict] = []        # every \ev printed, with its source
+        self.unknown_evidence: set[str] = set()
+        self.ev_text: dict[str, str] = {}   # "key@p" -> the text evidence.tex prints
+        self.ev_source: dict[str, dict] = {}
+        data = self.paper / "data"
+        if (data / "evidence.tex").exists():
+            for m in re.finditer(r"\\@namedef\{ev@([^{}]+)\}\{([^{}]*)\}",
+                                 (data / "evidence.tex").read_text(encoding="utf-8")):
+                self.ev_text[m.group(1)] = m.group(2)
+        if (data / "evidence.json").exists():
+            try:
+                self.ev_source = json.loads((data / "evidence.json").read_text(encoding="utf-8")).get("values") or {}
+            except ValueError:
+                self.ev_source = {}
         self.references = 0                 # entries in the rendered reference list
         self.unknown_cmds: set[str] = set()
         self._math: list[str] = []
         self.thm_styles = theorem_styles(self.paper)
         self.theorem_names: list[str] = []   # "Lemma 1", in order of appearance
         self._thm_next = 0
+
+    # -- evidence values ------------------------------------------------------
+    def evidence(self, text: str) -> str:
+        r"""`\ev[p]{key}` / `\evpct[p]{key}` -> the number evidence.tex prints for
+        it, written to the ledger with its file and field. An unknown key is
+        reported and prints nothing (the LaTeX build stops on it too)."""
+        def one(m: re.Match) -> str:
+            pct = m.group(1) == "evpct"
+            places = (m.group(2) or "").strip() or "d"
+            key = m.group(3).strip()
+            printed = self.ev_text.get(f"{key}@{'pct' if pct else ''}{places}")
+            if printed is None:
+                self.unknown_evidence.add(f"\\{m.group(1)}[{places}]{{{key}}}")
+                return ""
+            src = self.ev_source.get(key) or {}
+            self.ledger.append({"key": key, "places": places, "pct": pct, "printed": printed,
+                                "file": src.get("file"), "field": src.get("field")})
+            return ev_mark(len(self.ledger) - 1)
+        return EV_USE.sub(one, text)
+
+    def ev_place(self, text: str, part: str) -> str:
+        """The final text with each value put where its mark is, and where it
+        now stands -- `part` ("abstract" or "body") and offset -- in the ledger."""
+        out, last, pos = [], 0, 0
+        for m in EV_MARK.finditer(text):
+            out.append(text[last:m.start()])
+            pos += m.start() - last
+            e = self.ledger[ev_index(m.group(1))]
+            e.setdefault("at", []).append([part, pos])
+            out.append(e["printed"])
+            pos += len(e["printed"])
+            last = m.end()
+        out.append(text[last:])
+        return "".join(out)
+
+    def ev_plain(self, text: str) -> str:
+        """Text step 14 does not read (the title, a figure's drawn title): each
+        value as printed, recorded nowhere."""
+        text = EV_MARK.sub(lambda m: self.ledger[ev_index(m.group(1))]["printed"], text)
+
+        def one(m: re.Match) -> str:
+            places = (m.group(2) or "").strip() or "d"
+            return self.ev_text.get(f"{m.group(3).strip()}@{'pct' if m.group(1) == 'evpct' else ''}{places}", "")
+        return EV_USE.sub(one, text)
 
     # -- pass 1: number every float and section so \Cref can be resolved -----
     def index(self, body: str) -> None:
@@ -1398,7 +1481,7 @@ class Converter:
             one, text, flags=re.S)
 
     def finish_inline(self, text: str) -> str:
-        t = self.protect_math(text)
+        t = self.protect_math(self.evidence(text))
         t = self.cites(t)
         t = self.refs(t)
         t = inline_to_md(t, self.macros)
@@ -1497,6 +1580,7 @@ class Converter:
             # acted on, and there are two kinds of conditional here, not one.
             raw = if_file_exists(raw, self.paper)
             raw = self.resolve_inputs(raw)
+            raw = self.evidence(raw)
             raw = self.macros.expand(raw)
         # A \bibliography in a section file arrives with the inputs.
         raw = self.bibliography(raw)
@@ -1820,8 +1904,10 @@ def main() -> int:
         # Two figures whose labels end alike would both find the same data
         # file, and one of them would show the other's: never drawn then.
         shared = any(other != label and other.split(":")[-1] == stem for other, _ in conv.figures)
-        title = re.sub(r"[*_`$\\{}]", "", inline_to_md(cap, conv.macros))[:80]
-        if own.exists() and not shared and render_dat(own, figdir / fname, title):
+        # Its own name: `title` is the paper's, and a figure drawn from its
+        # data once put its caption in the paper's title field.
+        fig_title = re.sub(r"[*_`$\\{}]", "", inline_to_md(conv.ev_plain(cap), conv.macros))[:80]
+        if own.exists() and not shared and render_dat(own, figdir / fname, fig_title):
             made.append(fname)
             warn(f"figure {label}: {got[7:]}; drawn from its own data ({own.name}) instead of the PDF")
         else:
@@ -1837,6 +1923,10 @@ def main() -> int:
         warn(f"the reference list is in its short form (first author, year, title, venue): "
              f"in full it took body_md past {LIMITS['body_md'][1]:,} characters")
 
+    # The text is final: each \ev value goes where its mark is (Converter.ev_place).
+    title = conv.ev_plain(title)
+    abstract = conv.ev_place(abstract, "abstract")
+    body_md = conv.ev_place(body_md, "body")
     sub = {
         "title": title,
         "abstract": abstract,
@@ -1848,6 +1938,19 @@ def main() -> int:
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "submission.json").write_text(
         json.dumps(sub, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Where every \ev the paper prints came from, and where it stands, for
+    # step 14 to re-read. A value only the title prints is in no text step 14
+    # reads, so it is not listed.
+    seen: dict = {}
+    for e in conv.ledger:
+        if not e.get("at"):
+            continue
+        g = seen.setdefault((e["key"], e["places"], e["pct"]), {**{k: v for k, v in e.items() if k != "at"}, "at": []})
+        g["at"].extend(e["at"])
+    for g in seen.values():
+        g["uses"] = len(g["at"])
+    (outdir / "evidence-ledger.json").write_text(
+        json.dumps({"version": 2, "entries": list(seen.values())}, indent=1, ensure_ascii=False), encoding="utf-8")
     pc = count_pages(body_md)
     limit = a.page_limit if a.page_limit is not None else default_page_limit()
     over = limit > 0 and pc["pages"] > limit
@@ -1862,6 +1965,7 @@ def main() -> int:
     print(f"  keywords         {len(keywords)}")
     print(f"  reproducibility  {len(repro)} chars")
     print(f"  references       {conv.references} listed (every work it cites, from references.bib)")
+    print(f"  evidence values  {sum(g['uses'] for g in seen.values())} printed with \\ev ({len(seen)} distinct), each with its source")
     print(f"  figures          {len(made)} rendered {made if made else ''}")
     print(f"  platform pages   {pc['pages']} of {limit:g} (main text: {pc['words']} words, "
           f"{pc['figures']} figures, {pc['tables']} tables)")
@@ -1883,6 +1987,11 @@ def main() -> int:
         warn("reproducibility is empty. It has no source in the LaTeX tree by "
              "design: the research side owns it (readiness.json + run manifests + "
              "the replay verdict, in prose). Pass --reproducibility FILE.")
+        problems += 1
+    if conv.unknown_evidence:
+        warn(f"{len(conv.unknown_evidence)} \\ev value(s) with no such key in paper/data/evidence.tex: "
+             f"{sorted(conv.unknown_evidence)[:6]} -- paper/data/EVIDENCE.md lists every key; generate it with "
+             f"make_paper_data.py --evidence")
         problems += 1
     if conv.missing_cites:
         warn(f"{len(conv.missing_cites)} citation key(s) not in references.bib, "

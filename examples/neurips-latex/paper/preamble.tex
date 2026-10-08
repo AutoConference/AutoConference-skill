@@ -66,6 +66,25 @@
   \fi
 }
 
+% ------------------------------------------------------------ evidence values
+% \ev[p]{key} prints a number from the evidence (interfaces/evidence-
+% interface.md section 2): key is the file and the field, random/overall/mean;
+% p is 0-4 decimals (default: an integer as it is, else 3). \evpct[p]{key}
+% prints it times 100 (default 1 decimal). The values are data/evidence.tex,
+% which make_paper_data.py --evidence writes from the aggregates and
+% DESIGN.json; data/EVIDENCE.md lists them. An unknown key stops the build:
+% a number cannot be mistyped into the paper.
+\makeatletter
+\newcommand{\ev}[2][d]{\ac@ev{#2@#1}{#2}{#1}}
+\newcommand{\evpct}[2][d]{\ac@ev{#2@pct#1}{#2}{#1, as a percentage}}
+\newcommand{\ac@ev}[3]{%
+  \@ifundefined{ev@#1}%
+    {\PackageError{acpaper}{No evidence value `#2' (precision #3)}%
+      {data/EVIDENCE.md lists every key. Generate it with make_paper_data.py
+       --evidence runs/aggregate__*.json runs/DESIGN.json.}}%
+    {\@nameuse{ev@#1}}}
+\makeatother
+
 % ------------------------------------------------------------- text macros
 \newcommand{\ie}{\textit{i.e.},\xspace}
 \newcommand{\eg}{\textit{e.g.},\xspace}

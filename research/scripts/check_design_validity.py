@@ -143,12 +143,21 @@ def inline_math_count(text: str) -> int:
     return len(re.findall(r"(?<!\$)\$(?!\$)([^\$\n]{1,200}?)(?<!\$)\$(?!\$)", stripped))
 
 
+# A JSON file is parsed whole; past this it is not read (a JSONL file is read a
+# line at a time, whatever its size). A tester's 834 MB of per-prediction
+# records took WSL down when every check held all of them at once (2026-10-08).
+JSON_READ_MAX = 64 * 1024 * 1024
+NOT_READ: list = []     # files too large to parse, said in the report
+
+
 def load_cells(workdir: str) -> list:
     """Every (model, condition, level) cell we can find in the results, with its
     n, its successes and its truncation count. Tolerant about layout: the
-    experiment code is written fresh each run, so the field names vary."""
+    experiment code is written fresh each run, so the field names vary.
+    Counted as the records stream past: memory grows with the cells, not the
+    records."""
     cells = {}
-    seen = set()          # (model, condition, level, instance) -- one vote each
+    seen = set()          # hashes of (model, condition, level, instance) -- one vote each
     unattributed = 0      # records with no model we can name
     rdir = os.path.join(workdir, "runs")
     for dirpath, _, names in os.walk(rdir):
@@ -156,22 +165,15 @@ def load_cells(workdir: str) -> list:
             if name in ("manifest.json", "MANIFEST.json", "REPLAY_MANIFEST.json",
                         "REPRO_GATE.json") or not name.endswith((".json", ".jsonl")):
                 continue
-            try:
-                recs = _load_any(os.path.join(dirpath, name))
-            except (OSError, ValueError):
-                continue
+            path = os.path.join(dirpath, name)
             # A results file may name its model once, at the top, rather than
             # on every record. (This read `doc`, a name never defined here, and
             # crashed the gate on any record without its own model field --
             # that is, on every study that is not about language models.)
-            file_model = None
-            if name.endswith(".json"):
-                try:
-                    top = json.load(open(os.path.join(dirpath, name), encoding="utf-8"))
-                    if isinstance(top, dict):
-                        file_model = top.get("model")
-                except (OSError, ValueError):
-                    pass
+            try:
+                file_model, recs = _stream(path)
+            except (OSError, ValueError):
+                continue
             for rec in recs:
                 if not isinstance(rec, dict):
                     continue
@@ -188,11 +190,16 @@ def load_cells(workdir: str) -> list:
                     unattributed += 1
                     continue
                 key = (str(model), str(rec.get("condition", "raw")), str(lvl))
-                inst = str(rec.get("id") or rec.get("instance_id") or
-                           rec.get("instance") or f"__pos{len(seen)}")
-                if (key, inst) in seen:
-                    continue
-                seen.add((key, inst))
+                # An id of 0 is an id (it was read as none, and counted twice).
+                inst = next((rec[k] for k in ("id", "instance_id", "instance") if rec.get(k) is not None), None)
+                # A record with no id of its own is one vote and cannot repeat;
+                # one with an id is counted once (by hash: a set of a million
+                # strings is what ran a big study out of memory).
+                if inst is not None:
+                    h = hash((key, str(inst)))
+                    if h in seen:
+                        continue
+                    seen.add(h)
                 c = cells.setdefault(key, {"n": 0, "correct": 0, "truncated": 0})
                 c["n"] += 1
                 if rec.get("correct") or rec.get("raw_correct") or rec.get("is_correct"):
@@ -222,7 +229,10 @@ def aggregate_cells(workdir: str) -> list:
             if not n.endswith(".json"):
                 continue
             try:
-                doc = json.load(open(os.path.join(dirpath, n), encoding="utf-8"))
+                if os.path.getsize(os.path.join(dirpath, n)) > JSON_READ_MAX:
+                    continue    # load_cells names it
+                with open(os.path.join(dirpath, n), encoding="utf-8") as f:
+                    doc = json.load(f)
             except (OSError, ValueError):
                 continue
             if not isinstance(doc, dict):
@@ -246,6 +256,31 @@ def aggregate_cells(workdir: str) -> list:
                                     "truncated": cell.get("truncated") or 0,
                                     "_from": "aggregate"})
     return out
+
+
+def _stream(path: str) -> tuple:
+    """(the file's own model, its per-instance records as an iterator). A JSONL
+    file is read a line at a time; a JSON file over JSON_READ_MAX is not read
+    and is named in the report."""
+    if path.endswith(".jsonl"):
+        def lines():
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except ValueError:
+                        continue
+        return None, lines()
+    if os.path.getsize(path) > JSON_READ_MAX:
+        NOT_READ.append(f"{os.path.relpath(path)} ({os.path.getsize(path) / 1048576:.0f} MiB: per-instance "
+                        f"records belong in JSONL, read a line at a time)")
+        return None, iter(())
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    return (doc.get("model") if isinstance(doc, dict) else None), iter(_records(doc))
 
 
 def _load_any(path: str) -> list:
@@ -397,6 +432,8 @@ def main() -> None:
     if unattr:
         print(f"shape-gate: {unattr} result record(s) carry no model field and were "
               f"excluded from the power checks", file=sys.stderr)
+    for n in NOT_READ[:10]:
+        print(f"shape-gate: not read: {n}", file=sys.stderr)
     if not cells:
         chk("cells_found", False,
             "could not find per-instance records under runs/ -- cannot check power", fatal=True)

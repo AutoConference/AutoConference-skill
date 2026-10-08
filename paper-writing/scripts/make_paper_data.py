@@ -12,6 +12,19 @@ disagree.
         --question "..." --finding "..."
     python3 scripts/make_paper_data.py --table-stats runs/aggregate__*.json \
         --precision 1
+    python3 scripts/make_paper_data.py --evidence runs/aggregate__*.json runs/DESIGN.json
+
+--evidence writes the values the paper prints with \\ev (interfaces/
+evidence-interface.md §2), from every number of every file given:
+
+    paper/data/evidence.tex              \\ev and \\evpct values, at each precision
+    paper/data/evidence.json             each key's file, field and value
+    paper/data/EVIDENCE.md               the list, for the writer to read
+
+A key is the file (`random` for aggregate__random.json, `design` for
+DESIGN.json) and the field's path: random/per_split/1/mean. The converter
+records each \\ev it prints, and step 14 re-reads its field from its file, so
+a value cannot be mistyped into the paper or edited in evidence.tex.
 
 --opening writes everything the opening figure and the secondary figures of
 the design family read (references/design-axes.md axes 2 and 10):
@@ -80,7 +93,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 REQUIRED = ("label", "method", "metric", "estimator", "primary_inputs", "per_split", "overall")
@@ -209,12 +224,21 @@ def write_table_stats(aggregates: list[dict], out: Path, precision: int | None) 
         f"% precision: {precision} decimal place(s) on every number below.",
         "%",
     ]
+    lines += ["% Each line also gives the cell as \\ev, to paste instead of the numbers:",
+              "% lo and hi are the smallest and largest of the cell's values, by index.", "%"]
     for a in sorted(aggregates, key=lambda a: a["method"]):
         lines.append(f"% {a['method']} ({a.get('display', a['method'])}):")
+        stem = ev_stem(Path(a.get("_path", f"aggregate__{a['method']}.json")))
         for cond, cell in a["per_split"].items():
             vals = cell["values"]
             lines.append(f"%   {cond:<24} {cell['mean']:.{precision}f} "
                          f"[{min(vals):.{precision}f}, {max(vals):.{precision}f}]")
+            if vals:
+                lo, hi = vals.index(min(vals)), vals.index(max(vals))
+                seg = re.sub(r"[^A-Za-z0-9_.\-]", "_", str(cond)) or "_"
+                lines.append(f"%   {'':<24} \\ev[{precision}]{{{stem}/per_split/{seg}/mean}} "
+                             f"[\\ev[{precision}]{{{stem}/per_split/{seg}/values/{lo}}}, "
+                             f"\\ev[{precision}]{{{stem}/per_split/{seg}/values/{hi}}}]")
         lines.append("%")
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"wrote {out} from {len(aggregates)} aggregate(s) at precision {precision} "
@@ -493,10 +517,117 @@ def write_opening(aggregates: list[dict], out_dir: Path, primary: str, direction
 
 
 # --------------------------------------------------------------------------- main
+# --------------------------------------------------------------------------- evidence values (\ev)
+EV_PLACES = range(0, 5)        # \ev[0] .. \ev[4]
+EV_PCT_PLACES = range(0, 3)    # \evpct[0] .. \evpct[2]
+
+
+def ev_format(value, places: int | None = None, pct: bool = False) -> str:
+    """What \\ev prints (interfaces/evidence-interface.md §2): an integer as it
+    is; any other number to `places` decimals -- 3 by default, 1 for a
+    percentage -- rounded half up from the number as the file writes it.
+    research/scripts/check_reproduction.py prints it the same way to check it."""
+    d = Decimal(repr(value)) if isinstance(value, float) else Decimal(value)
+    if pct:
+        d *= 100
+        places = 1 if places is None else places
+    elif places is None:
+        if isinstance(value, int):
+            return str(value)
+        places = 3
+    q = d.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+    s = format(q, "f")
+    return s[1:] if s.startswith("-") and q == 0 else s
+
+
+def ev_stem(path: Path) -> str:
+    name = path.name
+    if name.startswith("aggregate__") and name.endswith(".json"):
+        name = name[len("aggregate__"):-len(".json")]
+    elif name.endswith(".json"):
+        name = name[:-len(".json")]
+    return re.sub(r"[^A-Za-z0-9_.\-]", "_", name).lower() or "file"
+
+
+def ev_entries(data, stem: str) -> list:
+    """(key, field, value) for every finite number in a file's JSON."""
+    out: list = []
+
+    def seg(k) -> str:
+        return re.sub(r"[^A-Za-z0-9_.\-]", "_", str(k)) or "_"
+
+    def walk(o, keys: list, field: list) -> None:
+        if isinstance(o, dict):
+            for k, v in o.items():
+                walk(v, keys + [seg(k)], field + [str(k)])
+        elif isinstance(o, list):
+            for i, v in enumerate(o):
+                walk(v, keys + [str(i)], field + [i])
+        elif isinstance(o, (int, float)) and not isinstance(o, bool) and math.isfinite(o):
+            out.append(("/".join([stem] + keys), field, o))
+
+    walk(data, [], [])
+    return out
+
+
+def write_evidence(paths: list[Path], data_dir: Path) -> None:
+    """paper/data/evidence.tex, evidence.json and EVIDENCE.md, from every
+    number of every evidence file given (aggregates, DESIGN.json)."""
+    values: dict = {}
+    files: dict = {}
+    for path in paths:
+        if not path.exists():
+            sys.exit(f"evidence file not found: {path}")
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError as e:
+            sys.exit(f"{path} is not JSON ({e})")
+        stem = ev_stem(path)
+        while stem in files:          # aggregate__design.json beside DESIGN.json
+            stem += "_"
+        files[stem] = str(path)
+        for key, field, value in ev_entries(data, stem):
+            values[key] = {"file": str(path), "field": field, "value": value}
+    if not values:
+        sys.exit("no number in the evidence files given: nothing for \\ev to print")
+    tex = [
+        "% GENERATED by scripts/make_paper_data.py --evidence. Do not edit by hand:",
+        "% step 14 re-reads every value from its file (interfaces/evidence-interface.md).",
+        "% source-data: " + ", ".join(sorted(files.values())),
+        "\\makeatletter",
+    ]
+    rows = []
+    for key in sorted(values):
+        v = values[key]["value"]
+        tex.append(f"\\@namedef{{ev@{key}@d}}{{{ev_format(v)}}}")
+        tex += [f"\\@namedef{{ev@{key}@{p}}}{{{ev_format(v, p)}}}" for p in EV_PLACES]
+        tex.append(f"\\@namedef{{ev@{key}@pctd}}{{{ev_format(v, pct=True)}}}")
+        tex += [f"\\@namedef{{ev@{key}@pct{p}}}{{{ev_format(v, p, pct=True)}}}" for p in EV_PCT_PLACES]
+        rows.append(f"| `{key}` | {v!r} | {ev_format(v)} | {ev_format(v, 2)} | {ev_format(v, pct=True)} |")
+    tex.append("\\makeatother")
+    (data_dir / "evidence.tex").write_text("\n".join(tex) + "\n", encoding="utf-8")
+    (data_dir / "evidence.json").write_text(json.dumps({"version": 1, "files": files, "values": values}, indent=1),
+                                            encoding="utf-8")
+    md = [
+        "# Evidence values",
+        "",
+        "Print a number with `\\ev{key}` (an integer as it is, anything else to 3 decimals),",
+        "`\\ev[2]{key}` (0-4 decimals) or `\\evpct{key}` (times 100, 1 decimal; `\\evpct[0]`-`[2]`).",
+        "An unknown key stops the build. Generated from: " + ", ".join(sorted(files.values())) + ".",
+        "",
+        "| key | in the file | `\\ev` | `\\ev[2]` | `\\evpct` |",
+        "|---|---|---|---|---|",
+        *rows,
+    ]
+    (data_dir / "EVIDENCE.md").write_text("\n".join(md) + "\n", encoding="utf-8")
+    print(f"evidence: {len(values)} values from {len(files)} file(s) -> {data_dir}/evidence.tex, evidence.json, EVIDENCE.md")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("aggregates", nargs="+", type=Path)
+    parser.add_argument("aggregates", nargs="+", type=Path,
+                        help="aggregate files (and, with --evidence, DESIGN.json)")
     parser.add_argument("--teaser", action="store_true", help="write paper/data/teaser.tex (legacy card)")
     parser.add_argument("--figure", help="name of a figure declared in the config (legacy)")
     parser.add_argument("--table-stats", action="store_true",
@@ -518,10 +649,12 @@ def main() -> int:
     parser.add_argument("--question", default="", help="teaser question, one sentence")
     parser.add_argument("--finding", default="", help="teaser takeaway, one sentence")
     parser.add_argument("--paper-dir", type=Path, default=Path("paper"))
+    parser.add_argument("--evidence", action="store_true",
+                        help="write paper/data/evidence.tex, evidence.json and EVIDENCE.md: the values \\ev prints")
     args = parser.parse_args()
 
-    if not (args.teaser or args.figure or args.opening or args.table_stats):
-        parser.error("choose --opening, --teaser, --figure or --table-stats")
+    if not (args.teaser or args.figure or args.opening or args.table_stats or args.evidence):
+        parser.error("choose --opening, --teaser, --figure, --table-stats or --evidence")
 
     config: dict = {}
     if args.config.exists():
@@ -529,6 +662,13 @@ def main() -> int:
     paper_dir = Path(config.get("paper_dir", args.paper_dir))
     data_dir = paper_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
+    if args.evidence:
+        # Aggregates are checked as aggregates; DESIGN.json and the like as JSON.
+        load([p for p in args.aggregates if p.name.startswith("aggregate__")])
+        write_evidence(list(args.aggregates), data_dir)
+        if not (args.teaser or args.figure or args.opening or args.table_stats):
+            return 0
+        args.aggregates = [p for p in args.aggregates if p.name.startswith("aggregate__")]
     aggregates = select_metric(load(args.aggregates), args.metric)
 
     if args.teaser:

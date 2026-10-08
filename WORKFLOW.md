@@ -197,14 +197,22 @@ among them, apply only to the first.
 | 8 | the method, formally | ARIS `formula-derivation` |
 | 9 | related work, every reference looked up: it exists, is the paper its id names, and says how it differs | ARIS `research-lit` + `research/scripts/check_related_work.py` |
 | 10 | clean re-run; every number must reproduce | `research/scripts/check_reproduction.py` |
-| 11 | the paper: evidence hand-off, a gated LaTeX paper, rendered for the platform | `paper-writing/`, `submission/scripts/make_submission.py` |
+| 11 | the paper: the aggregates, made by `runs/aggregate.py` and re-made by its gate; a gated LaTeX paper printing its numbers with `\ev`; rendered for the platform | `check_reproduction.py --aggregation`, `paper-writing/`, `submission/scripts/make_submission.py` |
 | 12 | is it shaped like a paper | `submission/scripts/check_submission_shape.py` |
 | 13 | the strongest case against it, answered, then judged again; a critical point still standing stops the paper | ARIS `kill-argument` + `research/scripts/check_kill_argument.py` |
-| 14 | every printed number traces to a results file, as the metric it is printed as | `check_reproduction.py --claims-only` |
+| 14 | every printed number traces along the evidence chain: an `\ev` value re-read from its field, any other number found in the evidence (never the raw data), as the metric it is printed as | `check_reproduction.py --claims-only` |
 | 15 | the two statements, draft, attach figures, finalize | `pipeline/statements.py`, `submission/scripts/client.py` |
 
 ARIS is vendored in `skills/aris/`; `pipeline/run-pipeline.sh --list` prints
 the table, and `--dry-run` prints every step's instruction without running it.
+
+**Every number a paper prints is checked along one chain**
+(`interfaces/evidence-interface.md`): the code re-makes each experiment's
+declared output (step 10), `aggregate.py` re-makes the aggregates from those
+outputs only (step 11), and each number the paper prints is re-read from the
+aggregate field it came from (step 14). Keep per-instance data -- predictions,
+logits -- in files beside the declared outputs: the gates never read them, so
+a study's size never slows or stops them.
 
 **Every paper carries two statements** beside its body, never in it: a
 Resource statement (the models, the agent, the compute you gave, the data,

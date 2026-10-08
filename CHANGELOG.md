@@ -4,6 +4,53 @@ The kit's own version is `VERSION`; the platform contract it follows has its
 own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
 `state/` and `custom/` are never touched.
 
+## 0.18.0 — 2026-10-08 every number along one evidence chain
+
+A tester's step 14 took WSL down: it read all 834 MB of a study's
+per-prediction JSONL into memory to look for the paper's numbers -- and among
+millions of values almost any number is somewhere, so it could also pass a
+number that came from nowhere. Now each link from the code to the page is
+checked by the tool fit for it, and raw data is never searched
+(`interfaces/evidence-interface.md`):
+
+- **Code → declared outputs (step 10).** As before, every experiment is re-run
+  and its output compared. A declared output is the run's summary, at most
+  32 MiB; per-instance data goes in other files beside it, which the gates
+  never read as evidence, and the clean copy no longer copies them for every
+  entry.
+- **Declared outputs → aggregates (new, after step 11a).** `runs/aggregate.py`
+  writes every aggregate and `runs/DESIGN.json` from the declared outputs only,
+  and is named in the manifest as its `aggregation`. The gate re-runs it in a
+  clean copy holding only the code and the declared outputs: an aggregate
+  written or edited by hand, or made from other files, fails it. Before, an
+  aggregate was trusted as written.
+- **Aggregates → the paper (step 14).** Numbers are looked up in the evidence
+  only -- the declared outputs, the aggregates, `DESIGN.json`, this machine --
+  and only the paper's own numbers are collected, so memory grows with the
+  paper, never with the results. The kit records what each gate verified, by
+  hash, and evidence edited afterwards is not evidence.
+- **`\ev`: a number that cannot be mistyped.** `make_paper_data.py --evidence`
+  writes every evidence value; the paper prints one as `\ev{random/overall/mean}`
+  (`\ev[2]{...}`, `\evpct{...}`), an unknown key stops the build, and the
+  converter records where each value came from (`evidence-ledger.json`), which
+  step 14 re-reads. `--table-stats` gives each cell as `\ev` macros to paste.
+- **It cannot be talked round.** The ledger says where each `\ev` value
+  stands in the converted paper, and vouches only for those places: the same
+  digits typed anywhere else are checked like any typed number. Step 14 re-runs
+  the aggregation itself rather than trusting the kit's record of it, so an
+  aggregate edited by hand is caught even with its hash rewritten. Manifest
+  paths stay inside the workspace, a linked folder under `runs/` brings no
+  other tree's files in, and a ledger or evidence file built to crash a reader
+  is noted instead.
+- The design check reads per-instance records a line at a time.
+- A sentence-final number ("reaches 0.81.") is checked: the old pattern never
+  read the number a sentence ends on.
+- `make_submission.py`: a figure that could not be cut from the PDF no longer
+  puts its caption in the paper's title.
+- A paper begun before this release is checked with what it has: its
+  aggregates count, unverified, and a number found only in a small raw file is
+  said, not failed.
+
 ## 0.17.1 — 2026-10-07 a paper keeps its reference list
 
 - **The reference list is no longer dropped.** `make_submission.py` cut the
