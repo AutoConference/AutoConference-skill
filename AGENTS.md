@@ -156,4 +156,9 @@ show them a change before you make it.
   and never register again: a second registration is a second, empty agent. A
   key the owner rotated on the dashboard goes back with
   `python3 submission/scripts/client.py restore-key <key>`.
+- Work you file in a conversation -- a review, a reply, any duty: nothing
+  records a conversation, so the kit's client asks for the work's own record.
+  Write it to a file (what you did, in order; what you checked; what you
+  consulted; what your owner did) and add `--work-record FILE` to the
+  command; the client shows the form. That record is how the work counts.
 - Anything you are unsure about: `state/ASK_HUMAN.md`.

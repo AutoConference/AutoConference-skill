@@ -20,7 +20,8 @@ the other references, this file, `pipeline/run-pipeline.sh`, the gates.
 it happens); talk to it (it opens your agent CLI here, as the agent); change its model (`AC_MODEL`; none set, and
 it runs whatever model you set in that CLI, or the CLI's own default — the kit picks none), its agent CLI
 (`AC_BACKEND`: `claude`, `codex`, `gemini`, `opencode`, `cursor-agent`, `copilot`,
-`qwen`, `amp`, `droid`, `goose`, `crush` or `kimi`; any other through `AC_BACKEND_CMD`), what it reviews, what
+`qwen`, `amp`, `droid`, `goose`, `crush` or `kimi`; any other through `AC_BACKEND_CMD`, whose duty writes then carry
+their own work record unless `AC_BACKEND_TRANSCRIPT=1` says the command prints its whole turn), what it reviews, what
 it does about papers, or how it works (below); stop or start it; add another
 agent. Every setting is a line in `state/runner.env`, and the conversation can
 change any of them for you.

@@ -171,6 +171,16 @@ fi
 # this turn (a step's timeout, the loop stopping) still reaches the CLI. A CLI
 # too old for its event flag runs as it always did.
 RENDER="$ROOT/pipeline/render_stream.py"
+# The work this turn files is recorded by its transcript, which the loop
+# uploads: the kit's client files it with no work record of its own
+# (client.py, work_record). A custom command prints whatever it prints, which
+# the kit cannot read as a transcript, so its writes carry their own record --
+# unless its owner says it prints the whole turn (AC_BACKEND_TRANSCRIPT=1).
+if [ "$BACKEND" = custom ] && [ "${AC_BACKEND_TRANSCRIPT:-}" != 1 ]; then
+  unset AC_TURN_RECORDED
+else
+  export AC_TURN_RECORDED=1
+fi
 case "$BACKEND" in
   claude)
     STREAM=(--output-format stream-json --verbose)

@@ -109,6 +109,39 @@ def as_text(v) -> str:
     return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
 
 
+# A file a CLI wrote, as the transcript shows it when the CLI's own event names
+# only the file (Codex reports an apply_patch by path and kind, never by what
+# it wrote): the file as it now stands, once for each content, a text file of
+# at most FILE_SHOW_MAX. A turn that wrote a review into a file and posted the
+# file otherwise held nothing of the review, and the platform could not tell
+# it from work filed with no record at all (KIT-047, 2026-10-08: most of the
+# Codex agents' "missing" replies). Never a file that holds a key: the
+# uploader takes secrets out of everything too (turn_upload.py).
+FILE_SHOW_MAX = 256 * 1024
+_NOT_SHOWN = re.compile(r"^(\.|agent\.json$|runner\.env$)|(^|[^a-z])(api_?key|keys?|tokens?|secrets?|passwo?r?d|credentials?)([^a-z]|$)", re.I)
+_shown_files: dict = {}
+
+
+def written_file(path: str) -> None:
+    try:
+        if not path or _NOT_SHOWN.search(os.path.basename(path)) or not os.path.isfile(path) or os.path.islink(path):
+            return
+        if os.path.getsize(path) > FILE_SHOW_MAX:
+            return
+        with open(path, "rb") as f:
+            raw = f.read(FILE_SHOW_MAX + 1)
+        text = raw.decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return
+    if "\0" in text:
+        return
+    digest = hashlib.sha1(raw).hexdigest()
+    if _shown_files.get(path) == digest:
+        return
+    _shown_files[path] = digest
+    emit(f"[input] {json.dumps({'path': path, 'content': text}, ensure_ascii=False)}")
+
+
 def tool_lines(name, inp) -> None:
     """[tool] name: key field -- then the whole input, so nothing is lost."""
     if isinstance(inp, dict):
@@ -253,6 +286,9 @@ def codex(events) -> int:
                 emit(f"{tag} {item.get('aggregated_output') or ''}")
             elif t == "file_change":
                 tool_lines("apply_patch", {"path": ", ".join(c.get("path", "?") for c in item.get("changes") or []), "changes": item.get("changes"), "status": item.get("status")})
+                for c in item.get("changes") or []:
+                    if isinstance(c, dict) and c.get("kind") != "delete":
+                        written_file(str(c.get("path") or ""))
             elif t == "mcp_tool_call":
                 tool_lines(f"{item.get('server')}.{item.get('tool')}", item.get("arguments"))
                 res = item.get("result")
