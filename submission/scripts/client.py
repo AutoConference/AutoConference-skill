@@ -1114,7 +1114,7 @@ def fill_interests(keywords):
 # a setting the owner later changed here, in ./ac, is not undone by a change
 # to another one on the website. Never a path, never a command: those stay
 # on this machine.
-SETTING_KEYS = {"backend", "model", "papers", "gpus", "instructions", "research_tokens"}
+SETTING_KEYS = {"backend", "model", "papers", "gpus", "instructions", "research_tokens", "auto_update"}
 # These reach the loop only when it starts again; instructions are read by
 # each research step as it runs.
 RESTART_KEYS = {"backend", "model", "papers", "gpus", "research_tokens"}
@@ -1310,8 +1310,25 @@ def machine_report(applied: int, fresh: bool = False) -> dict:
         "activity": activity(),
         "questions": questions(),
         "model_blocked": model_blocked(),
+        # KIT-048: whether the kit keeps itself up to date, and how its last look went.
+        "kit_update": kit_update_state(get),
         "applied_version": applied,
     }
+
+
+def kit_update_state(get) -> dict:
+    """state/kit-update.json (pipeline/kit_update.py), as its owner's page
+    shows it: on or off, and the last update or why there was none."""
+    try:
+        with open(os.path.join(STATE, "kit-update.json"), encoding="utf-8") as f:
+            r = json.load(f)
+    except (OSError, ValueError):
+        r = {}
+    if not isinstance(r, dict):
+        r = {}
+    keys = ("state", "cause", "why", "latest", "from", "to", "updated_at", "checked_at")
+    return {"auto": (get("AC_AUTO_UPDATE") or "").strip() not in ("0", "off", "no", "false"),
+            **{k: str(r[k])[:300] for k in keys if r.get(k)}}
 
 
 def apply_settings(settings: dict, since: int) -> list:
@@ -1349,6 +1366,10 @@ def apply_settings(settings: dict, since: int) -> list:
             if value is None or (value.isdigit() and 1 <= int(value) <= 100000):
                 _runner_set("AC_RESEARCH_MTOKENS_WEEK", value)
                 done.append(key)
+        elif key == "auto_update":
+            # KIT-048: "off" keeps the kit as it is until its owner updates it (./ac, u).
+            _runner_set("AC_AUTO_UPDATE", "0" if value == "off" else None)
+            done.append(key)
         elif key == "instructions":
             # Beside state/: the kit's custom/ (its own copy, in a test).
             path = os.path.join(os.path.dirname(os.path.abspath(STATE)), "custom", "website.md")
@@ -1376,15 +1397,19 @@ def cmd_sync(a):
     rules = fetch_rules()
     owner = (out or {}).get("owner_settings") or {}
     version = int(owner.get("version") or 0)
+    # KIT-048: the platform's latest kit, for pipeline/kit_update.py.
+    latest = ((out or {}).get("kit") or {}).get("latest")
+    latest = latest if isinstance(latest, str) and re.fullmatch(r"\d+(\.\d+){1,3}", latest) else None
     if version <= applied:
-        emit({"settings_version": applied, "changed": [], "rules_version": rules or None})
+        emit({"settings_version": applied, "changed": [], "rules_version": rules or None, "kit_latest": latest})
         return
     done = apply_settings(owner.get("settings") or {}, applied)
     answered = apply_answers(owner.get("answers") or [], applied)
     save("settings.json", {"version": version})
     # Said back at once, so the website shows them applied now, not a wake later.
     req("POST", "/me/machine", machine_report(version, fresh=True), budget="machine")
-    emit({"settings_version": version, "changed": done, "answered": answered, "rules_version": rules or None})
+    emit({"settings_version": version, "changed": done, "answered": answered, "rules_version": rules or None,
+          "kit_latest": latest})
     if RESTART_KEYS & set(done):
         sys.exit(3)
 

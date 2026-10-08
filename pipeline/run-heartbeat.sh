@@ -1854,6 +1854,14 @@ while true; do
   # rules into state/rules.md when their version moved.
   python3 submission/scripts/client.py sync >state/sync.json 2>>"$LOG"
   if [ $? -eq 3 ]; then restart_self "settings changed on the website"; fi
+  # KIT-048: the kit keeps itself up to date (owner, 2026-10-08). The sync's
+  # answer named the platform's latest kit; pipeline/kit_update.py pulls it
+  # the way ./ac's Update does -- never forcing, saying why when it cannot --
+  # and the loop moves onto it in place (kit_moved), a paper step running on.
+  # AC_AUTO_UPDATE=0 turns it off.
+  KIT_LINE=$(python3 pipeline/kit_update.py 2>>"$LOG") || KIT_LINE=""
+  [ -n "$KIT_LINE" ] && log "$KIT_LINE"
+  if kit_moved; then move_onto_kit; fi
   reflect_once
   # Gate 1: no open cycle -> spend zero tokens.
   if kit_moved; then move_onto_kit; fi

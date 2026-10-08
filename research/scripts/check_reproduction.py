@@ -46,11 +46,13 @@ nobody decided was reproducible.
 Each entry runs alone, in a fresh copy of the workspace without results/
 (nor data/, figures/ or any environment), so a script must compute what it
 reports. One that reads another entry's results names it in `after` (its
-script or its output): that entry runs first, in the same copy, and the
-script reads what it re-made -- a slow computation split from the analyses
+script or its output): that entry runs first, and the script reads
+everything it re-made -- its output and every other file its re-run wrote,
+put in the script's own copy -- so a slow computation split from the analyses
 built on it reproduces as one chain (a tester's report, 2026-10-06: two
 analyses reading another entry's output crashed in the gate, which the agent
-was never told). `python` names the interpreter to re-run with (a path, or
+was never told; and 2026-10-08: with `after`, an analysis still crashed on a
+second file that entry writes, as only its declared output was carried over). `python` names the interpreter to re-run with (a path, or
 a command as a list), when it is not this one.
 
 A failed entry says how it failed (`failure`): `mismatch` -- a number came
@@ -1124,10 +1126,13 @@ def runs_relative(path: str) -> str:
     return p
 
 
-def diagnose(stderr: str, outputs: dict, own: str, python_cmd: list) -> dict:
+def diagnose(stderr: str, outputs: dict, own: str, python_cmd: list,
+             after: set | None = None, sources: dict | None = None) -> dict:
     """Why a script crashed, from what it printed: a cause, the line that
     says it, and what would fix it. `outputs` maps every entry's output to its
-    script, so reading another entry's results is named as such."""
+    script, so reading another entry's results is named as such; `sources`
+    (script -> its text) finds the entry that writes a file it does not
+    declare; `after`, the scripts this entry already runs after."""
     tail = (stderr or "")[-8000:]
     lines = [ln.strip() for ln in tail.splitlines() if ln.strip()]
     last = lines[-1][:300] if lines else ""
@@ -1153,21 +1158,38 @@ def diagnose(stderr: str, outputs: dict, own: str, python_cmd: list) -> dict:
         path = found[-1].group(1)
         rel = runs_relative(path)
         other = next((s for o, s in outputs.items() if o != own and (o == rel or rel.endswith("/" + o))), None)
+        base = os.path.basename(rel)
         if other is None:
-            base = os.path.basename(rel)
             hits = {s for o, s in outputs.items() if o != own and os.path.basename(o) == base}
             other = next(iter(hits)) if len(hits) == 1 else None
+        if other is None and sources and base:
+            # A file an entry writes besides its declared output (its
+            # per-instance data, say): the one entry whose script names it.
+            mine = outputs.get(own)
+            hits = {s for s, text in sources.items() if s != mine and base in text}
+            other = next(iter(hits)) if len(hits) == 1 else None
+        if other and other in (after or set()):
+            return {"cause": "not_remade", "last": last, "reads": other,
+                    "hint": (f"it reads {rel}, and it already runs after {other} -- whose re-run, in a clean "
+                             f"copy, did not write it. Make {other} write it on every run (not only when it is "
+                             f"missing, or a flag is set), or compute it in this script.")}
+        if other is None and after and "/results/" in "/" + rel:
+            names = ", ".join(sorted(after))
+            return {"cause": "not_remade", "last": last,
+                    "hint": (f"it reads {rel}; it runs after {names}, and none of their re-runs wrote it. Have "
+                             f"the entry that makes it write it on every run (and name that one in \"after\" "
+                             f"if it is not there), or compute it in this script.")}
         if other:
             return {"cause": "reads_another_entrys_output", "last": last, "reads": other,
                     "hint": (f"it reads {rel}, which {other} writes. Each entry re-runs alone, in a copy "
                              f"without results/, in no set order: name that entry in its manifest entry -- "
-                             f"\"after\": [\"{other}\"] -- so it runs first, in the same copy; or compute "
+                             f"\"after\": [\"{other}\"] -- so it runs first and this one reads what it re-made; or compute "
                              f"what it needs itself.")}
         if "/results/" in "/" + rel:
             return {"cause": "reads_recorded_results", "last": last,
                     "hint": (f"it reads {rel}, a results file the clean copy does not have: a script computes "
-                             f"everything it reports. A results file another entry writes is read through "
-                             f"\"after\".")}
+                             f"everything it reports. If another entry writes it, name that entry in "
+                             f"\"after\"; otherwise compute it in this script.")}
         return {"cause": "missing_file", "last": last,
                 "hint": (f"it reads {path}, which the clean copy does not have: data/, figures/ and any "
                          f"environment are left out of it. A script makes or fetches what it needs, or "
@@ -1203,6 +1225,44 @@ def copy_workspace(work: str, tmp: str) -> None:
                 pass
 
 
+def snapshot(root: str) -> dict:
+    """Every file under `root` (bar compiled Python), by size and time: what a
+    re-run made is what differs afterwards."""
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for fn in filenames:
+            if fn.endswith(".pyc"):
+                continue
+            p = os.path.join(dirpath, fn)
+            try:
+                st = os.lstat(p)
+            except OSError:
+                continue
+            out[os.path.relpath(p, root)] = (st.st_size, st.st_mtime_ns)
+    return out
+
+
+def place(src: str, dst: str, link: bool) -> None:
+    """`src` at `dst` -- a link stays a link. `link`: a hard link where the
+    disk allows (keeping a large re-made file costs no second copy); else a
+    copy, as each reader gets: one that writes into a file it was given
+    must not change what the next reader reads."""
+    os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+    if os.path.lexists(dst):
+        os.remove(dst)
+    if os.path.islink(src):
+        os.symlink(os.readlink(src), dst)
+        return
+    if link:
+        try:
+            os.link(src, dst)
+            return
+        except OSError:
+            pass
+    shutil.copy2(src, dst)
+
+
 def script_path(runs: str, script: str) -> str:
     """Scripts are named relative to runs/ by convention, but may sit anywhere
     in the tree; resolved against runs/ first, then the workspace root."""
@@ -1211,13 +1271,15 @@ def script_path(runs: str, script: str) -> str:
     return next((c for c in cand if os.path.exists(c)), cand[0])
 
 
-def run_one(runs: str, exp: dict, env: dict, python_cmd: list, deps: dict | None = None,
-            keep: str | None = None, outputs: dict | None = None) -> tuple:
+def run_one(runs: str, exp: dict, env: dict, python_cmd: list, feeds: list | None = None,
+            keep: str | None = None, outputs: dict | None = None,
+            after: set | None = None, sources: dict | None = None) -> tuple:
     """Re-run one entry in a clean copy and diff what it makes against what
-    was recorded. `deps`: the re-made outputs of the entries it runs after
-    (output -> file), put in its copy first. `keep`: a folder to keep its own
-    re-made output in, for the entries that read it. Returns (the report's
-    entry, the kept output or None)."""
+    was recorded. `feeds`: what the entries it runs after re-made (a folder
+    each, in the order they ran), put in its copy first. `keep`: a folder to
+    keep everything this re-run made in -- its output and every other file it
+    wrote -- for the entries that read it. Returns (the report's entry, the
+    kept folder or None)."""
     script = exp["script"]
     out_rel = exp["output"]
     base = {"script": script, "output": out_rel}
@@ -1255,11 +1317,15 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, deps: dict | None
         if os.path.exists(stale):
             os.remove(stale)
         os.makedirs(os.path.join(tmp, "runs", os.path.dirname(out_rel) or "."), exist_ok=True)
-        # What it runs `after`: their outputs as this replay re-made them.
-        for rel, src in (deps or {}).items():
-            dst = os.path.join(tmp, "runs", rel)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
+        # What it runs `after`: everything those re-runs made, where they made it.
+        for made_dir in feeds or []:
+            for dirpath, _dirs, filenames in os.walk(made_dir):
+                for fn in filenames:
+                    src = os.path.join(dirpath, fn)
+                    place(src, os.path.join(tmp, os.path.relpath(src, made_dir)), link=False)
+        if os.path.exists(stale):
+            os.remove(stale)
+        before = snapshot(tmp) if keep else {}
 
         script_abs = script_path(os.path.join(tmp, "runs"), script)
         cmd = list(python_cmd) + [script_abs] + [str(x) for x in exp.get("args", [])]
@@ -1270,7 +1336,7 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, deps: dict | None
                               timeout=exp.get("timeout_s", 3600))
         dt = time.time() - t0
         if proc.returncode != 0:
-            d = diagnose(proc.stderr, outputs or {}, out_rel, python_cmd)
+            d = diagnose(proc.stderr, outputs or {}, out_rel, python_cmd, after, sources)
             entry = {**base, "verdict": "FAIL", "failure": "crashed",
                      "why": f"exit {proc.returncode}" + (f": {d['last']}" if d["last"] else ""),
                      "cause": d["cause"], "hint": d["hint"],
@@ -1288,9 +1354,10 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, deps: dict | None
         with open(fresh_path, encoding="utf-8") as f:
             fresh = json.load(f)
         if keep:
-            kept = os.path.join(keep, hashlib.sha256(out_rel.encode()).hexdigest()[:16], os.path.basename(out_rel))
-            os.makedirs(os.path.dirname(kept), exist_ok=True)
-            shutil.copy2(fresh_path, kept)
+            kept = os.path.join(keep, hashlib.sha256(f"{script}\0{out_rel}".encode()).hexdigest()[:16])
+            for rel, st in snapshot(tmp).items():
+                if before.get(rel) != st:
+                    place(os.path.join(tmp, rel), os.path.join(kept, rel), link=True)
     except subprocess.TimeoutExpired:
         return {**base, "verdict": "FAIL", "failure": "timeout",
                 "why": f"timed out after {exp.get('timeout_s', 3600)}s",
@@ -1820,6 +1887,13 @@ def main() -> None:
                 print(f"repro-gate: every entry runs ({why})", flush=True)
         env = man.get("env", {})
         outputs = {e["output"]: e["script"] for e in exps}
+        sources = {}
+        for e in exps:
+            try:
+                with open(script_path(runs, e["script"]), encoding="utf-8", errors="replace") as f:
+                    sources[e["script"]] = f.read(2_000_000)
+            except OSError:
+                pass
         readers = set().union(*(closure(deps[i], deps) for i in wanted)) if wanted else set()
         scratch = tempfile.mkdtemp(prefix="reprogate-keep-")
         made, entries = {}, {}
@@ -1836,9 +1910,12 @@ def main() -> None:
                                   "hint": "repair the entry it reads; this one runs once that one does."}
                     allok = False
                     continue
-                feed = {exps[j]["output"]: made[j] for j in closure(deps[i], deps) - {i}}
+                ahead = closure(deps[i], deps) - {i}
+                feed = [made[j] for j in order if j in ahead]
+                after = {exps[j]["script"] for j in deps[i]}
                 print(f"repro-gate: re-running {exp['script']} ...", flush=True)
-                entry, kept = run_one(runs, exp, env, python_cmd, feed, scratch if i in readers else None, outputs)
+                entry, kept = run_one(runs, exp, env, python_cmd, feed, scratch if i in readers else None, outputs,
+                                      after, sources)
                 # A replay whose only problem is drift -- every exact field matched,
                 # only `tolerant` fields moved past their bound -- runs once more
                 # before it fails: a result that varies run to run can land outside
@@ -1847,7 +1924,8 @@ def main() -> None:
                         all(p.get("kind") == "outside_tolerance" for p in entry["problems"]):
                     print(f"repro-gate: only tolerant fields drifted; running {exp['script']} once more", flush=True)
                     first = entry
-                    entry, kept = run_one(runs, exp, env, python_cmd, feed, scratch if i in readers else None, outputs)
+                    entry, kept = run_one(runs, exp, env, python_cmd, feed, scratch if i in readers else None, outputs,
+                                          after, sources)
                     entry["first_attempt"] = {"verdict": first["verdict"], "problems": first["problems"]}
                 if kept:
                     made[i] = kept

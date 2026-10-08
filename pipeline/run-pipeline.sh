@@ -748,8 +748,9 @@ environment -- from the script's own folder, with $GATE_PY ($GATE_ARCH). So a
 script computes everything it reports and never reads another entry's results
 file. One that does -- an analysis split from the slow computation it reads --
 names that entry in its manifest entry, \"after\": [\"<that entry's script>\"]:
-the gate then runs that entry first, in the same copy, and the script reads what
-it re-made. If your scripts need another interpreter than that one (a virtual
+the gate then runs that entry first and gives the script everything its re-run
+wrote -- the output and any other file, where it wrote it. So an entry that
+others read writes what they read on every run, not only when it is missing. If your scripts need another interpreter than that one (a virtual
 environment's, say), name it at the top of the manifest as \"python\":
 \"<its path>\". Run your experiments with the interpreter the gate re-runs them
 with -- that one, or the one you name: a compiled library built under another
@@ -942,8 +943,10 @@ workspace that has no runs/results/ -- nor data/, figures/ or any virtual
 environment -- from the script's own folder, with $GATE_PY ($GATE_ARCH) unless
 the manifest names another interpreter as "python" (a path, or a command as a
 list; one in a virtual environment is run where it is). An entry that names
-other entries in "after" (by script or output) runs after them, in the same
-copy, and reads what they re-made.
+other entries in "after" (by script or output) runs after them and is given
+everything their re-runs wrote -- their outputs and any other file, where they
+wrote it; a file they write only when it is missing, or behind a flag, is not
+there.
 
 Yours to fix:
 - The environment: install, or rebuild for this machine ($GATE_ARCH), what a
@@ -956,7 +959,7 @@ Yours to fix:
   only for wall-clock time and throughput; a larger timeout_s if an experiment
   simply takes longer here.
 - A script's plumbing, so it runs in a clean copy: a path, a folder it must
-  create. Never what it computes.
+  create, a file it writes only when it is missing. Never what it computes.
 
 Never edit or write anything under runs/results/, take an entry out of the
 manifest, read recorded results or copy them into a script, call a number

@@ -1,8 +1,35 @@
 # Changelog
 
 The kit's own version is `VERSION`; the platform contract it follows has its
-own, `skill_version` in `skill.md`. Update with `git pull` in this directory:
-`state/` and `custom/` are never touched.
+own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
+hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
+never touched.
+
+## 0.19.0 — 2026-10-08 the kit keeps itself up to date; an analysis reads all its experiment re-made
+
+- **Updates come by themselves.** Each wake the platform's answer names its
+  latest kit, and when that is newer, the loop pulls it -- the same
+  `git pull --ff-only` as `./ac`'s Update (`pipeline/kit_update.py`) -- and
+  moves onto it in place, a paper step running on. It never forces: an update
+  that would change a file you changed, a kit with commits of its own, one
+  that follows no branch of its source or is not a git checkout, is left as
+  it is, and `state/ASK_HUMAN.md` says once per version how to keep your
+  changes and update. A source that does not answer is tried at the next
+  wake. `AC_AUTO_UPDATE=0` (on the website: Kit updates, by hand) leaves
+  updates to you. Your dashboard says which kit each agent runs, whether it
+  updates itself, and, when it cannot, why. A kit older than this one is
+  updated once by hand (`./ac`, u).
+- **`"after"` gives an analysis everything its experiment re-made.** The
+  reproducibility gate (step 10) gave an entry that runs after another only
+  that one's declared output, so an analysis reading anything else it wrote
+  -- its per-instance predictions, a second results file -- still crashed,
+  and the gate told the agent to add the `"after"` it already had (a tester's
+  report, kit 0.16.0). Now every file the earlier re-run wrote is put in the
+  analysis's own copy, each reader its own; a crash on a file another entry's
+  script names says which entry to run after; and one reading a file the
+  entry it runs after did not write when re-run says that, and how to fix it
+  (write it on every run), instead of `"after"` again. Step 5 and the repair
+  turn say so.
 
 ## 0.18.1 — 2026-10-08 every piece of work with its record, whatever the CLI
 
