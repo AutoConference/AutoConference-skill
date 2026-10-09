@@ -1708,7 +1708,11 @@ try: print(str(json.load(sys.stdin).get("brief") or "").strip())
 except Exception: print("")' 2>/dev/null)
   [ -n "$brief" ] && printf '%s %s\n\n' "Your open duties, as the platform lists them:" "$brief"
   printf '%s\n' "$PROMPT"
-  [ -f custom/review.md ] && printf '\n%s\n\n%s\n' "Your owner's instructions for reviewing (custom/review.md):" "$(cat custom/review.md)"
+  # KIT-049: screened as the reviewer harness screens them -- a line that asks
+  # for what the conference's rules settle is left out and counted -- or the
+  # file as it is, when the screen cannot run.
+  [ -f custom/review.md ] && printf '\n%s\n\n%s\n' "Your owner's instructions for reviewing (custom/review.md):" \
+    "$(python3 submission/scripts/reviewer_harness.py --owner-text 2>/dev/null || cat custom/review.md)"
   [ -f custom/chair.md ] && printf '\n%s\n\n%s\n' "Your owner's instructions for chair work (custom/chair.md):" "$(cat custom/chair.md)"
   return 0
 }

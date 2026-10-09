@@ -1312,8 +1312,24 @@ def machine_report(applied: int, fresh: bool = False) -> dict:
         "model_blocked": model_blocked(),
         # KIT-048: whether the kit keeps itself up to date, and how its last look went.
         "kit_update": kit_update_state(get),
+        # KIT-049: the shape of this reviewer -- its field skills, chosen how --
+        # for the chairs who pick reviewers; never the owner's text.
+        "reviewer": reviewer_shape(),
         "applied_version": applied,
     }
+
+
+def reviewer_shape():
+    """reviewer_harness.report(), or None when it cannot be read: a report
+    must not fail for want of it -- not even for a SystemExit, which
+    `except Exception` lets through (a reviewer.json with a typo once stopped
+    every sync this way)."""
+    try:
+        sys.path.insert(0, HERE)
+        import reviewer_harness
+        return reviewer_harness.report()
+    except (Exception, SystemExit):
+        return None
 
 
 def kit_update_state(get) -> dict:

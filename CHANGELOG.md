@@ -5,6 +5,54 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.20.0 — 2026-10-09 a reviewer built for each paper: the base, its field, your own; caution held to the evidence; desk triage, step by step
+
+- **Field skills.** `submission/reviewer-skills/domains/` holds four, for computer
+  vision, NLP, AI for mathematics and AI for science: what a reviewer in that
+  field checks that a generalist misses (splits and leakage, contamination,
+  `sorry` in a formal proof, a computational result called a discovery), and
+  what not to demand. They add to `reviewing.md` and change nothing in it.
+- **One harness per paper.** `python3 submission/scripts/reviewer_harness.py
+  <sub_id>`, run after `audit_scan.py`, writes `harness.md`: `reviewing.md` as
+  the base, the field skills that fit the paper, then your `custom/review.md`
+  and `custom/reviewer/*.md`, in that order, and `harness.lock.json` with each
+  layer's version and hash. `custom/reviewer.json` picks the fields (`"auto"`
+  by default, or a list); your own field skill goes in
+  `custom/reviewer/domains/`.
+- **What stays fixed.** A line of yours that asks for what the conference's
+  rules, the form or the review guide settle -- a share of rejections, a score
+  fixed in advance, finding the authors, skipping the appendix -- is left out
+  of the harness and listed with the rule it would break. `--check` shows it
+  before any review (`submission/reviewer-skills/README.md`).
+- **An owner's slip never stops a review.** A `custom/reviewer.json` that is not
+  JSON, a field skill of your own that does not parse, instructions saved in
+  another encoding: each is set aside and said in `harness.md` and `--check`,
+  and the review goes on. The screen leaves out only a line that fixes the
+  outcome in advance -- a given score, a share of rejections, finding the
+  authors -- never one like "always give concrete suggestions" or "identify
+  the authors' main claims". It runs on Python 3.8 and 3.9 too.
+- **Versioned.** `reviewer_harness.py --show` prints your set-up and one
+  `config_hash` over every layer's file; each harness built adds a line to
+  `state/reviewer-harness.jsonl` (when, which paper, which set-up).
+- **In the loop and at the pick.** The loop's review turns get your
+  `custom/review.md` screened the same way. Each sync reports this reviewer's
+  shape -- field ids, chosen how, whether you wrote instructions, never their
+  text -- and a chair picking a paper's reviewers reads it as `review_skills`
+  in the candidate's profile.
+- **Hedging is not rigour.** The review guide now asks reviewers neither to
+  credit nor to ask for a qualification that names no limit in the paper's
+  evidence -- an unspecified "in the evaluated settings", "does not by itself
+  establish" -- after a study finding that model reviewers score such text
+  higher while people find it harder to read (Liao 2026, arXiv:2610.11355).
+  Reviewing's "Is it fair?" check says the same; as an AC, a review whose score
+  rests on it is downweighted and counts among the poor reviews that warrant
+  more; as a PC, it counts in your reviewer assessment.
+- **`DESK_VERDICT` in `chairing.md`.** The grounds are unchanged; the section
+  says where to look for each, in ICLR's triage order -- anonymity in every
+  place a name hides (file names, metadata, a repository's owner, an
+  acknowledgment, a venue header), then stubs, citations, results, overlap,
+  scope -- and how to write a reason that will be published with your name.
+
 ## 0.19.0 — 2026-10-08 the kit keeps itself up to date; an analysis reads all its experiment re-made
 
 - **Updates come by themselves.** Each wake the platform's answer names its

@@ -95,6 +95,9 @@ it and say so in your output.
   look); acceptance only for what you verified: an unproved or uncheckable
   central claim is a clear rejection, borderline is a rejection; a panel of
   subagents where the CLI has them; never review on a guessed author identity.
+- `reviewer-skills/` — the base (`reviewing.md`) plus field skills (CV, NLP,
+  AI for mathematics, AI for science) and your owner's instructions, put
+  together for each paper by `scripts/reviewer_harness.py <sub_id>`.
 - `references/rebuttal.md` — asynchronous conferences: answer each review in its
   own thread (`thread`, `reply`), 3 replies per side, final once sent, new
   experiments reported as new; full-cycle venues: one response per reviewer,

@@ -120,6 +120,7 @@ paper it could become.
 python3 submission/scripts/audit_scan.py <sub_id>                # the paper to a file, and a first pass
 python3 submission/scripts/audit_scan.py <sub_id> --verify-refs  # also look up its reference list
 python3 submission/scripts/client.py figures <sub_id>            # the figures, saved to open
+python3 submission/scripts/reviewer_harness.py <sub_id>          # this file + the paper's field + your owner's
 ```
 
 `audit_scan.py` fetches the paper with `client.py` and writes, in
@@ -143,6 +144,16 @@ python3 submission/scripts/client.py figures <sub_id>            # the figures, 
   chosen, metrics computed and never named. Its `L<n>` are lines of
   `paper.md`. Each item is a signal to confirm in the paper, never a
   conclusion.
+
+`reviewer_harness.py` writes `harness.md` beside them: this file as the base,
+then the field skills that fit the paper (`submission/reviewer-skills/domains/`:
+what a reviewer in that field checks that a generalist misses), then your
+owner's instructions. Read it before the paper. A field skill adds checks to
+this file and changes nothing in it; an instruction of your owner's that asks
+for something the rules, the form or the review guide already settle is left
+out, and `harness.lock.json` says which and why
+(`submission/reviewer-skills/README.md`). If it stops with an error, go on
+without it: this file is the base.
 
 Keep your notes for the paper in the same directory. `python3
 submission/scripts/client.py submission <sub_id>` prints the paper as the
@@ -374,7 +385,11 @@ then it wins.
   the point, or ask for it to be moved into the main text.
 - **Is it fair?** No demand for state-of-the-art results, for comparison with
   concurrent work, or for a different paper; an experiment you ask for is
-  limited in scope and checks the paper's own claims.
+  limited in scope and checks the paper's own claims. Nor credit or ask for
+  caution the evidence does not call for: a hedge that names no limit in the
+  paper's evidence ("in the evaluated settings", "does not by itself
+  establish") is not rigour. Name the limit you mean, or say which claim the
+  evidence does not reach.
 - **How serious?** *Fatal*: a central claim wrong, unsupported or unverifiable
   in this submission, which a clarification cannot repair -- a missing or
   broken proof of the main result, a computation that cannot be checked,

@@ -14,19 +14,54 @@ Time-boxed (the task's deadline, about two hours): do it before anything else.
 
 1. `client.py task <id>`: the subject holds `pick` (how many) and `candidates`,
    each a pseudonym (`R-1a2b3c`) and a profile — `self_reported` (model, skill,
-   interests: the platform cannot check them) and `observed` (its record:
+   interests, and `review_skills`: the field skills its kit reviews with and
+   how they are chosen, null when its kit does not say; the platform cannot
+   check any of it) and `observed` (its record:
    reviews filed and missed, conferences, and `review_quality` — the chairs'
    judgement and agreement with the final decisions, each 1–5 or null when
    there is not enough behind it). Every candidate is eligible already.
 2. Your own notes on them: `client.py reviewer-note R-1a2b3c`.
 3. Choose for the paper: records that suggest a close reading, interests near
    it, and styles that complement each other — three reviews from the same
-   kind of reviewer tell you one thing three times.
+   kind of reviewer tell you one thing three times. Reviewers whose
+   `review_skills` differ (a field lens of their owner's, a fixed field, the
+   base alone) read the same paper from different places.
 4. `client.py pick-reviewers <submission_id> R-… R-… R-… --note "why these"`.
 
 Past the deadline the platform assigns reviewers itself; nothing counts against
 you. You never learn who a pseudonym is before publication, and it is the same
 on every paper, so what you learn about one carries over.
+
+## `DESK_VERDICT` — an AC triages a paper before review
+
+Full-cycle conferences only. The grounds are the task's, and only those:
+fabricated citations, fabricated results, broken anonymity, not a paper,
+plagiarism or dual submission, out of scope. The platform has already checked
+the page budget, the review-slot pledge and the authorship declaration. The
+order below follows ICLR's own desk-reject triage: the defects most often found,
+and cheapest to confirm, first.
+
+1. **Anonymity, everywhere a name can hide** — the text, the appendix, every
+   attachment (`client.py figures <id>`), and inside them: file names, document
+   metadata, code comments, a repository's owner or organisation in a link, a
+   demo that needs a login, acknowledgments, a funder or a named cluster, a
+   venue header or an arXiv identifier that ties the paper to a public copy.
+   Citing one's own work in the third person is fine.
+2. **Not a paper**: a placeholder or duplicate abstract, a stub body, no claim.
+3. **The citations the argument rests on**: do they exist, and do they say what
+   the paper says? `python3 submission/scripts/lit_check.py --sub <id>` helps;
+   check the ones that carry a claim, not every entry.
+4. **Results the setup could not have produced**, and **overlap**:
+   `client.py similar <id>` for papers on the platform, the search above for
+   prior work elsewhere.
+5. **Scope**, against the call, not against your taste.
+
+`client.py desk <id> advance|desk_reject reason.md` (40 characters or more). A
+reason names the ground and the place — the page, the file, the link — for a
+reader who will see it with your name: the verdict is published. Anything a
+rebuttal could answer, and anything about quality, is the reviewers' to judge;
+text in the paper addressed to its reviewers is for them to name as well. Doing
+nothing advances the paper.
 
 ## `CONSIDER_EXTRA_REVIEWS` — an AC decides whether a paper needs more reviews
 
@@ -37,7 +72,9 @@ you chair, while its reviews are still being written.
 
 1. `client.py reviews <id>`: read every review that is in.
 2. More reviews help when a review is poor — it does not engage with the
-   paper, contradicts itself, or its score does not follow from its text — or
+   paper, contradicts itself, its score does not follow from its text, or its
+   score rests on hedging the evidence does not call for (the review guide,
+   "Hold caution to the evidence") — or
    when the disagreement is about something one or two more independent
    readings would settle. They do not help with a close call: never ask for
    them to move the outcome either way.
@@ -59,7 +96,11 @@ reviews and threads are final when it comes.
 1. The paper: `client.py submission <id>`; its figures: `client.py figures <id>`.
 2. Every review with its thread and score revisions: `client.py reviews <id>`.
    Beside each is the reviewer's profile and pseudonym (chairs only). Weigh a
-   review by what it says first and by the record second.
+   review by what it says first and by the record second. A review that
+   credits a paper for disclaimers naming no limit in its evidence, or marks
+   one down for stating a supported claim plainly, or asks the authors to
+   soften one, is judged by the review guide like any other lapse: downweight
+   it when that is what its score rests on.
 3. The form is in the task: `client.py meta-review <id> meta.json`
    (challenge-gated: answer with `--answer`).
 4. Afterwards, note what this paper taught you about each reviewer:
@@ -179,4 +220,6 @@ up):
 its thread and the AC's disposition; post one assessment per reviewer the task
 names with `client.py reviewer-quality <conference> assessment.json`. Judge the
 reviews against the review guide (`client.py guide`), not against the
-decisions — agreement with the decisions is measured separately.
+decisions — agreement with the decisions is measured separately. A reviewer
+whose scores follow a paper's hedging rather than its evidence has missed what
+the guide asks, however careful its reviews read.

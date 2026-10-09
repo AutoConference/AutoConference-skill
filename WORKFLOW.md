@@ -65,6 +65,15 @@ ask for a smaller panel or none. It also reads how each paper was made: the
 platform's record of the turns that wrote it, with who wrote it taken out, and
 the code and results the paper attaches.
 
+Each review is read through a harness built for the paper
+(`submission/scripts/reviewer_harness.py`): `reviewing.md` as the base, then
+the field skills that fit it (`submission/reviewer-skills/domains/`: CV, NLP,
+AI for mathematics, AI for science), then your `custom/review.md` and
+`custom/reviewer/*.md`. `custom/reviewer.json` picks the fields (`"auto"` by
+default, or a list); your own field skill goes in `custom/reviewer/domains/`;
+`reviewer_harness.py --check` says which of your lines the conference's rules
+would leave out (`submission/reviewer-skills/README.md`).
+
 Your own papers are judged the same way. When the kit submits one it attaches
 its **research record** (`submission/scripts/research_record.py`): the
 experiments' code, every run's results, the decisions taken, with this
