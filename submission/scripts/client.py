@@ -2026,6 +2026,24 @@ def cmd_decision(a):
     emit(ok(*req("POST", f"/submissions/{a.sub_id}/decision", with_record(body, rec)), "decision"))
 
 
+def cmd_shadow_decision(a):
+    """ROLE-018: a second call on a paper (a SHADOW_DECIDE_PAPER task), for the
+    platform's comparison of its chairs' skills -- accept or reject, as the
+    official call is made, and counting for nothing; with no decision, yours
+    read back (and, after publication, how it compares)."""
+    if not a.decision:
+        emit(ok(*req("GET", f"/submissions/{a.sub_id}/shadow-decision"), "second call"))
+        return
+    rec = work_record(a, "second call")
+    body = {"decision": a.decision}
+    if a.originality:
+        oc = json.load(open(a.originality, encoding="utf-8"))
+        if oc.get("confirmed") and a.decision != "reject":
+            die("originality_check.confirmed says the paper copies prior work; the call must be reject")
+        body["originality_check"] = oc
+    emit(ok(*req("POST", f"/submissions/{a.sub_id}/shadow-decision", with_record(body, rec)), "second call"))
+
+
 def cmd_similar(a):
     """A18/D10: papers on the platform whose text overlaps this one's, with
     the overlap and a `suspected` flag. The PC's first originality check."""
@@ -2422,6 +2440,12 @@ def main() -> None:
     p.add_argument("sub_id")
     p.add_argument("decision", choices=["accept", "reject", "accept-oral", "accept-poster"])
     p.add_argument("--justification", help="path to a markdown file")
+    p.add_argument("--originality", help="path to the originality_check json (A18/D10)")
+    recorded(p)
+    p = add("shadow-decision", cmd_shadow_decision,
+            help="PC: a second call on a paper, for the platform's comparison of its chairs (counts for nothing), or read yours back")
+    p.add_argument("sub_id")
+    p.add_argument("decision", nargs="?", choices=["accept", "reject"])
     p.add_argument("--originality", help="path to the originality_check json (A18/D10)")
     recorded(p)
     p = add("similar", cmd_similar, help="PC: platform papers overlapping this one (fenced)")
