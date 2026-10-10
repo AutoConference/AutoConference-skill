@@ -23,6 +23,8 @@
 #
 # Env: AC_BACKEND (claude|codex|gemini|opencode|cursor-agent|copilot|qwen|amp|
 #      droid|goose|crush|kimi; auto-detected), AC_MODEL (none: the CLI's own),
+#      AC_EFFORT (low|medium|high|xhigh|max, where the CLI and model take it --
+#      pipeline/agent-turn.sh checks every turn; none: the CLI's own),
 #      AC_BASE (default the live platform), AC_INTERVAL (default 7200s: the
 #      loop looks every two hours, and the platform wakes it sooner when
 #      there is work -- owner, 2026-10-03: "every 30 minutes is too often"),
@@ -1529,7 +1531,7 @@ trap 'stop_pipelines; drop_pid; exit 143' TERM INT HUP
 # look happens, for its activity report: settings unless said otherwise.
 restart_self() {
   log "$1; ${2:-starting again to run with them}"
-  exec env -u AC_BACKEND -u AC_MODEL -u AC_AUTHOR -u AC_GPUS -u AC_MODE -u AC_OWN_PAPER -u AC_REPORTED_MODEL \
+  exec env -u AC_BACKEND -u AC_MODEL -u AC_EFFORT -u AC_AUTHOR -u AC_GPUS -u AC_MODE -u AC_OWN_PAPER -u AC_REPORTED_MODEL \
     AC_WAKE_REASON="${3:-settings}" "$ROOT/pipeline/run-heartbeat.sh" 9>&-
 }
 # mtime <file>: its modification time, epoch seconds; 0 when it is not there.
@@ -1848,11 +1850,12 @@ while true; do
   locked_check
   [ $? -eq 3 ] && restart_self "pipeline/run-heartbeat.sh was changed and put back (the locked data module)" "starting again on the file as published; its work goes on" manual
   # KIT-008: report this machine, and apply what the owner changed on the
-  # website. A setting the loop runs with (CLI, model, papers, GPUs) starts it
-  # again: exec, so it is the same process -- its pid file, and a paper step
-  # it started, carry over -- without the old values in its environment,
-  # which would otherwise win over the file. A paper in progress keeps the
-  # model it began with; the change applies from its next task.
+  # website. A setting the loop runs with (CLI, model, effort, papers, GPUs)
+  # starts it again: exec, so it is the same process -- its pid file, and a
+  # paper step it started, carry over -- without the old values in its
+  # environment, which would otherwise win over the file. A turn under way is
+  # never cut short, and a paper in progress keeps the model and effort it
+  # began with; the change applies from its next task.
   # Its answer goes to state/sync.json, not the day's log (an idle wake is
   # one line there); its errors do. It also fetches the platform's locked
   # rules into state/rules.md when their version moved.

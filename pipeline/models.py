@@ -9,6 +9,12 @@ Crush and Kimi Code.
 
   python3 pipeline/models.py <cli>    the numbered list setup and ./ac show
   python3 pipeline/models.py --json   every CLI here, for the platform (KIT-008)
+  python3 pipeline/models.py --efforts <cli> [<model>]
+                                      the efforts that CLI takes for that model
+                                      (none given: its own), numbered (KIT-051)
+  python3 pipeline/models.py --effort-for <cli> <model> <effort>
+                                      the effort a turn passes: <effort> when
+                                      they take it, else nothing, and why on stderr
 
 The numbered list is a line per model -- number, the id padded, a few words,
 the id -- and a last "enter" line: the number Enter picks. That is the model
@@ -16,7 +22,8 @@ the owner already uses in that CLI when it names one (owner, 2026-10-02), or
 the one the CLI itself marks as its default; otherwise empty, and Enter
 means the CLI's own default. The kit picks no model of its own (owner,
 2026-10-03: "the user chooses everything"), and no position in a list is a
-recommendation.
+recommendation. The efforts' list is the same, its "enter" line always
+empty: Enter is the CLI's own effort.
 """
 import json
 import os
@@ -38,6 +45,32 @@ CLAUDE = [
     ("claude-opus-5-5", "Opus 5.5"),
     ("claude-sonnet-5", "Sonnet 5"),
 ]
+
+# ── The effort an owner may choose (KIT-051) ──────────────────────────────
+#
+# Offered only where the CLI and the model take it, and only levels seen to
+# change a turn (real runs, 2026-10-10): Claude Code 2.1.296 gave each level
+# back as the turn's own CLAUDE_EFFORT, its thinking growing with it; Codex
+# 0.160.1 recorded each in its session log, and its API refused a level the
+# model does not list, failing the turn -- which is why a level is checked
+# against the model before every turn (effort_for). No other CLI the kit
+# runs has a per-turn setting the kit has seen take effect (OpenCode's
+# --variant could not be run here; Gemini CLI keeps thinking in its settings
+# files), so they offer none and run at their own setting. None chosen,
+# nothing is passed: the turn is what it was before.
+EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+# Claude Code takes --effort. Opus 5.5, Sonnet 5 and Fable 5.1 take all five
+# (Claude Code's own model table, 2.1.296, and the runs above); Haiku 4.5
+# none: it ran the same at low and max, with no effort reported. A model
+# not here is one whose efforts the kit does not know, and gets none.
+CLAUDE_EFFORTS = {
+    "claude-fable-5-1": EFFORTS,
+    "claude-haiku-4-5-20251001": [],
+    "claude-opus-5-5": EFFORTS,
+    "claude-sonnet-5": EFFORTS,
+}
+# A few words for each, in the setup's list; Codex's own words come from its cache.
+EFFORT_WORDS = {"low": "quickest, thinks least", "max": "thinks most; slowest, most quota"}
 
 
 def _load(*path):
@@ -212,12 +245,157 @@ def installed():
     return [c for c in CLIS if shutil.which(c)]
 
 
+LABELS = {"claude": "Claude Code", "codex": "Codex", "gemini": "Gemini CLI", "opencode": "OpenCode",
+          "cursor-agent": "Cursor", "copilot": "GitHub Copilot", "qwen": "Qwen Code", "amp": "Amp",
+          "droid": "Factory Droid", "goose": "Goose", "crush": "Crush", "kimi": "Kimi Code"}
+
+
+def _claude_known(model):
+    """The effort table's id for a Claude model -- its [1m] and the like
+    taken off, with its date or without, or a family's bare alias ("opus")
+    read as the model menu reads it -- or None when the table has none."""
+    m = re.sub(r"\[[^\]]*\]$", "", (model or "").strip()).lower()
+    if m in ("opus", "sonnet", "fable", "haiku"):
+        m = next(i for i, _ in CLAUDE if "-" + m + "-" in "-" + i + "-")
+    undated = lambda s: re.sub(r"-\d{8}$", "", s)
+    return next((k for k in CLAUDE_EFFORTS if m and (m == k or undated(m) == undated(k))), None)
+
+
+def _claude_own_model():
+    """The model Claude Code runs when the kit names none: ANTHROPIC_MODEL,
+    else its settings' model; None when neither names one."""
+    s = os.environ.get("ANTHROPIC_MODEL") or str((_load(".claude", "settings.json") or {}).get("model") or "")
+    return s.split("[")[0].strip() or None
+
+
+def _codex_home():
+    return os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex")
+
+
+def _codex_config():
+    """Codex's own model and provider: the top of its config.toml (a model
+    under a [section] -- a profile, a project -- is not the one it runs)."""
+    model = provider = None
+    try:
+        with open(os.path.join(_codex_home(), "config.toml"), encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if s.startswith("["):
+                    break
+                m = re.match(r'(model|model_provider)\s*=\s*"([^"]*)"', s)
+                if m and m.group(1) == "model":
+                    model = model or m.group(2)
+                elif m:
+                    provider = provider or m.group(2)
+    except OSError:
+        pass
+    return model, provider
+
+
+_CODEX_CACHE = []
+
+
+def _codex_levels(model):
+    """{effort: Codex's own words for it} for each effort the kit offers that
+    Codex's model cache lists for this model; None when it has no such model."""
+    if not _CODEX_CACHE:
+        try:
+            with open(os.path.join(_codex_home(), "models_cache.json"), encoding="utf-8") as f:
+                _CODEX_CACHE.append((json.load(f) or {}).get("models") or [])
+        except Exception:
+            _CODEX_CACHE.append([])
+    for m in _CODEX_CACHE[0]:
+        if isinstance(m, dict) and m.get("slug") == model:
+            listed = {}
+            for x in m.get("supported_reasoning_levels") or []:
+                if isinstance(x, dict) and x.get("effort") in EFFORTS:
+                    listed[x["effort"]] = str(x.get("description") or "")
+            return listed
+    return None
+
+
+def efforts(cli, model=""):
+    """(levels, words, why, model): the efforts this CLI takes for this model,
+    in order, a few words for each, why there are none (for a note), and the
+    model that was looked up. No model, or "default", is the CLI's own, as the
+    CLI names it; one the kit cannot name gets none."""
+    model = "" if model in (None, "-", "default") else str(model).strip()
+    if cli == "claude":
+        m = model or _claude_own_model()
+        if not m:
+            return [], {}, "the model Claude Code runs by itself is not named in its settings", ""
+        k = _claude_known(m)
+        if k is None:
+            return [], {}, "the kit does not know which efforts Claude Code takes for " + m, m
+        if not CLAUDE_EFFORTS[k]:
+            return [], {}, "Claude Code takes no effort for " + m, m
+        return list(CLAUDE_EFFORTS[k]), dict(EFFORT_WORDS), None, m
+    if cli == "codex":
+        own, provider = _codex_config()
+        if provider and provider != "openai":
+            return [], {}, "Codex runs another provider here (" + provider + "), whose efforts the kit cannot check", model
+        m = model or own
+        if not m:
+            return [], {}, "the model Codex runs by itself is not named in its config.toml", ""
+        listed = _codex_levels(m)
+        if listed is None:
+            return [], {}, "Codex's model list here does not have " + m, m
+        levels = [e for e in EFFORTS if e in listed]
+        if not levels:
+            return [], {}, "Codex lists none of the kit's efforts for " + m, m
+        return levels, {e: listed[e] for e in levels}, None, m
+    return [], {}, "the kit passes no effort to " + LABELS.get(cli, cli or "this CLI"), model
+
+
+def effort_for(cli, model, effort):
+    """(level, note): the effort a turn passes -- the one chosen, when this
+    CLI and model take it -- or None and why it is left out. Left out, the
+    turn runs at the CLI's own setting; it never fails for it."""
+    effort = (effort or "").strip()
+    if not effort:
+        return None, None
+    levels, _, why, m = efforts(cli, model)
+    if effort in levels:
+        return effort, None
+    if effort not in EFFORTS:
+        why = "the kit offers " + ", ".join(EFFORTS)
+    elif levels:
+        why = LABELS.get(cli, cli) + " takes " + ", ".join(levels) + " for " + (m or "its own model")
+    return None, "effort " + effort + " left out: " + why + "; this turn runs at the CLI's own setting"
+
+
+def efforts_numbered(cli, model=""):
+    """The efforts' list setup and ./ac show, as numbered() is the models';
+    nothing at all when there are none, and then nothing is asked."""
+    levels, words, _, _ = efforts(cli, model)
+    if not levels:
+        return
+    w = max(len(e) for e in levels)
+    for n, e in enumerate(levels, 1):
+        d = (words.get(e) or "").strip()
+        d = d if len(d) <= 60 else d[:59].rsplit(" ", 1)[0].rstrip(",;") + "…"
+        print(f"{n}\t{e.ljust(w)}\t{d or ' '}\t{e}")
+    print("enter\t")
+
+
 def as_json():
     clis = []
     for c in installed():
         rows, default, yours = options(c)
-        clis.append({"id": c, "models": [{"id": i, "desc": d[:120]} for i, d in rows][:MENU_MAX],
-                     "default": yours or default})
+        models = []
+        for i, d in rows[:MENU_MAX]:
+            entry = {"id": i, "desc": d[:120]}
+            # KIT-051: the efforts it takes, only where it takes some.
+            levels = efforts(c, i)[0]
+            if levels:
+                entry["efforts"] = levels
+            models.append(entry)
+        cli = {"id": c, "models": models, "default": yours or default}
+        # ...and those of the model the CLI runs by itself, for "its own".
+        own = efforts(c, "")[0]
+        if own:
+            cli["efforts"] = own
+        clis.append(cli)
     return {"clis": clis, "gpus_available": gpus_available()}
 
 
@@ -240,9 +418,25 @@ def numbered(cli):
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--json"]:
+    a = sys.argv[1:]
+    if a == ["--json"]:
         print(json.dumps(as_json()))
-    elif len(sys.argv) == 2 and sys.argv[1] in CLIS:
-        numbered(sys.argv[1])
+    elif len(a) == 1 and a[0] in CLIS:
+        numbered(a[0])
+    elif len(a) in (2, 3) and a[0] == "--efforts":
+        efforts_numbered(a[1], a[2] if len(a) == 3 else "")
+    elif len(a) == 4 and a[0] == "--effort-for":
+        # For pipeline/agent-turn.sh, before every turn: whatever goes wrong
+        # here, the turn runs, at the CLI's own effort.
+        try:
+            level, note = effort_for(a[1], a[2], a[3])
+        except Exception as e:
+            level, note = None, "effort " + a[3] + " left out: the kit could not check it (" + type(e).__name__ + \
+                "); this turn runs at the CLI's own setting"
+        if note:
+            print("agent-turn: " + note, file=sys.stderr)
+        if level:
+            print(level)
     else:
-        sys.exit("usage: models.py <" + "|".join(CLIS) + "> | --json")
+        sys.exit("usage: models.py <" + "|".join(CLIS) + "> | --json | --efforts <cli> [<model>]"
+                 " | --effort-for <cli> <model> <effort>")

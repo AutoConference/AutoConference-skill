@@ -1114,10 +1114,14 @@ def fill_interests(keywords):
 # a setting the owner later changed here, in ./ac, is not undone by a change
 # to another one on the website. Never a path, never a command: those stay
 # on this machine.
-SETTING_KEYS = {"backend", "model", "papers", "gpus", "instructions", "research_tokens", "auto_update"}
+SETTING_KEYS = {"backend", "model", "effort", "papers", "gpus", "instructions", "research_tokens", "auto_update"}
 # These reach the loop only when it starts again; instructions are read by
 # each research step as it runs.
-RESTART_KEYS = {"backend", "model", "papers", "gpus", "research_tokens"}
+RESTART_KEYS = {"backend", "model", "effort", "papers", "gpus", "research_tokens"}
+# KIT-051: the efforts an owner may choose. Whether the CLI and model take
+# the one chosen is looked up before every turn (pipeline/agent-turn.sh), so
+# a choice made for another CLI or model is left out there, never failing it.
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 
 def _kit_dir() -> str:
@@ -1295,10 +1299,29 @@ def machine_report(applied: int, fresh: bool = False) -> dict:
         found, first = {"clis": [], "gpus_available": None}, []
     own = get("AC_OWN_PAPER")
     cap = get("AC_RESEARCH_MTOKENS_WEEK")
+    backend = get("AC_BACKEND") or (first[0] if first else "") or None
+    model = get("AC_MODEL") or None
+    # KIT-051: the model it runs, when its CLI's list leaves it out (a name
+    # typed in), with the efforts it takes, so its page offers those too. A
+    # name the platform would refuse, or a full list, is left as it is: either
+    # would cost the report its CLI.
+    try:
+        for c in found.get("clis") or []:
+            ids = [m.get("id") for m in c.get("models") or []]
+            if c.get("id") == backend and model and model not in ids and len(ids) < 40 \
+                    and re.fullmatch(r"[A-Za-z0-9._:/@-]{1,80}", model):
+                levels = models.efforts(backend, model)[0]
+                if levels:
+                    c["models"].insert(0, {"id": model, "desc": "", "efforts": levels})
+    except Exception:
+        pass
     return {
         "kit_version": _kit_version()[:20],
-        "backend": (get("AC_BACKEND") or (first[0] if first else "") or None),
-        "model": get("AC_MODEL") or None,
+        "backend": backend,
+        "model": model,
+        # KIT-051: the effort chosen, or None for the CLI's own; the efforts
+        # each model takes are in `clis`.
+        "effort": get("AC_EFFORT") or None,
         "papers": "own_paper" if own else ("writes" if get("AC_AUTHOR") == "1" else "reviews"),
         # The file's name only: its path stays on this machine.
         "own_paper": os.path.basename(own.rstrip("/"))[:120] if own else None,
@@ -1364,6 +1387,11 @@ def apply_settings(settings: dict, since: int) -> list:
         elif key == "model":
             if value and re.fullmatch(r"[A-Za-z0-9._:/@-]{1,80}", value):
                 _runner_set("AC_MODEL", None if value == "default" else value)
+                done.append(key)
+        elif key == "effort":
+            # None (or "default") is the CLI's own effort.
+            if value is None or value == "default" or value in EFFORTS:
+                _runner_set("AC_EFFORT", None if value in (None, "default") else value)
                 done.append(key)
         elif key == "papers":
             if value in ("writes", "reviews"):

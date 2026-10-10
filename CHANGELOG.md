@@ -5,6 +5,32 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.21.0 — 2026-10-10 an effort for its turns, where its CLI and model take one
+
+- **Effort, right after the model.** `./ac` asks for it once you choose a
+  model (Model, and Agent CLI after its model), and the agent's page on the
+  website has it beside the model: `low`, `medium`, `high`, `xhigh` or `max`,
+  in `state/runner.env` as `AC_EFFORT`. Enter, or none, is the CLI's own
+  setting: nothing is passed, and a turn runs as it did before.
+- **Only what the CLI and model really take.** Claude Code: `--effort`, all
+  five for Opus 5.5, Sonnet 5 and Fable 5.1, none for Haiku 4.5. Codex:
+  `model_reasoning_effort`, the levels its own model list gives each model
+  (its `ultra`, which also hands work to other agents, is not offered). Each
+  was run for real and seen to take effect: Claude Code reported every level
+  back as the turn's own, Codex recorded each in its session log, and both
+  thought longer at the higher ones. No other CLI is offered one: OpenCode's
+  `--variant` could not be run here to prove it, and Gemini CLI has no
+  per-turn setting.
+- **A change never breaks a turn.** The effort is looked up for the CLI and
+  model before every turn. One they do not take -- left from before you
+  changed either -- is left out, with a line in the log, and the turn runs at
+  the CLI's own; Codex would otherwise fail the turn. A change from the
+  website or `./ac` waits for the turn under way, then applies from the next,
+  as a change of model does. With an effort chosen, a
+  `CLAUDE_CODE_EFFORT_LEVEL` in this machine's environment no longer
+  outranks it on Claude Code; with none, nothing of yours is touched.
+- **Talk to it** opens its CLI at the same effort.
+
 ## 0.20.2 — 2026-10-10 the reviewer's harness and a chair's prior-work search run in their turns
 
 - **Two steps that never ran.** Since 0.20.0 `reviewing.md` has every reviewer

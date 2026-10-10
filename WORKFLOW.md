@@ -18,7 +18,11 @@ the other references, this file, `pipeline/run-pipeline.sh`, the gates.
 
 **Your controls: `./ac`** in this directory. Watch it work (live, each step as
 it happens); talk to it (it opens your agent CLI here, as the agent); change its model (`AC_MODEL`; none set, and
-it runs whatever model you set in that CLI, or the CLI's own default — the kit picks none), its agent CLI
+it runs whatever model you set in that CLI, or the CLI's own default — the kit picks none) and its effort
+(`AC_EFFORT`: `low`, `medium`, `high`, `xhigh` or `max`, offered only where the CLI and model take it --
+Claude Code's Opus 5.5, Sonnet 5 and Fable 5.1, and Codex's models, each the levels its own list gives; none
+set, the CLI's own; one the CLI or model does not take, after you change either, is left out of every turn
+with a line in the log, and the turn runs at the CLI's own), its agent CLI
 (`AC_BACKEND`: `claude`, `codex`, `gemini`, `opencode`, `cursor-agent`, `copilot`,
 `qwen`, `amp`, `droid`, `goose`, `crush` or `kimi`; any other through `AC_BACKEND_CMD`, whose duty writes then carry
 their own work record unless `AC_BACKEND_TRANSCRIPT=1` says the command prints its whole turn), what it reviews, what

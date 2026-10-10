@@ -34,7 +34,12 @@
 # Env: AC_BACKEND (auto-detected in the order above), AC_BACKEND_CMD, AC_MODEL
 # (the owner's choice; with none set, every CLI -- Claude Code included --
 # runs with no model flag, so the model is whatever its owner set in that CLI,
-# else the CLI's own default: the kit picks none; owner, 2026-10-03).
+# else the CLI's own default: the kit picks none; owner, 2026-10-03), AC_EFFORT
+# (KIT-051: the owner's choice of reasoning effort, passed only where this CLI
+# and model take it -- Claude Code's --effort, Codex's model_reasoning_effort
+# -- as pipeline/models.py says before every turn; one they do not take is
+# left out with a note in the turn's log, and none chosen passes nothing, so
+# the CLI runs at its own setting, as it always did).
 # Settings may also live in state/runner.env; the environment wins.
 #
 # --mode duties    the inbox: read, write files in the kit, run the platform
@@ -142,6 +147,24 @@ fi
 [ -n "$PROMPT" ] || { echo "agent-turn: no instruction given" >&2; exit 2; }
 cd "$DIR" || { echo "agent-turn: no directory $DIR" >&2; exit 2; }
 
+# KIT-051: the effort this turn runs at. Looked up for this CLI and model
+# now, every turn: a setting changed since it was chosen (another CLI, another
+# model, the CLI's own default model changed in its settings) leaves a stale
+# one, and Codex fails a turn whose effort its model does not list. Whatever
+# the lookup says, or if it cannot run, the turn runs: left out, the CLI uses
+# its own setting, and pipeline/models.py says why in the turn's log.
+EFFORT=""
+if [ -n "${AC_EFFORT:-}" ]; then
+  if [ "$BACKEND" = custom ]; then
+    echo "agent-turn: effort $AC_EFFORT left out: AC_BACKEND_CMD runs as its command says; this turn runs at the CLI's own setting" >&2
+  elif [ -f "$ROOT/pipeline/models.py" ]; then
+    EFFORT=$(python3 "$ROOT/pipeline/models.py" --effort-for "$BACKEND" "$MODEL" "$AC_EFFORT") || EFFORT=""
+  else
+    echo "agent-turn: effort $AC_EFFORT left out: pipeline/models.py, which says what $BACKEND takes, is not here; this turn runs at the CLI's own setting" >&2
+  fi
+  case "$EFFORT" in low|medium|high|xhigh|max) ;; *) EFFORT="" ;; esac
+fi
+
 # The research steps name ARIS skills the way Claude Code invokes them,
 # `/name args`. Claude Code resolves that itself from .claude/skills/. The
 # other CLIs have no such convention, so they are told what it means; the
@@ -184,6 +207,11 @@ fi
 case "$BACKEND" in
   claude)
     STREAM=(--output-format stream-json --verbose)
+    # KIT-051: the effort, in the flag and in the variable Claude Code reads
+    # before the flag: one this machine's environment holds would outrank it
+    # (Claude Code 2.1.296 ran low with CLAUDE_CODE_EFFORT_LEVEL=low and
+    # --effort high). With none chosen, neither is touched.
+    if [ -n "$EFFORT" ]; then export CLAUDE_CODE_EFFORT_LEVEL="$EFFORT"; fi
     if [ "$MODE" = research ]; then
       # No --add-dir: it takes any number of values and swallows the prompt
       # after it. Nothing needs it; the workspace reaches the kit through
@@ -199,7 +227,7 @@ case "$BACKEND" in
       # tells every reviewing step to review its own work instead. No prompt
       # may follow --disallowedTools, which takes any number of values; it
       # comes on stdin.
-      exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} --permission-mode bypassPermissions "${STREAM[@]}" \
+      exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} ${EFFORT:+--effort "$EFFORT"} --permission-mode bypassPermissions "${STREAM[@]}" \
         --disallowedTools ScheduleWakeup CronCreate CronDelete RemoteTrigger \
                           mcp__manual_review__review mcp__manual_review__review_reply <<<"$PROMPT"
     fi
@@ -246,7 +274,7 @@ case "$BACKEND" in
         echo "agent-turn: AC_DUTY_COMMANDS: left out \"$c\" (only a script in custom/, run as bash custom/<path>.sh or python3 custom/<path>.py)" >&2
       done
     fi
-    exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} --permission-mode acceptEdits "${STREAM[@]}" \
+    exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} ${EFFORT:+--effort "$EFFORT"} --permission-mode acceptEdits "${STREAM[@]}" \
       --disallowedTools mcp__manual_review__review mcp__manual_review__review_reply "Edit(custom/**)" "Write(custom/**)" \
       --allowedTools "WebSearch" "WebFetch" \
                      "Bash(python3 submission/scripts/client.py:*)" \
@@ -279,11 +307,14 @@ case "$BACKEND" in
     case "$(codex exec --help 2>/dev/null)" in
       *--json*) run() { exec python3 "$RENDER" --format codex -- "$1" "$2" --json -c 'model_reasoning_summary="detailed"' "${@:3}"; } ;;
     esac
+    # KIT-051: the effort as Codex's own setting, for this turn only. Its API
+    # refuses one the model does not list and the turn fails, so only one
+    # pipeline/models.py found in the model's list gets here.
     if [ "$MODE" = research ]; then
       # Experiments need the GPU and the package index, which the sandbox
       # withholds. The flag's name says what it is; setup says it to the owner.
       run codex exec --dangerously-bypass-approvals-and-sandbox \
-        --skip-git-repo-check -C "$DIR" ${MODEL:+-m "$MODEL"} - <<<"$PROMPT"
+        --skip-git-repo-check -C "$DIR" ${MODEL:+-m "$MODEL"} ${EFFORT:+-c "model_reasoning_effort=$EFFORT"} - <<<"$PROMPT"
     fi
     # `-s workspace-write` sandboxes writes to this tree, and the network key is
     # what lets client.py reach the platform from inside it: the sandbox blocks
@@ -293,7 +324,7 @@ case "$BACKEND" in
     # checks the value: disabled | cached | indexed | live).
     run codex exec -s workspace-write \
       -c 'sandbox_workspace_write.network_access=true' -c 'web_search="live"' \
-      --skip-git-repo-check -C "$DIR" ${MODEL:+-m "$MODEL"} - <<<"$PROMPT"
+      --skip-git-repo-check -C "$DIR" ${MODEL:+-m "$MODEL"} ${EFFORT:+-c "model_reasoning_effort=$EFFORT"} - <<<"$PROMPT"
     ;;
   gemini)
     # -y accepts tool calls without asking. --include-directories lets it read
