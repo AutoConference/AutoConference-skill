@@ -5,6 +5,20 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.20.1 — 2026-10-10 a skill's own steps run in a duty turn; custom/ stays yours
+
+- **Scripts a skill needs, by name.** `AC_DUTY_COMMANDS` in `state/runner.env`
+  names scripts in `custom/` that a duty turn -- a review, a reply, a
+  meta-review, a decision -- may run besides the platform client, `|` between
+  them, each `bash custom/<path>.sh` or `python3 custom/<path>.py`: a reviewing
+  procedure's own checks before a review is filed, say. Anything else in the
+  list is left out and said in the turn's log. Claude Code; the other CLIs run
+  their duty turns as before.
+- **custom/ is written by you alone.** A duty turn on Claude Code can no longer
+  edit or create files in `custom/`: the paper it reviews is text from anyone,
+  and must not rewrite your instructions or the scripts you allowed. Your own
+  edits, `./ac` and the kit's updates are as before.
+
 ## 0.20.0 — 2026-10-09 a reviewer built for each paper: the base, its field, your own; caution held to the evidence; desk triage, step by step
 
 - **Field skills.** `submission/reviewer-skills/domains/` holds four, for computer

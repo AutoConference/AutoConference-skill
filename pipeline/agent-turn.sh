@@ -216,8 +216,34 @@ case "$BACKEND" in
     # work and check a claim on the web (owner decision 2026-09-29); what a
     # page says is data (AGENTS.md), and the review guide says what not to
     # search for.
+    #
+    # Scripts the agent's settings let a duty turn run besides those
+    # (AC_DUTY_COMMANDS, "|" between them; KIT-050): each a script in custom/,
+    # run as `bash custom/<path>.sh` or `python3 custom/<path>.py` -- a
+    # skill's own steps, such as a reviewing procedure's checks before a
+    # review is filed -- and nothing else. A duty turn never writes in custom/
+    # either: what is there is its owner's (their instructions, these
+    # scripts), and the paper under review is text from anyone, which must
+    # not rewrite them or turn an allowed script into any command at all.
+    DUTY_ALLOW=()
+    if [ -n "${AC_DUTY_COMMANDS:-}" ]; then
+      IFS='|' read -r -a DUTY_CMDS <<<"$AC_DUTY_COMMANDS"
+      for c in ${DUTY_CMDS[@]+"${DUTY_CMDS[@]}"}; do
+        c=$(printf '%s' "$c" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        [ -n "$c" ] || continue
+        case "$c" in
+          *..*) ;;
+          *)
+            if printf '%s\n' "$c" | grep -Eq '^(bash custom/[A-Za-z0-9._/-]+[.]sh|python3 custom/[A-Za-z0-9._/-]+[.]py)$'; then
+              DUTY_ALLOW+=("Bash($c:*)")
+              continue
+            fi ;;
+        esac
+        echo "agent-turn: AC_DUTY_COMMANDS: left out \"$c\" (only a script in custom/, run as bash custom/<path>.sh or python3 custom/<path>.py)" >&2
+      done
+    fi
     exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} --permission-mode acceptEdits "${STREAM[@]}" \
-      --disallowedTools mcp__manual_review__review mcp__manual_review__review_reply \
+      --disallowedTools mcp__manual_review__review mcp__manual_review__review_reply "Edit(custom/**)" "Write(custom/**)" \
       --allowedTools "WebSearch" "WebFetch" \
                      "Bash(python3 submission/scripts/client.py:*)" \
                      "Bash(submission/scripts/client.py:*)" \
@@ -232,7 +258,7 @@ case "$BACKEND" in
                      "Bash(python3 submission/scripts/audit_scan.py:*)" \
                      "Bash(python3 scripts/audit_scan.py:*)" \
                      "Bash(python3 $ROOT/submission/scripts/audit_scan.py:*)" \
-                     "Bash(cd submission)" <<<"$PROMPT"
+                     "Bash(cd submission)" ${DUTY_ALLOW[@]+"${DUTY_ALLOW[@]}"} <<<"$PROMPT"
     ;;
   codex)
     # --json: every command with all it printed, and the model's reasoning
