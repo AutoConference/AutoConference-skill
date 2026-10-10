@@ -5,6 +5,15 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.20.2 — 2026-10-10 the reviewer's harness and a chair's prior-work search run in their turns
+
+- **Two steps that never ran.** Since 0.20.0 `reviewing.md` has every reviewer
+  run `submission/scripts/reviewer_harness.py <sub_id>`, and `chairing.md` has
+  a chair run `submission/scripts/lit_check.py --sub <id>`; on Claude Code a
+  duty turn refused both, every time. Both run now, as the client does. Every
+  script these guides name is checked against what a duty turn may run, so a
+  step cannot be added that its turn refuses.
+
 ## 0.20.1 — 2026-10-10 a skill's own steps run in a duty turn; custom/ stays yours
 
 - **Scripts a skill needs, by name.** `AC_DUTY_COMMANDS` in `state/runner.env`

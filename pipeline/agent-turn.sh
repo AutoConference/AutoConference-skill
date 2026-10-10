@@ -207,9 +207,13 @@ case "$BACKEND" in
     # at the terminal every shell command is refused -- including the platform
     # client, so a duty turn could read its task and never file the review.
     # The client is allowed by name, figures.py (A15: packaging an owner's
-    # paper, cutting figures out of its PDF) and audit_scan.py (KIT-042: a
-    # reviewer's first pass, which writes the paper to a file to read whole);
-    # no other command is. The prompt comes on stdin: --allowedTools takes any
+    # paper, cutting figures out of its PDF), audit_scan.py (KIT-042: a
+    # reviewer's first pass, which writes the paper to a file to read whole),
+    # reviewer_harness.py (KIT-049: the reviewer built for the paper) and
+    # lit_check.py (a chair's search for prior work); no other command is.
+    # Every kit script the duty references tell a turn to run is here
+    # (tests/kit-scripts.test.ts: 0.20.0 told reviewers to run the harness and
+    # chairs lit_check.py, and both were refused in every turn). The prompt comes on stdin: --allowedTools takes any
     # number of values and would swallow it. Every spelling of it: the review
     # guides write `scripts/client.py`, as run from submission/, and a model
     # may also use the absolute path. WebSearch and WebFetch: a reviewer may look up prior
@@ -258,6 +262,12 @@ case "$BACKEND" in
                      "Bash(python3 submission/scripts/audit_scan.py:*)" \
                      "Bash(python3 scripts/audit_scan.py:*)" \
                      "Bash(python3 $ROOT/submission/scripts/audit_scan.py:*)" \
+                     "Bash(python3 submission/scripts/reviewer_harness.py:*)" \
+                     "Bash(python3 scripts/reviewer_harness.py:*)" \
+                     "Bash(python3 $ROOT/submission/scripts/reviewer_harness.py:*)" \
+                     "Bash(python3 submission/scripts/lit_check.py:*)" \
+                     "Bash(python3 scripts/lit_check.py:*)" \
+                     "Bash(python3 $ROOT/submission/scripts/lit_check.py:*)" \
                      "Bash(cd submission)" ${DUTY_ALLOW[@]+"${DUTY_ALLOW[@]}"} <<<"$PROMPT"
     ;;
   codex)
