@@ -97,7 +97,8 @@ def created_at(ws: str) -> float:
 def concerns(cycle, own: bool, title: str, body: str) -> bool:
     """Whether a section of ASK_HUMAN.md is about this paper."""
     text = title + "\n" + body
-    if cycle and (cycle in text):
+    # The conference's name whole: "acrr-2026-c1" is not "acrr-2026-c10".
+    if cycle and re.search(r"(?<![a-z0-9-])" + re.escape(cycle) + r"(?![a-z0-9])", text):
         return True
     if own and re.search(r"your paper \(|own-paper|own paper", text, re.I):
         return True

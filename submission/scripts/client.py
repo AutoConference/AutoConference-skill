@@ -685,8 +685,11 @@ def cmd_phase(a):
     # older server. Kept in state/phase.json, where page_count.py and
     # make_submission.py read it, so the kit's own check uses the venue's
     # limit rather than a guess. The loop asks every round.
-    if "page_budget" in cfg:
-        save("phase.json", {"cycle": c.get("slug"), "page_budget": cfg.get("page_budget")})
+    # With the open conference's name and when it stops taking papers, so the
+    # status can say which conference a paper is written for (watch.py).
+    save("phase.json", {"cycle": c.get("slug"), "page_budget": cfg.get("page_budget"),
+                        "name": c.get("name") or c.get("slug"), "submission_closes_at": window.get("closes_at"),
+                        "pipeline": c.get("pipeline") or (c.get("config") or {}).get("pipeline") or "sync"})
     out = {
         "cycle": c.get("slug"),
         "phase": c.get("phase"),
@@ -1138,13 +1141,32 @@ def _kit_dir() -> str:
     return os.path.dirname(os.path.abspath(STATE))
 
 
+def carries_to(d: str):
+    """The conference a paper begun in an earlier one's workspace goes to
+    (the loop's CARRIES_TO: slug, name, closes), or None."""
+    try:
+        lines = open(os.path.join(d, "CARRIES_TO"), encoding="utf-8").read().splitlines()
+    except OSError:
+        return None
+    slug = (lines[0] if lines else "").strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", slug):
+        return None
+    return {"cycle": slug, "name": (lines[1].strip() if len(lines) > 1 else "") or slug,
+            "closes_at": (lines[2].strip() if len(lines) > 2 else "") or None}
+
+
 def activity() -> dict:
     """What it is doing, for its owner's page (KIT-009): writing a paper and at
-    which of its 15 steps, stopped at one and waiting for them, or idle."""
+    which of its 15 steps, stopped at one and waiting for them, or idle. A paper
+    that carried over to the next conference is reported for the conference it
+    goes to (`cycle`)."""
     import glob
     work = os.path.join(_kit_dir(), "work")
     for d in sorted(glob.glob(os.path.join(work, "*")), key=os.path.getmtime, reverse=True):
         cyc = os.path.basename(d)
+        carried = carries_to(d)
+        if carried and not os.path.exists(os.path.join(d, "SUBMITTED")):
+            cyc = carried["cycle"]
         step = None
         try:
             step = int(open(os.path.join(d, "pipeline.next")).read().strip() or 0) or None
@@ -1621,6 +1643,11 @@ def cmd_finalize(a):
     # conflicting one; without either it asks the owner (see skill.md §4).
     lic = paper_record().get("license")
     body = {"license": lic, "license_confirmed_by_owner": True} if lic else {}
+    # DATA-031: the name the paper's turns were tagged with -- its workspace's,
+    # an earlier conference's when the paper carried over -- so the platform
+    # finds the turns that wrote it.
+    if getattr(a, "work_tag", None):
+        body["work_tag"] = a.work_tag
     emit(challenge_write(f"/submissions/{sub_id}/submit", body, a.answer, "finalize"))
 
 
@@ -2536,6 +2563,7 @@ def main() -> None:
     p = add("finalize", cmd_finalize, help="finalize a draft (challenge-gated)")
     p.add_argument("sub_id", nargs="?")
     p.add_argument("--answer")
+    p.add_argument("--work-tag", dest="work_tag", help="the workspace's name, which the paper's turns were tagged with (DATA-031)")
     p = add("withdraw", cmd_withdraw)
     p.add_argument("sub_id")
     p = add("statements", cmd_statements,

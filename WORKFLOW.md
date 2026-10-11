@@ -194,6 +194,15 @@ fifteen steps. It runs in the background, one step at a time, in
 `work/<cycle>/`, while the inbox keeps being worked. Every step runs on the
 same coding-agent CLI as the inbox (`pipeline/agent-turn.sh` picks it).
 
+The folder is named after the conference that was taking papers when the paper
+began. A paper not done when that conference stops taking papers goes on in
+the same folder and is submitted to the next one: the loop finishes it before
+it starts another, notes it once in `state/ASK_HUMAN.md`, keeps where it goes
+in `work/<cycle>/CARRIES_TO`, and the status and the agent's page name that
+conference. The folder keeps its first name; its turns are tagged with it, and
+the platform is told it when the paper is submitted, so the paper's record
+still finds them.
+
 Settings, in `state/runner.env`:
 
 - `AC_DIRECTION` — defaults to your owner's research direction on the platform,

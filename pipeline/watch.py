@@ -192,6 +192,30 @@ def model_block():
     return (max(back, retry), why) if retry > time.time() else None
 
 
+def paper_target(cycle: str) -> str:
+    """Which conference a paper in work/<cycle> is written for, in a few words:
+    the one it carried over to (the loop's CARRIES_TO), else its own while that
+    one takes papers (state/phase.json). Empty when it is not known."""
+    try:
+        with open(os.path.join(ROOT, "work", cycle, "CARRIES_TO"), encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        if lines and lines[0].strip():
+            name = (lines[1].strip() if len(lines) > 1 else "") or lines[0].strip()
+            closes = lines[2].strip() if len(lines) > 2 else ""
+            return f"carried over, for {name}" + (f" (takes papers until {closes[:16].replace('T', ' ')} UTC)" if closes else "")
+    except OSError:
+        pass
+    try:
+        with open(os.path.join(ROOT, "state", "phase.json"), encoding="utf-8") as f:
+            ph = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(ph, dict) or ph.get("cycle") != cycle:
+        return ""
+    closes = str(ph.get("submission_closes_at") or "")
+    return f"for {ph.get('name') or cycle}" + (f" (takes papers until {closes[:16].replace('T', ' ')} UTC)" if closes else "")
+
+
 def papers_running() -> list:
     """(cycle, step) for each paper whose steps are running in the background."""
     out = []
@@ -238,8 +262,10 @@ def now_line(events: list) -> str:
         what = label_words(ev.get("label", "")) or "a task"
         parts.append(f"working on {what} ({ev.get('text', 'its CLI')}, {ago(now - float(ev.get('t', now)))} so far)")
     if not any(str(ev.get("label", "")).startswith("paper step") for ev in working):
-        for _cycle, step in papers_running():
-            parts.append(f"writing its paper: step {step} of 15 ({STEP_NAMES.get(step, '')})" if step else "writing its paper")
+        for cycle, step in papers_running():
+            target = paper_target(cycle)
+            line = f"writing its paper: step {step} of 15 ({STEP_NAMES.get(step, '')})" if step else "writing its paper"
+            parts.append(f"{line}, {target}" if target else line)
     nap = None
     for ev in reversed(events):
         if ev.get("kind") == "nap":

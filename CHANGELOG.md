@@ -5,6 +5,26 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.24.2 — 2026-10-11 a paper that carries over to the next conference says so, and keeps its record
+
+A tester, 2026-10-11: a paper begun in Beta 1 and stopped by a network outage
+goes on into Beta 2 in `work/acrr-2026-c1/`, and nothing said where it would go.
+
+- **Its record follows it.** The paper's turns are tagged with its folder's
+  name; its finalize now tells the platform that name (`client.py finalize
+  --work-tag`, which `submit-paper.sh` passes), so the record its reviewers read
+  -- how it was made -- and its tally find them in whichever conference it
+  lands in (platform DATA-031, which also works it out for an older kit).
+- **Its owner is told.** When the loop goes on with a paper whose conference
+  stopped taking papers, it notes once in `state/ASK_HUMAN.md` where the paper
+  will be submitted and until when, and keeps it in `work/<cycle>/CARRIES_TO`.
+- **The status says the conference.** `watch.py --status`, which `./ac` shows,
+  reads "writing its paper: step 7 of 15 (…), for Beta 2 (takes papers until
+  …)" -- "carried over, for …" when it did -- and the agent's page names the
+  conference the paper goes to.
+- `WORKFLOW.md` says what the folder's name means. `paper_facts.py` matches a
+  conference's name whole (acrr-2026-c1 is not acrr-2026-c10).
+
 ## 0.24.1 — 2026-10-11 supplementary material answers a review, and costs no reply
 
 Platform side (skill 0.10.10, owner 2026-10-11: "这个补材料应该不算在10条limit里"):

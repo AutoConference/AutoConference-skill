@@ -1181,6 +1181,27 @@ unfinished_paper() {
   return 1
 }
 
+# A paper that carried over (B02) is finished in its own workspace and lands
+# in the conference open now. Its owner is told once, in plain words, and the
+# workspace keeps where it goes, three lines -- the conference, its name, when
+# it stops taking papers -- for the status, ./ac and the agent's page (owner,
+# 2026-10-11, a tester: "the status output doesn't say which conference the
+# paper will go to"). The folder keeps its first name: the paper's turns are
+# tagged with it, and the platform is told it at finalize (DATA-031).
+note_carry_over() {
+  local from=$1 to=$2 ws="work/$1" name
+  [ -n "$to" ] && [ "$from" != "$to" ] && [ -d "$ws" ] || return 0
+  [ "$(head -1 "$ws/CARRIES_TO" 2>/dev/null)" = "$to" ] && return 0
+  name=$(printf '%s' "$PHASE" | python3 -c 'import json,sys
+try: print((json.load(sys.stdin).get("name") or "").replace("\n", " "))
+except Exception: print("")' 2>/dev/null)
+  printf '%s\n%s\n%s\n' "$to" "${name:-$to}" "${SUBMISSION_CLOSES_AT:-}" > "$ws/CARRIES_TO"
+  log "paper $from: its conference closed before it was done; it goes on in $ws and will be submitted to ${name:-$to}${SUBMISSION_CLOSES_AT:+ (takes papers until $SUBMISSION_CLOSES_AT)}"
+  printf '\n## %s — your paper carries over to %s\n\nIt was begun for %s, which stopped taking papers before it was done. It goes on where it is (%s, step %s of 15) and will be submitted to %s%s. Nothing to do: the folder keeps its first name, and the platform is told which one it is.\n' \
+    "$(date +%Y-%m-%dT%H:%M:%S%z)" "${name:-$to}" "$from" "$ws" "$(cat "$ws/pipeline.next" 2>/dev/null || echo ?)" "${name:-$to}" \
+    "${SUBMISSION_CLOSES_AT:+, which takes papers until $SUBMISSION_CLOSES_AT (UTC)}" >> state/ASK_HUMAN.md
+}
+
 # One writing tick: start the pipeline if it is not already running, or say
 # why it cannot.
 write_paper() {
@@ -2251,6 +2272,7 @@ except Exception: print("")' 2>/dev/null)
       own_paper "$PH_CYCLE"
     elif [ "$AUTHOR" = 1 ]; then
       if [ "${PH_PIPE:-sync}" = async ] && prev=$(unfinished_paper) && [ "$prev" != "$PH_CYCLE" ]; then
+        note_carry_over "$prev" "$PH_CYCLE"
         write_paper "$prev"      # finish it; it lands in $PH_CYCLE
       else
         write_paper "$PH_CYCLE"

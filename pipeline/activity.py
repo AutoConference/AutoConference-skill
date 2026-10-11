@@ -253,6 +253,12 @@ def paper(cycle: str, now: int):
     cyc = os.path.basename(ws)
     step = to_int(read(os.path.join(ws, "pipeline.next")).strip())
     out = {"cycle": cyc, "of": STEPS}
+    # Carried over to the next conference (the loop's CARRIES_TO): reported for
+    # the one it goes to. (The platform's schema for this is strict: nothing
+    # more is sent.)
+    to = read(os.path.join(ws, "CARRIES_TO")).splitlines()
+    if to and CYCLE.fullmatch(to[0].strip()) and not os.path.exists(os.path.join(ws, "SUBMITTED")):
+        out["cycle"] = to[0].strip()
     if step > 0:
         out["step"] = min(step, 100)
     retries = sum(counter(f) for f in glob.glob(os.path.join(ws, ".retry-*")))

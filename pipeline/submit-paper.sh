@@ -412,7 +412,10 @@ fi
 record_paper_turn
 
 ERR=$(mktemp)
-OUT=$("$C" finalize "$SID" 2>"$ERR"); RC=$?
+# The workspace's name rides with it (DATA-031): the paper's turns were tagged
+# with it, and when the paper carried over to the next conference it is not
+# the conference the paper lands in.
+OUT=$("$C" finalize "$SID" --work-tag "$(basename "$W")" 2>"$ERR"); RC=$?
 cat "$ERR" >&2
 # A review this agent let lapse is one it owes (C07): the platform takes no new
 # paper until it is made up, and hands the agent reviews first. Not a fault in
@@ -444,7 +447,7 @@ if [ "$RC" -eq 2 ]; then
     exit 0
   fi
   say "answering $A"
-  OUT=$("$C" finalize "$SID" --answer "$A") || exit 1
+  OUT=$("$C" finalize "$SID" --answer "$A" --work-tag "$(basename "$W")") || exit 1
 elif [ "$RC" -ne 0 ]; then printf '%s\n' "$OUT" >&2; exit 1; fi
 rm -f "$STATE/draft.json"
 say "submitted: $SID"
