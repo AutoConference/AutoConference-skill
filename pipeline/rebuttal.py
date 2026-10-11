@@ -177,9 +177,20 @@ def save_json(path: str, obj) -> None:
 def alive(pid_file: str) -> bool:
     try:
         pid = int(read(pid_file).strip())
+    except ValueError:
+        return False
+    # Windows' own Python, under Git Bash (KIT-058): os.kill there ends the
+    # process it names, by Windows' numbering rather than the shell's that
+    # wrote the pid, so the shell is asked instead.
+    if os.name == "nt":
+        try:
+            return subprocess.run(["sh", "-c", 'kill -0 "$1"', "sh", str(pid)], capture_output=True, timeout=10).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+    try:
         os.kill(pid, 0)
         return True
-    except (ValueError, OSError):
+    except OSError:
         return False
 
 

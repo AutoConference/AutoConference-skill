@@ -758,6 +758,37 @@ def cmd_home(a):
     emit(ok(*req("GET", "/me/home"), "home"))
 
 
+# When a process started, read the way the loop reads it (run-heartbeat.sh's
+# started_at), by sh so that it is the same answer: ps in the C locale, else
+# /proc's start in clock ticks where ps has no -o (Git Bash, BusyBox; KIT-058).
+# One line: Windows passes it to sh on a command line.
+STARTED_AT_SH = (
+    r"""t=$(LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//'); """
+    r"""case "$t" in *[0-9]:[0-9][0-9]:[0-9][0-9]*) echo "$t"; exit 0 ;; esac; """
+    r"""t=$(sed 's/.*) //' "${AC_PROC:-/proc}/$1/stat" 2>/dev/null | awk '{print $20}'); """
+    r"""case "$t" in ''|*[!0-9]*) exit 1 ;; esac; """
+    r'echo "ticks $t"'
+)
+
+
+def pid_alive(pid: int) -> bool:
+    """Whether a process the kit's shell started still runs. On Windows' own
+    Python, under Git Bash (KIT-058), os.kill ends the process it names, by
+    Windows' numbering rather than the shell's that wrote the pid: the shell
+    is asked instead."""
+    import subprocess
+    if os.name == "nt":
+        try:
+            return subprocess.run(["sh", "-c", 'kill -0 "$1"', "sh", str(pid)], capture_output=True, timeout=10).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def loop_running() -> bool:
     """Is this kit's background loop (pipeline/run-heartbeat.sh) alive?
 
@@ -771,13 +802,21 @@ def loop_running() -> bool:
     # The loop writes its pid; a loop started by a relative path (inside
     # screen or tmux) is found this way when pgrep on the path would miss it.
     # It records its start time beside the pid: a pid from before a reboot
-    # may belong to another process now.
+    # may belong to another process now. Where nothing could read it (Git
+    # Bash), the check-in said the loop was not running while it ran, and
+    # each loop started on its word was one more (KIT-058).
     try:
         pid_s, _, started = open(os.path.join(STATE, "heartbeat.pid")).read().strip().partition(" ")
-        now = subprocess.run(["ps", "-o", "lstart=", "-p", pid_s], capture_output=True, text=True).stdout
-        if started and " ".join(now.split()) == " ".join(started.split()):
-            return True
-    except (OSError, ValueError):
+        started = " ".join(started.split())
+        if started and pid_s.isdigit():
+            now = subprocess.run(["sh", "-c", STARTED_AT_SH, "sh", pid_s], capture_output=True, text=True, timeout=10).stdout
+            if " ".join(now.split()) == started:
+                return True
+            # Or as a kit before 0.24.3 wrote it, in this shell's own language.
+            now = subprocess.run(["ps", "-o", "lstart=", "-p", pid_s], capture_output=True, text=True, timeout=10).stdout
+            if " ".join(now.split()) == started:
+                return True
+    except (OSError, ValueError, subprocess.SubprocessError):
         pass
     me = os.path.join(ROOT, "pipeline", "run-heartbeat.sh")
     cmd = ["pgrep"] + (["-a"] if platform.system() == "Darwin" else []) + ["-f", me]
@@ -1180,10 +1219,10 @@ def activity() -> dict:
             return {"state": "stopped", "cycle": cyc, "step": step, "of": 15}
         try:
             pid = int(open(os.path.join(d, "pipeline.pid")).read().strip())
-            os.kill(pid, 0)
-            return {"state": "writing", "cycle": cyc, "step": step, "of": 15}
         except (OSError, ValueError):
             continue
+        if pid_alive(pid):
+            return {"state": "writing", "cycle": cyc, "step": step, "of": 15}
     return {"state": "idle", "cycle": None, "step": None, "of": 15}
 
 

@@ -51,14 +51,33 @@ cd "$ROOT"
 # after a power cut it survives, and its pid may by then be another agent's
 # loop on the same machine, which a check on the command alone would take for
 # this one and refuse to start.
-started_at() { ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//'; }
+#
+# The start time reads the same wherever it is asked (KIT-058): ps in the C
+# locale -- in another one macOS prints it in that language, so a loop started
+# in one language was gone to a check made in another -- else, where ps has no
+# -o (Git Bash, BusyBox), the start /proc keeps: the 22nd field of its stat
+# line, in clock ticks since boot, after a name that may itself hold spaces or
+# brackets. A loop no check could find was started again beside itself each
+# time one was asked for: five at once on a tester's machine, all answering
+# the same review (2026-10-11).
+started_at() {
+  local t
+  t=$(LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')
+  case "$t" in *[0-9]:[0-9][0-9]:[0-9][0-9]*) echo "$t"; return 0 ;; esac
+  t=$(sed 's/.*) //' "${AC_PROC:-/proc}/$1/stat" 2>/dev/null | awk '{print $20}')
+  case "$t" in ''|*[!0-9]*) return 1 ;; esac
+  echo "ticks $t"
+}
 loop_pid() {
   local p t
   # 2>/dev/null first: redirections apply in order, and a missing file is
   # the normal case, not an error to print.
   read -r p t 2>/dev/null < state/heartbeat.pid || return 1
   case "$p" in ''|*[!0-9]*) return 1 ;; esac
-  [ -n "$t" ] && [ "$(started_at "$p")" = "$t" ] || return 1
+  [ -n "$t" ] || return 1
+  # Or as a kit before 0.24.3 wrote it, in this shell's own language: a loop
+  # not yet moved onto this kit.
+  [ "$(started_at "$p")" = "$t" ] || [ "$(ps -o lstart= -p "$p" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')" = "$t" ] || return 1
   echo "$p"
 }
 # A loop older than the pid file, found by its command line (in OLDER) --
@@ -504,20 +523,58 @@ PROMPT_END
 
 exec 9>state/heartbeat.lock
 if ! flock -n 9 2>/dev/null; then
-  # macOS has no flock(1). One loop per checkout is a convention there rather
-  # than an enforced lock; the platform's own idempotency cursors are what
-  # actually stop a task being worked twice.
+  # macOS has no flock(1), nor has Git Bash: there the pid file below is the
+  # lock. Nothing else is: two loops each take the same task, and each files
+  # it (2026-10-11, KIT-058).
   command -v flock >/dev/null 2>&1 && { echo "another heartbeat holds the lock; exiting" >&2; exit 0; }
 fi
+# claim_start: state/.starting, held while the pid file is read and written,
+# so that looking and writing are one step (KIT-058). Loops that start in the
+# same second -- several moving onto an updated kit together -- each found
+# none running, and all ran on. mkdir makes the directory or finds it made;
+# one left by a start that died in between is over a minute old, far past
+# any start, and is taken away. After a minute and a half the start goes on
+# without it.
+claim_start() {
+  local n=0
+  while [ "$n" -lt 90 ]; do
+    mkdir state/.starting 2>/dev/null && return 0
+    n=$((n + 1))
+    if [ -n "$(find state/.starting -maxdepth 0 -mmin +1 2>/dev/null)" ]; then rm -rf state/.starting; else sleep 1; fi
+  done
+  return 1
+}
 # One loop per checkout, on macOS too: the pid file is the lock flock cannot
 # be there. Two loops would work every task twice. Written before anything
 # reaches the network: a start with the computer, before its network is up,
 # is a running loop at once, not one --detach gave up on (KIT-030).
+STARTING=""
+claim_start && STARTING=1
 if other=$(loop_pid) && [ "$other" != "$$" ]; then
+  [ -n "$STARTING" ] && rmdir state/.starting 2>/dev/null
   log "another loop is already running here (pid $other); exiting"
   exit 0
 fi
 printf '%s %s\n' "$$" "$(started_at $$)" > state/heartbeat.pid
+[ -n "$STARTING" ] && rmdir state/.starting 2>/dev/null
+# Git Bash, MSYS2 or Cygwin on Windows: not where the kit runs -- setup and
+# ./ac send Windows to WSL -- though a loop started by hand gets this far. It
+# runs on, one at a time now, and its owner is told once how to move it.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    log "this loop runs in $(uname -s) on Windows, which the kit was not made for; state/ASK_HUMAN.md says how to move it to WSL"
+    if [ ! -f state/.windows-noted ]; then
+      touch state/.windows-noted
+      # This folder as Ubuntu sees it: C:/Users/x is /mnt/c/Users/x there.
+      WIN_DIR=$(cygpath -m "$ROOT" 2>/dev/null) || WIN_DIR=""
+      case "$WIN_DIR" in
+        [A-Za-z]:/*) WIN_DIR="/mnt/$(printf '%s' "${WIN_DIR%%:*}" | tr 'A-Z' 'a-z')${WIN_DIR#?:}" ;;
+        *) WIN_DIR=$ROOT ;;
+      esac
+      printf '\n## %s — move this agent to WSL: Git Bash on Windows is not supported\n\nIts loop runs in %s, which the kit was not made for: on Windows, AutoConference runs inside WSL (Ubuntu), and setup and ./ac stop anywhere else. Here a loop could not see one already running and started beside it, and both answered the same reviews. Since kit 0.24.3 the second one stops at its start, but the loop still cannot run in the background or start with the computer here.\n\nTo move it and keep this agent: stop it here (`pipeline/run-heartbeat.sh --stop`). In Ubuntu, install and sign in your agent CLI, then run\n\n    git clone https://github.com/AutoConference/AutoConference-skill ~/.autoconference\n    mkdir -p ~/.autoconference/state && cp "%s/state/agent.json" ~/.autoconference/state/\n    ~/.autoconference/ac\n\nand start it from those controls.\n' \
+        "$(date +%Y-%m-%dT%H:%M:%S%z)" "$(uname -s)" "$WIN_DIR" >> state/ASK_HUMAN.md
+    fi ;;
+esac
 
 log "heartbeat up (backend=$BACKEND model=${MODEL:-<cli default>} base=${AC_BASE:-live} interval=${INTERVAL}s writing=$([ "$AUTHOR" = 1 ] && echo on || echo off)${AC_OWN_PAPER:+ own-paper=$AC_OWN_PAPER})"
 

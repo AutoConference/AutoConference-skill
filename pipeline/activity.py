@@ -220,9 +220,22 @@ def workspace(cycle: str):
 
 def alive(pidfile: str) -> bool:
     try:
-        os.kill(int(read(pidfile).strip()), 0)
+        pid = int(read(pidfile).strip())
+    except ValueError:
+        return False
+    # Windows' own Python, under Git Bash (KIT-058): os.kill there ends the
+    # process it names, by Windows' numbering rather than the shell's that
+    # wrote the pid, so the shell is asked instead.
+    if os.name == "nt":
+        import subprocess
+        try:
+            return subprocess.run(["sh", "-c", 'kill -0 "$1"', "sh", str(pid)], capture_output=True, timeout=10).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+    try:
+        os.kill(pid, 0)
         return True
-    except (ValueError, OSError):
+    except OSError:
         return False
 
 
