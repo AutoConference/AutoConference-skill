@@ -62,6 +62,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE = os.environ.get("AC_STATE") or os.path.join(ROOT, "state")
@@ -854,18 +855,108 @@ def others(jobdir: str) -> list:
     return out
 
 
+# KIT-056: a verified result goes to its reviewers with what made it -- the
+# experiment's code, its outputs, its manifest and its report, in one zip
+# attached to the paper as supplementary material (ASYNC-024), so a reviewer
+# can check each number against the file that holds it. What the kit keeps of
+# its own (the job's state, the request, the check) stays out.
+BUNDLE_EXT = {".py", ".sh", ".r", ".jl", ".json", ".jsonl", ".md", ".txt", ".csv", ".tsv", ".yaml", ".yml", ".toml", ".cfg", ".ini", ".ipynb"}
+BUNDLE_SKIP = {"JOB.json", "CHECK.json", "DONE", "POSTED", "pid", "waiting", "evidence.zip"}
+BUNDLE_MAX = 5 * 1024 * 1024
+BUNDLE_FILE_MAX = 2 * 1024 * 1024
+
+
+def bundle_files(jobdir: str, everything: bool = True) -> list:
+    """What goes in a job's evidence: every text file of its own (`everything`),
+    or only what its manifest names -- the scripts, the outputs -- with the
+    manifest and the report. Paths relative to the job."""
+    root = os.path.realpath(jobdir)
+    found = []
+    if everything:
+        for dirpath, dirs, files in os.walk(root):
+            rel_dir = os.path.relpath(dirpath, root)
+            top = rel_dir.split(os.sep)[0]
+            if top in ("requests", "state") or any(part.startswith(".") or part == "__pycache__" for part in rel_dir.split(os.sep) if part != "."):
+                dirs[:] = []
+                continue
+            for fn in sorted(files):
+                rel = os.path.normpath(os.path.join(rel_dir, fn))
+                p = os.path.join(dirpath, fn)
+                if fn in BUNDLE_SKIP or fn.startswith(".") or os.path.splitext(fn)[1].lower() not in BUNDLE_EXT:
+                    continue
+                if os.path.islink(p) or not os.path.isfile(p) or os.path.getsize(p) > BUNDLE_FILE_MAX:
+                    continue
+                found.append(rel)
+        return sorted(found)
+    man = load_json(os.path.join(jobdir, "runs", "REPLAY_MANIFEST.json"), {}) or {}
+    want = ["RESULT.md", os.path.join("runs", "REPLAY_MANIFEST.json")]
+    for e in man.get("experiments") or []:
+        if not isinstance(e, dict):
+            continue
+        if isinstance(e.get("script"), str):
+            s = e["script"]
+            want.append(os.path.join("runs", s) if os.path.isfile(os.path.join(jobdir, "runs", s)) else s)
+        if isinstance(e.get("output"), str):
+            want.append(os.path.join("runs", e["output"]))
+    for rel in dict.fromkeys(os.path.normpath(w) for w in want):
+        p = os.path.realpath(os.path.join(root, rel))
+        if p.startswith(root + os.sep) and os.path.isfile(p) and not os.path.islink(os.path.join(root, rel)):
+            found.append(rel)
+    return found
+
+
+def evidence_bundle(jobdir: str):
+    """The job's evidence as `evidence.zip` in its directory -- a plain zip,
+    entries named relative to the job, no owner, no times -- or None when there
+    is nothing but the report to show, or it will not fit the platform's 5 MB."""
+    jobdir = os.path.abspath(jobdir)
+    out = os.path.join(jobdir, "evidence.zip")
+    for everything in (True, False):
+        files = bundle_files(jobdir, everything)
+        # The platform reads an archive's every entry to check it names no
+        # author, within a few thousand: a job with that many files sends only
+        # what its manifest names.
+        if everything and len(files) > 500:
+            continue
+        if not any(f.startswith("runs" + os.sep) and f != os.path.join("runs", "REPLAY_MANIFEST.json") for f in files) and \
+                not any(f.endswith((".py", ".sh", ".r", ".jl")) for f in files):
+            return None
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+            for rel in files:
+                zi = zipfile.ZipInfo(rel.replace(os.sep, "/"), date_time=(1980, 1, 1, 0, 0, 0))
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                with open(os.path.join(jobdir, rel), "rb") as f:
+                    z.writestr(zi, f.read())
+        if os.path.getsize(out) <= BUNDLE_MAX:
+            return out
+    try:
+        os.remove(out)
+    except OSError:
+        pass
+    return None
+
+
 def post_prompt(jobdir: str) -> str:
     jobdir = os.path.abspath(jobdir)
     info, status = job_of(jobdir), done_status(jobdir) or "failed"
     sid = info.get("submission_id")
     reqs = job_requests(jobdir)
     threads = "\n".join(f"  - {label(r)}" for r in reqs)
+    bundle = evidence_bundle(jobdir) if status == "verified" else None
     if status == "verified":
         what = ("The kit checked its report: every number in it traced to what its code wrote, and that code re-ran from a "
                 "clean copy with the same result. Its report:\n\n=== RESULT.md ===\n" + read(os.path.join(jobdir, "RESULT.md"), 40000).strip()
                 + "\n=== END ===\n\nPost it: say plainly that it is new and not in the reviewed paper, what was run (the setup, "
                 "the data, the scale, the seeds), the numbers exactly as the report gives them, and what they show and do not "
                 "-- also where they go against the paper. Give no number the report does not have.")
+        if bundle:
+            what += ("\n\nFirst attach its evidence to the paper as supplementary material -- the experiment's code, its outputs, "
+                     "its manifest and this report, in one zip the kit made -- so each reviewer can check the numbers against "
+                     f"the files that hold them:\n\n  python3 submission/scripts/client.py attach {sid} {bundle} --artifact\n\n"
+                     "Then say in each reply that it is attached, as evidence.zip. If the platform refuses it -- it names you "
+                     "(identity_in_attachment: it says where), the paper's discussion closed, or the paper has all the "
+                     "supplementary files it may -- post the result without it and do not say it is attached; never link "
+                     "your own copy instead.")
     elif status == "not_run":
         what = ("It could not be run. Its report says why:\n\n=== RESULT.md ===\n" + read(os.path.join(jobdir, "RESULT.md"), 20000).strip()
                 + "\n=== END ===\n\nSay so plainly, and why, and what would settle the point. No numbers.")

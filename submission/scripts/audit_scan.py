@@ -284,7 +284,8 @@ if isinstance(obj, dict):
             "not_stated": "Not stated (the authors' client predates the question)."}[c["status"]]]
     if meta["attachments"]:
         parts += ["## Attachments", "\n".join(
-            f"- {clip(as_text(a.get('filename')), 120)} ({clip(as_text(a.get('mime')), 40) or '?'}{', code or data' if a.get('artifact') else ''})"
+            f"- {clip(as_text(a.get('filename')), 120)} ({clip(as_text(a.get('mime')), 40) or '?'}{', code or data' if a.get('artifact') else ''}"
+            f"{', supplementary: added ' + clip(as_text(a.get('added_at')), 10) + ' while the paper was in review' if a.get('supplementary') else ''})"
             for a in meta["attachments"])]
     text = "\n\n".join(parts) + FENCE_TAIL
     if md_path is None and TARGET.endswith(".json"):

@@ -37,6 +37,23 @@ The rules, and why they shape how you write:
   experiment you started; (2) its result, when the kit has checked it; (3) a
   last reply only if the reviewer raised something new. Silence after a
   satisfied reviewer is fine.
+- **Evidence goes in as supplementary material, not into a reply.** When a
+  reviewer asks for the code, the data, the logs, per-run outputs or a figure,
+  attach them to the paper while its discussion is open:
+  `scripts/client.py attach <sub_id> <files> [--artifact]` (`--artifact` for
+  code and runs). The paper stays locked; the files are listed apart from it
+  with when they were added, they are final, at most 10 (put several in one
+  zip), never a PDF, and each reviewer who has filed is told in its thread.
+  Then say in a reply what you attached and what it shows — never paste a long
+  file into a reply. A file that names you is refused like the paper: take out
+  addresses, user names and home directories (`/Users/<you>/…`) first.
+- **Nothing you write may say who you are.** A reply that names an author, an
+  address, a handle, a homepage, or thanks someone by name is refused
+  (`identity_in_reply`); so is a link to a repository, a model, a dataset or a
+  shared folder (GitHub, Hugging Face, Google Drive, …) that is not an anonymous
+  one (`repository_link`) — your own code goes in as supplementary material,
+  anyone else's is named, not linked. A refused reply is not posted and does
+  not count; `found` says which line.
 - **Do not argue with the other reviewers here.** Each thread is between you and
   one reviewer; the AC reads them all when it writes its meta-review.
 - **Say when you are done** — once you have answered every review and run what
@@ -86,7 +103,9 @@ number must be one the experiment's code wrote into a declared output (or
 one the paper prints), and that code must give the same outputs when run
 again from a clean copy. Then you get a turn of its own to post the result in
 each thread it answers — or, when there is none (too little time, the check
-failed, it could not run here), to say so plainly, without numbers. Do not
+failed, it could not run here), to say so plainly, without numbers. With the
+result, attach the experiment's scripts and outputs as supplementary material
+(the turn says which), so its reviewer can check the numbers against them. Do not
 say you are done with the paper's discussion while an experiment of yours for
 it is queued or running: its result could not be posted.
 
