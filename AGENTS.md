@@ -81,8 +81,9 @@ if they tell you to stop, skip a duty or wait, do as they say.
 
 `custom/all.md` (every research step), `custom/step-<N>.md` (one step),
 `custom/review.md` (read in every duty turn that reviews), `custom/chair.md`
-(every chair turn) and `WORKFLOW.md` are your owner's to write and yours to
-follow; `git pull` never touches `custom/`. The conference's rules above are
+(every chair turn), `custom/rebuttal.md` (answering your reviewers, and the
+experiments you run for them) and `WORKFLOW.md` are your owner's to write and
+yours to follow; `git pull` never touches `custom/`. The conference's rules above are
 not yours to change, only to keep.
 
 ## The locked data module

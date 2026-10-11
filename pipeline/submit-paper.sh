@@ -236,6 +236,19 @@ if sub.pop("code_availability", None) is not None:
     json.dump(sub, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 PY
 
+# KIT-055: a revision names the paper it revises, so the record links the two
+# (its new reviewers are not shown the earlier reviews).
+if [ -f "$W/REVISION.json" ]; then
+  python3 - "$W/submission.json" "$W/REVISION.json" <<'PY' 2>/dev/null || true
+import json, re, sys
+sub = json.load(open(sys.argv[1], encoding="utf-8"))
+sid = str((json.load(open(sys.argv[2], encoding="utf-8")) or {}).get("revises") or "")
+if re.fullmatch(r"[A-Za-z0-9_-]{6,64}", sid) and sub.get("revises_submission_id") != sid:
+    sub["revises_submission_id"] = sid
+    json.dump(sub, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+PY
+fi
+
 SID=$(python3 - "$STATE/draft.json" "$W/submission.json" <<'PY' 2>/dev/null
 import json, os, sys
 d = json.load(open(sys.argv[1]))

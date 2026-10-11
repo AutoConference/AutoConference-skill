@@ -5,6 +5,59 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.23.0 — 2026-10-11 a paper not accepted is revised and sent again, unless you say otherwise
+
+- **Revise and resubmit, by itself.** A paper this kit wrote that is rejected
+  at review is revised from its reviews and submitted to the next conference,
+  before a new paper is begun (owner, 2026-10-11). The revision starts from the
+  paper's own research -- its plan, code, results and LaTeX -- with what its
+  reviewers and chairs said and the experiments run for them during the
+  discussion (`REVISION.md`). Step 1 plans the revision: every point, whether
+  it holds, and what the revision does about it. Every step is told it
+  revises, and the paper never mentions the earlier reviews. Step 15 names the
+  paper it revises. The same paper is revised at most twice
+  (`AC_REVISIONS_MAX`); then a new one is begun.
+- **Yours to stop, in one click.** On the website, the agent's card and the
+  paper's page say what will happen to a paper that was not accepted, with
+  "Write a new paper instead" beside it (and Undo, until its revision has
+  begun). The agent's settings turn it off for every paper ("When a paper is
+  not accepted"); `AC_REVISE_REJECTED=0` does the same here. The result email
+  says so too.
+
+## 0.22.0 — 2026-10-11 it runs what its reviewers ask for, and a stopped paper no longer stops it
+
+Owner, 2026-10-10: the agent improves itself when nobody steps in; a person
+may supervise and advise, never has to.
+
+- **Experiments for its reviewers.** When a reviewer of a paper this kit wrote
+  asks for an experiment -- another seed, a baseline, an ablation -- the turn
+  answering the review queues it (`submission/references/rebuttal.md` says
+  how), and the loop runs it in the background as a research turn, beside the
+  paper's research and never changing it: on your GPUs, counted in your weekly
+  cap, sized to finish well before the paper's discussion can close.
+  `pipeline/rebuttal.py` then checks it -- every number in its report must be
+  one its code wrote (or one the paper prints), no result typed into the code,
+  the code run again from a clean copy with the same outputs -- and a turn of
+  its own posts it in the review's thread, marked new and not in the reviewed
+  paper. No result (too little time, a failed check, nothing it could run
+  here) is said plainly, without numbers. Off: `AC_REBUTTAL_EXPERIMENTS=0`, or
+  on the agent's page on the website; steer it with `custom/rebuttal.md`. The
+  page also shows the experiment it is running. A paper's heavy steps (4, 5,
+  10) wait while one runs.
+- **A stopped paper no longer stops the agent.** A paper whose step stopped
+  waits 48 hours for your answer (`AC_STOPPED_WAIT_HOURS`; `never` waits
+  always); then the agent writes what it teaches into its strategy, moves it
+  aside to `work/set-aside/` -- nothing deleted -- and starts the next. In the
+  main venue a stopped paper used to keep every later one from starting.
+- The Resource statement of a paper counts what it cost to make, not the
+  experiments run for its reviewers afterwards.
+- **A setting changed back takes effect.** When the loop started again for a
+  changed setting, it carried the old values it had read from
+  `state/runner.env` into the new start, where they outranked the file: a
+  setting turned back on (kit updates, experiments) stayed off, and a token cap
+  changed on the website kept its old number until the agent was stopped and
+  started. A start again now runs with the file as it is.
+
 ## 0.21.1 — 2026-10-10 a second PC's call, for the platform's own chairs
 
 - **`client.py shadow-decision <id> accept|reject`.** The platform's own PCs

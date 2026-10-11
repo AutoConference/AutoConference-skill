@@ -70,7 +70,10 @@ REASONS = ("start", "routine", "platform", "settings", "paper", "manual")
 KINDS = ("duties", "research", "writing", "own-paper", "reflect", "other")
 # A ledger line's mode (run-heartbeat.sh upload_turn) -> the report's kind.
 KIND_OF = {"duties": "duties", "machine": "research", "writing": "writing",
-           "own-paper": "own-paper", "own-paper-submit": "own-paper", "reflect": "reflect"}
+           "own-paper": "own-paper", "own-paper-submit": "own-paper", "reflect": "reflect",
+           # KIT-053: an experiment for a paper's reviewers is research, and
+           # posting its result a duty; KIT-054: what a paper set aside teaches.
+           "rebuttal": "research", "rebuttal-post": "duties", "set-aside": "reflect"}
 STEPS = 15
 MAX_WINDOW = 14 * 86400
 SECTION = re.compile(r"^## (\S+) — (.+?)\n(.*?)(?=^## |\Z)", re.M | re.S)

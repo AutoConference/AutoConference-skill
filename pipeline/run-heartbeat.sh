@@ -188,6 +188,12 @@ export PATH="$ROOT/state/bin:$PATH"
 # file, a key's last line wins over its earlier ones, as everything else that
 # reads the file has it (client.py, ./ac): a model chosen later, written as a
 # line of its own, must not be read under the one it replaced.
+# FROM_FILE: the keys it took from the file, which a start again
+# (restart_self) leaves out of the new loop's environment, so the file is what
+# it runs with: a line removed is a setting back to its default, not its old
+# value carried over (KIT-053: a switch turned back on stayed off; so did a cap
+# changed on the website, and kit updates turned back on).
+FROM_FILE=""
 load_settings() {
   [ -f state/runner.env ] || return 0
   local k v given
@@ -197,6 +203,7 @@ load_settings() {
     case "$k" in *[!A-Za-z0-9_]*) continue ;; esac
     case "$given" in *" $k "*) continue ;; esac
     export "$k=$v"
+    FROM_FILE="$FROM_FILE $k"
   done < state/runner.env
 }
 load_settings
@@ -647,7 +654,9 @@ TOK
 # research_over_cap: true when this week's paper writing has used the tokens
 # its owner allowed it (AC_RESEARCH_MTOKENS_WEEK, millions; KIT-009). Seven
 # days back from now, from this machine's own ledger. Reviews are not capped:
-# they are owed.
+# they are owed. An experiment for a paper's reviewers is research (KIT-053),
+# and so is what a paper set aside teaches (KIT-054); posting a result is a
+# duty.
 research_over_cap() {
   case "${AC_RESEARCH_MTOKENS_WEEK:-}" in ''|*[!0-9]*) return 1 ;; esac
   python3 - "${ROOT:-$PWD}/state/usage.jsonl" "$AC_RESEARCH_MTOKENS_WEEK" <<'CAP' 2>/dev/null
@@ -659,7 +668,7 @@ try:
             r = json.loads(line)
         except ValueError:
             continue
-        if r.get("at", 0) >= since and r.get("mode") in ("writing", "machine", "own-paper", "own-paper-submit", "reflect"):
+        if r.get("at", 0) >= since and r.get("mode") in ("writing", "machine", "own-paper", "own-paper-submit", "reflect", "rebuttal", "set-aside"):
             used += int(r.get("in") or 0) + int(r.get("out") or 0)
 except OSError:
     pass
@@ -897,6 +906,23 @@ pipeline_steps() {
       log "paper $cyc: this week's writing reached its cap; paused before step $n/15"
       cap_note; return 0
     fi
+    # KIT-053: a heavy step -- the calibration, the sweep, the replay -- and an
+    # experiment for a paper's reviewers do not share the machine. That one is
+    # due before a discussion can close, and this paper's conference is days
+    # away: the step waits for it, two days at most, and for a request nobody
+    # could start in two hours (its model out, say) no longer.
+    case "$n" in 4|5|10)
+      if python3 "$ROOT/pipeline/rebuttal.py" busy 2>/dev/null; then
+        touch "$ws/.waiting-for-rebuttal"
+        log "paper $cyc: step $n/15 waits while an experiment for its reviewers runs"
+        local waited=0
+        while [ "$waited" -lt 172800 ] && python3 "$ROOT/pipeline/rebuttal.py" busy 2>/dev/null; do
+          sleep 60 9>&- & wait $!
+          waited=$((waited + 60))
+        done
+        rm -f "$ws/.waiting-for-rebuttal"
+      fi ;;
+    esac
     out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
     : > "$ws/.step-prompts"          # run-pipeline.sh appends what it asks the model
     # A step that stops says why here (step 10 does): only this run's counts.
@@ -1104,6 +1130,8 @@ UNTRACE
       if grep -q 'submitted: ' "$out"; then
         # Also under state/, which a reinstall keeps and work/ is not.
         touch "$ws/SUBMITTED"; mkdir -p state/submitted; touch "state/submitted/$cyc"
+        # KIT-055: a revision that went in is no longer to be revised.
+        python3 "$ROOT/pipeline/revision.py" submitted "$cyc" >/dev/null 2>&1
         # Async: finished after its conference closed, the paper went to the
         # next one; that conference has its paper now, too.
         landed=$(sed -n 's/^.*conference: \([a-z0-9-]*\)$/\1/p' "$out" | tail -1)
@@ -1236,6 +1264,29 @@ write_paper() {
     # Straight on to the paper when that worked, rather than a wake later.
     [ -f state/machine.json ] || { log "paper $cyc: no state/machine.json yet; will ask again"; return; }
   fi
+  # KIT-055: a paper of its that was rejected at review is revised before a new
+  # one is begun -- unless its owner let it go or turned revising off
+  # (pipeline/revision.py). Its workspace is made here, from the rejected
+  # paper's research and what its reviewers said.
+  local rev="" said
+  [ -f "$ws/pipeline.next" ] || rev=$(python3 pipeline/revision.py next 2>>"$LOG")
+  if [ -n "$rev" ]; then
+    if said=$(python3 pipeline/revision.py prepare "$rev" "$cyc" 2>&1); then
+      log "paper $cyc: revising the paper rejected as $rev, from its reviews (REVISION.md), for this conference"
+    else
+      log "paper $cyc: ${said##*$'\n'}"
+      return
+    fi
+  fi
+  local mode=${AC_MODE:-}
+  if [ -f "$ws/REVISION.json" ]; then
+    # A revision is the paper it revises: its direction, its seed and how it
+    # came about are that paper's, kept with its research.
+    dir=$(cat "$ws/DIRECTION" 2>/dev/null); seed=$(cat "$ws/SEED" 2>/dev/null)
+    mode=$(cat "$ws/MODE" 2>/dev/null)
+    [ -n "$dir$seed" ] || dir="the direction of the paper it revises (REVISION.md)"
+    log "paper $cyc: starting the revision's pipeline in the background; output in $ws/pipeline.out"
+  else
   # The direction: the owner's setting here, else their research direction on
   # the platform, else the agent's registered interests. With none of those and
   # no seed paper there is nothing to start from.
@@ -1254,7 +1305,6 @@ print(("owner\t"+r) if r else ("own\t"+", ".join(d.get("research_interests") or 
   # How the paper came about, for the record (A14), when setup left it to the
   # loop (one "it writes papers" choice since 0.12): steered by the owner's
   # direction or seed paper, or on its own topics. A mode the owner set stays.
-  local mode=${AC_MODE:-}
   [ -z "$mode" ] && { [ -n "$steered" ] && mode=owner_direction || mode=autonomous; }
   if [ -z "$dir" ] && [ -z "$seed" ]; then
     log "paper $cyc: writing is on but there is no direction and no seed paper (AC_DIRECTION or AC_SEED_PAPER in state/runner.env)"
@@ -1277,6 +1327,7 @@ print(("owner\t"+r) if r else ("own\t"+", ".join(d.get("research_interests") or 
   [ -n "$dir" ] && printf '%s\n' "$dir" > "$ws/DIRECTION"
   [ -n "$seed" ] && printf '%s\n' "$seed" > "$ws/SEED"
   printf '%s\n' "$mode" > "$ws/MODE"
+  fi
   # Its own process group (set -m), so stopping the loop can stop every process
   # a step started -- the agent CLI, the experiment -- and not only this shell.
   # 9>&- keeps the loop's lock out of it: a step can run for hours, and a
@@ -1509,6 +1560,201 @@ print(c if took_part and re.fullmatch(r"[a-z0-9-]+", c) else "")' 2>/dev/null)
   touch "state/reflected/$cyc"
 }
 
+# ── Experiments for a paper's reviewers (KIT-053) ──────────────────────────
+#
+# Owner, 2026-10-10: "最好是做到agent在没人干预的时候都能自己完善做到recursive
+# self improvement，人类当然可以作为supervisor介入给到一些指点和修改建议，但是
+# 当人不介入的时候agent应该也要自己能够完成自进化". A reviewer asks for an
+# experiment. The duty turn answering the review cannot run one, so it queues
+# it (pipeline/rebuttal.py puts how in its instruction); here it runs -- one
+# at a time for the whole agent, in the background, as a research turn in a
+# directory of its own beside the paper's research, within the owner's GPUs
+# and weekly cap, and before the paper's discussion can close. Its report's
+# numbers are checked against what its code wrote, and that code is run again
+# from a clean copy (rebuttal.py check); a check that fails gets one more try,
+# told why. Then a duty turn of its own posts the result in the review's
+# thread -- or says plainly that there is none, and why. A paper's heavy steps
+# (4, 5, 10) and an experiment for reviewers never share the machine:
+# pipeline_steps waits for it. Off: AC_REBUTTAL_EXPERIMENTS=0, or on the
+# website; custom/rebuttal.md steers it. Nothing here waits for a person.
+
+# with_timeout <seconds> <command...>: macOS has no timeout(1), coreutils
+# calls it gtimeout, and with neither the command runs unbounded rather than
+# not at all.
+with_timeout() {
+  if command -v timeout >/dev/null 2>&1; then timeout --foreground "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout --foreground "$@"
+  else shift; "$@"; fi
+}
+
+# rebuttal_job <jobdir> <seconds>: one experiment, run in the background (its
+# own process group: stopping the loop stops it, and it goes on at the next
+# start from what it left).
+rebuttal_job() {
+  local job=$1 secs=$2 ws cyc prompt out start t0 rc mb status=failed tries=0
+  ws=$(cd "$job/../../.." && pwd) || return 1
+  cyc=$(basename "$ws")
+  # Claude Code finds the research skills through a workspace's .claude.
+  [ -e "$ws/.claude" ] && [ ! -e "$job/.claude" ] && ln -s "$(cd "$ws/.claude" && pwd -P)" "$job/.claude" 2>/dev/null
+  while :; do
+    prompt=$(python3 "$ROOT/pipeline/rebuttal.py" prompt "$job") || break
+    out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
+    log "rebuttal: an experiment for the reviewers of $cyc's paper (up to $((secs / 60)) min)"
+    (
+      # The owner's GPUs, and only those (A21), as for a paper's steps.
+      case "${AC_GPUS:-}" in ''|none|NONE) ;; *) export CUDA_VISIBLE_DEVICES="$AC_GPUS" ;; esac
+      [ "${AC_GPUS:-}" = none ] && export CUDA_VISIBLE_DEVICES=""
+      AC_LIVE_LABEL="experiment for reviewers" with_timeout "$secs" "$ROOT/pipeline/agent-turn.sh" --mode research --dir "$job" - <<<"$prompt"
+    ) 2>&1 | tee "$out" >> "$job/turns.log"
+    rc=${PIPESTATUS[0]}
+    upload_turn "$BACKEND" "${MODEL:-}" "$prompt" rebuttal "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "$cyc"
+    # The model was not there: back in the queue, to go on from what it left
+    # once it is (A36, KIT-015).
+    if [ "$rc" -ne 0 ] && mb=$(quota_retry_at "$out") && [ -n "$mb" ]; then
+      set -- $mb
+      block_model "$1" "$2" "${3:-$1}"
+      python3 "$ROOT/pipeline/rebuttal.py" wait "$job"
+      log "rebuttal: the model is out ($(why_words "$2")); the experiment goes on once it is back"
+      rm -f "$out"; return 0
+    fi
+    rm -f "$out"
+    python3 "$ROOT/pipeline/rebuttal.py" check "$job" > "$job/check.out" 2>&1; rc=$?
+    log "$(tail -1 "$job/check.out")"
+    # What the check calls it: verified, or not_run (nothing to report, and
+    # its report says why); failed (no report), or unverified.
+    status=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status") or "")' "$job/CHECK.json" 2>/dev/null)
+    [ "$rc" -eq 0 ] && { status=${status:-verified}; break; }
+    status=${status:-unverified}
+    tries=$((tries + 1))
+    [ "$tries" -lt 2 ] || break
+    secs=$(python3 "$ROOT/pipeline/rebuttal.py" time-left "$job" 2>/dev/null)
+    case "$secs" in ''|*[!0-9]*) secs=0 ;; esac
+    [ "$secs" -ge 1800 ] || break
+    log "rebuttal: its check found problems; one more try, told what they are"
+  done
+  python3 "$ROOT/pipeline/rebuttal.py" finish "$job" "$status"
+  log "rebuttal: the experiment for $cyc's reviewers finished ($status); its result is posted next"
+}
+
+# rebuttal_work: each look, after the duties. Results first -- a finished
+# experiment's result goes into its threads, in a duty turn -- then the next
+# experiment, if one can start.
+rebuttal_work() {
+  local j line secs f list=()
+  python3 pipeline/rebuttal.py recover 2>>"$LOG" | while IFS= read -r line; do log "$line"; done
+  if ! model_blocked >/dev/null; then
+    while IFS= read -r j; do [ -n "$j" ] && list+=("$j"); done < <(python3 pipeline/rebuttal.py to-post 2>>"$LOG")
+    for j in ${list[@]+"${list[@]}"}; do
+      log "rebuttal: posting what came of the experiment in ${j#$ROOT/}; waking $BACKEND"
+      wake "$(python3 pipeline/rebuttal.py post-prompt "$j")" rebuttal-post || break
+      if python3 pipeline/rebuttal.py posted "$j" >/dev/null 2>&1; then
+        log "rebuttal: posted"
+      elif [ -f "$j/POSTED" ]; then
+        log "rebuttal: not every thread got it ($(cat "$j/POSTED")); not tried again"
+      else
+        log "rebuttal: not every thread got it yet; tried once more at the next look"
+      fi
+    done
+  fi
+  f=$(mktemp 2>/dev/null) || return 0
+  printf '%s' "$TASKS" > "$f"
+  line=$(python3 pipeline/rebuttal.py next "$f" 2>>"$LOG")
+  rm -f "$f"
+  [ -n "$line" ] || return 0
+  secs=${line##* }; j=${line% *}
+  case "$secs" in ''|*[!0-9]*) return 0 ;; esac
+  # Its own process group (set -m), as a paper's pipeline: stopping the loop
+  # stops it. 9>&- keeps the loop's lock out of it.
+  set -m
+  ( rebuttal_job "$j" "$secs" ) >>"$j/job.out" 2>&1 9>&- &
+  echo $! > "$j/pid"
+  set +m
+}
+
+# ── A paper rejected at review is revised (KIT-055) ────────────────────────
+#
+# Owner, 2026-10-11: "被拒论文会默认自动recursive self improvement修改之后继续投
+# 下一次会议，但是用户可以手动关闭这个功能同时，也可以让这个agent放弃这个文章转手去做
+# 新的文章". pipeline/revision.py keeps the record; here, each look: the
+# papers this kit wrote and not yet settled are looked up (every three hours at
+# most), a rejected one queued for its revision -- write_paper starts it before
+# any new paper -- and a revision its owner let go is stopped and set aside,
+# nothing deleted, so the next paper is a new one.
+revision_work() {
+  local line sid ws pg dest list=()
+  python3 pipeline/revision.py scan 2>>"$LOG" | while IFS= read -r line; do log "$line"; done
+  while IFS= read -r line; do [ -n "$line" ] && list+=("$line"); done < <(python3 pipeline/revision.py dropped 2>>"$LOG")
+  for line in ${list[@]+"${list[@]}"}; do
+    sid=${line%% *}; ws=${line#* }
+    pg=$(cat "$ws/pipeline.pid" 2>/dev/null)
+    case "$pg" in
+      ''|*[!0-9]*) ;;
+      *) kill -TERM -- "-$pg" 2>/dev/null && log "revision: stopped its pipeline (process group $pg)"; rm -f "$ws/pipeline.pid" ;;
+    esac
+    dest="work/set-aside/$(basename "$ws")-$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p work/set-aside && mv "$ws" "$dest" || { log "revision: could not set $ws aside; tried again next time"; continue; }
+    python3 pipeline/revision.py set-aside "$sid" "$dest"
+    log "revision: its owner let the paper $sid go; its revision is set aside in $dest, and the next paper is a new one"
+  done
+}
+
+# ── A stopped paper does not stop the agent (KIT-054) ──────────────────────
+#
+# Owner, 2026-10-10 (the words above): with nobody to answer, the agent goes
+# on by itself. A paper whose step stopped -- a gate's finding, or a step that
+# failed its tries -- waits for its owner AC_STOPPED_WAIT_HOURS (48; "never"
+# waits for them always). Then one turn writes what it teaches into the
+# strategy, as a retrospective does, the paper is set aside -- its workspace
+# moved to work/set-aside/, nothing deleted -- and the next paper starts
+# afresh. In an asynchronous conference a stopped paper used to keep every
+# later one from starting for as long as nobody answered.
+read -r -d '' SET_ASIDE_PROMPT <<'PROMPT_END'
+Your paper in work/CYCLE/ stopped at step STEP of 15, and nobody answered for
+HOURS hours. It is being set aside, so that your next paper can start; nothing
+of it is deleted. Learn from it first, once.
+
+Why it stopped: its section in state/ASK_HUMAN.md (the one that names
+work/CYCLE/PIPELINE_STOPPED), work/CYCLE/refine-logs/STOP-step-STEP.md if it is
+there, and the end of work/CYCLE/pipeline.out. Its plan is in work/CYCLE/.
+
+Then update your strategy in state/strategy/ -- create the files if missing:
+the one the cause belongs to (direction.md: a question not worth the time or
+not feasible here; experiments.md: a design or a sizing that failed, or this
+machine's limits; writing.md: what a gate refused in the paper). Add one or
+two concrete rules that would have kept this paper from stopping, and keep
+each file under 40 lines. Append to state/strategy/CHANGELOG.md, newest last:
+  ## <date> -- CYCLE, set aside at step STEP
+  - <file>: <what changed> (because: <what stopped it, briefly>)
+
+Do not act on the platform, and change nothing in work/CYCLE/.
+PROMPT_END
+
+set_aside_stopped() {
+  local f ws cyc hours age step dest
+  hours=${AC_STOPPED_WAIT_HOURS:-48}
+  case "$hours" in never|off|NEVER|OFF) return 0 ;; ''|*[!0-9]*) hours=48 ;; esac
+  for f in work/*/PIPELINE_STOPPED; do
+    [ -f "$f" ] || continue
+    ws=${f%/PIPELINE_STOPPED}; cyc=${ws#work/}
+    age=$(( $(date +%s) - $(mtime "$f") ))
+    [ "$age" -ge $((hours * 3600)) ] || continue
+    # Its lesson needs the model; without it, the paper waits a little longer.
+    model_blocked >/dev/null && return 0
+    step=$(tr -dc '0-9' < "$f"); step=${step:-?}
+    log "paper $cyc: stopped at step $step/15 for $((age / 3600)) hours with no answer; setting it aside (AC_STOPPED_WAIT_HOURS=$hours)"
+    local p=${SET_ASIDE_PROMPT//CYCLE/$cyc}
+    p=${p//STEP/$step}
+    wake "${p//HOURS/$((age / 3600))}" set-aside
+    dest="work/set-aside/$cyc-$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p work/set-aside && mv "$ws" "$dest" || { log "paper $cyc: could not move it aside; it stays stopped"; continue; }
+    # A revision set aside so is not revised again (KIT-055).
+    [ -f "$dest/REVISION.json" ] && python3 pipeline/revision.py aside "$dest" >/dev/null 2>&1
+    printf '\n## %s — the %s paper was set aside, and the next one starts\n\nIt stopped at step %s/15 and nobody answered for %s hours (AC_STOPPED_WAIT_HOURS in state/runner.env; "never" waits for you always). What it teaches is in state/strategy/CHANGELOG.md. Nothing of it was deleted: it is in %s. To take it up again instead of the next paper: stop the agent, move the new work/%s aside, move it back to work/%s, delete its PIPELINE_STOPPED, and start the agent.\n' \
+      "$(date +%Y-%m-%dT%H:%M:%S%z)" "$cyc" "$step" "$((age / 3600))" "$dest" "$cyc" "$cyc" >> state/ASK_HUMAN.md
+    log "paper $cyc: set aside in $dest; the next paper starts at the next chance"
+  done
+}
+
 # Stopping the loop stops the paper too: `pkill -f run-heartbeat.sh` sends TERM
 # here, and each running pipeline's process group goes with it. The step it
 # was on is not recorded as done, so the next start resumes there.
@@ -1521,6 +1767,15 @@ stop_pipelines() {
     kill -TERM -- "-$pg" 2>/dev/null && log "stopped the pipeline (process group $pg)"
     rm -f "$f"
   done
+  # And an experiment for a paper's reviewers (KIT-053): it goes on at the
+  # next start, from what it left (rebuttal.py recover).
+  for f in work/*/rebuttal/jobs/*/pid; do
+    [ -f "$f" ] || continue
+    pg=$(cat "$f" 2>/dev/null)
+    case "$pg" in ''|*[!0-9]*) continue ;; esac
+    kill -TERM -- "-$pg" 2>/dev/null && log "stopped the experiment for reviewers (process group $pg)"
+    rm -f "$f"
+  done
 }
 trap 'stop_pipelines; drop_pid; exit 143' TERM INT HUP
 
@@ -1531,8 +1786,10 @@ trap 'stop_pipelines; drop_pid; exit 143' TERM INT HUP
 # look happens, for its activity report: settings unless said otherwise.
 restart_self() {
   log "$1; ${2:-starting again to run with them}"
+  local k drop=()
+  for k in $FROM_FILE; do drop+=(-u "$k"); done
   exec env -u AC_BACKEND -u AC_MODEL -u AC_EFFORT -u AC_AUTHOR -u AC_GPUS -u AC_MODE -u AC_OWN_PAPER -u AC_REPORTED_MODEL \
-    AC_WAKE_REASON="${3:-settings}" "$ROOT/pipeline/run-heartbeat.sh" 9>&-
+    ${drop[@]+"${drop[@]}"} AC_WAKE_REASON="${3:-settings}" "$ROOT/pipeline/run-heartbeat.sh" 9>&-
 }
 # mtime <file>: its modification time, epoch seconds; 0 when it is not there.
 # GNU's spelling first (-c %Y), BSD's second (-f %m): on GNU/Linux `stat -f`
@@ -1588,7 +1845,8 @@ local_change() { [ "$(mtime state/runner.env)" != "$ENV_MTIME" ]; }
 # changes, the platform is told then, not at the next wake.
 activity_sig() {
   local f
-  for f in state/ASK_HUMAN.md state/answers.json state/model_blocked work/*/pipeline.next work/*/pipeline.pid work/*/PIPELINE_STOPPED; do
+  for f in state/ASK_HUMAN.md state/answers.json state/model_blocked work/*/pipeline.next work/*/pipeline.pid work/*/PIPELINE_STOPPED \
+           work/*/rebuttal/jobs/*/pid work/*/rebuttal/jobs/*/DONE; do
     [ -e "$f" ] && printf '%s:%s ' "$f" "$(mtime "$f")"
   done
 }
@@ -1625,6 +1883,18 @@ paper_waits_over() {
   done
   for f in $stopped; do
     [ -e "$f" ] || { echo "the owner answered: ${f%/*} may go on"; return 0; }
+  done
+  # KIT-053: an experiment for a paper's reviewers finished during this nap:
+  # its result goes to its threads now, not at the next look. And a paper's
+  # heavy step began to wait for one that has yet to start.
+  for f in work/*/rebuttal/jobs/*/DONE; do
+    [ -f "$f" ] && [ ! -f "${f%DONE}POSTED" ] && [ "$(mtime "$f")" -gt "$began" ] || continue
+    echo "an experiment for reviewers finished (${f%/DONE})"; return 0
+  done
+  for f in work/*/.waiting-for-rebuttal; do
+    [ -f "$f" ] && [ "$(mtime "$f")" -gt "$began" ] || continue
+    python3 pipeline/rebuttal.py running >/dev/null 2>&1 && continue
+    echo "a paper's step waits for an experiment for reviewers to start"; return 0
   done
   return 1
 }
@@ -1710,6 +1980,21 @@ try: print(str(json.load(sys.stdin).get("brief") or "").strip())
 except Exception: print("")' 2>/dev/null)
   [ -n "$brief" ] && printf '%s %s\n\n' "Your open duties, as the platform lists them:" "$brief"
   printf '%s\n' "$PROMPT"
+  # KIT-053: answering the reviews of a paper whose research is on this
+  # machine, the experiments it can queue for them, and where those stand.
+  local f exp=""
+  if f=$(mktemp 2>/dev/null); then
+    printf '%s' "$TASKS" > "$f"
+    exp=$(python3 pipeline/rebuttal.py brief "$f" 2>/dev/null)
+    rm -f "$f"
+  fi
+  [ -n "$exp" ] && printf '\n%s\n' "$exp"
+  # Their instructions for answering reviewers, in a turn that answers some.
+  if [ -f custom/rebuttal.md ]; then
+    case "$exp$TASKS" in
+      *RESPOND_TO_REVIEW*|"Experiments for your reviewers"*) printf '\n%s\n\n%s\n' "Your owner's instructions for answering your reviewers (custom/rebuttal.md):" "$(cat custom/rebuttal.md)" ;;
+    esac
+  fi
   # KIT-049: screened as the reviewer harness screens them -- a line that asks
   # for what the conference's rules settle is left out and counted -- or the
   # file as it is, when the screen cannot run.
@@ -1954,6 +2239,11 @@ except Exception: print("")' 2>/dev/null)
   if [ -n "$PH_CYCLE" ] && [ "$PH_NAME" != SUBMISSION ] && [ "${PH_PIPE:-sync}" != async ] && [ ! -f "work/$PH_CYCLE/SUBMITTED" ]; then
     stop_late_pipeline "$PH_CYCLE"
   fi
+  # KIT-055: a paper rejected at review is queued for its revision, and one its
+  # owner let go is set aside. KIT-054: a paper stopped long with no answer
+  # is set aside, so the next can start.
+  [ "$AUTHOR" = 1 ] && revision_work
+  [ "$AUTHOR" = 1 ] && set_aside_stopped
   # A paper the owner brought takes the cycle's one paper, ahead of writing.
   if [ "$PH_NAME" = SUBMISSION ] && [ -n "$PH_CYCLE" ] \
      && [ ! -f "work/$PH_CYCLE/SUBMITTED" ] && [ ! -f "state/submitted/$PH_CYCLE" ]; then
@@ -1972,6 +2262,9 @@ except Exception: print("")' 2>/dev/null)
   else
     log "nothing to do; it looks again at $(clock $(( $(date +%s) + INTERVAL ))) unless the platform wakes it sooner"
   fi
+  # KIT-053: experiments for its papers' reviewers -- results into their
+  # threads, then the next one, if one can start.
+  rebuttal_work
   # This look's report: what it saw, what it did, what became of the paper.
   inbox_snapshot after
   activity_report

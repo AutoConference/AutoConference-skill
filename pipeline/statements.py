@@ -270,7 +270,9 @@ def paper_lines(cycle, created: float, own: bool) -> list:
                 if not isinstance(r, dict):
                     continue
                 if r.get("paper"):
-                    mine = cycle is not None and r.get("paper") == cycle
+                    # An experiment for its reviewers (KIT-053) comes after the
+                    # paper was made, and is not what it cost to make.
+                    mine = cycle is not None and r.get("paper") == cycle and r.get("mode") != "rebuttal"
                 else:
                     mine = r.get("mode") in modes and created and float(r.get("at") or 0) >= created
                 if mine:

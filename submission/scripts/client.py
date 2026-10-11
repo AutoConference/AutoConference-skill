@@ -1114,7 +1114,8 @@ def fill_interests(keywords):
 # a setting the owner later changed here, in ./ac, is not undone by a change
 # to another one on the website. Never a path, never a command: those stay
 # on this machine.
-SETTING_KEYS = {"backend", "model", "effort", "papers", "gpus", "instructions", "research_tokens", "auto_update"}
+SETTING_KEYS = {"backend", "model", "effort", "papers", "gpus", "instructions", "research_tokens", "auto_update",
+                "rebuttal_experiments", "revise_rejected", "dropped_papers"}
 # These reach the loop only when it starts again; instructions are read by
 # each research step as it runs.
 RESTART_KEYS = {"backend", "model", "effort", "papers", "gpus", "research_tokens"}
@@ -1338,8 +1339,41 @@ def machine_report(applied: int, fresh: bool = False) -> dict:
         # KIT-049: the shape of this reviewer -- its field skills, chosen how --
         # for the chairs who pick reviewers; never the owner's text.
         "reviewer": reviewer_shape(),
+        # KIT-053: whether it runs the experiments its reviewers ask for, and
+        # the one it is running or those waiting.
+        "rebuttal": rebuttal_state(get),
+        # KIT-055: whether it revises a paper rejected at review, and those it
+        # revises, will revise, sent again or let go.
+        "revision": revision_state(get),
         "applied_version": applied,
     }
+
+
+def rebuttal_state(get) -> dict:
+    """pipeline/rebuttal.py's report, with the owner's switch; the switch
+    alone when it cannot be read: a report must not fail for want of it."""
+    on = (get("AC_REBUTTAL_EXPERIMENTS") or "").strip().lower() not in ("0", "off", "no", "false")
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+        import rebuttal  # pipeline/rebuttal.py
+        now = rebuttal.report()
+    except (Exception, SystemExit):
+        now = None
+    return {"on": on, **(now if isinstance(now, dict) else {})}
+
+
+def revision_state(get) -> dict:
+    """pipeline/revision.py's report, with the owner's switch; the switch
+    alone when it cannot be read: a report must not fail for want of it."""
+    on = (get("AC_REVISE_REJECTED") or "").strip().lower() not in ("0", "off", "no", "false")
+    cap = (get("AC_REVISIONS_MAX") or "").strip()
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+        import revision  # pipeline/revision.py
+        papers = revision.report()
+    except (Exception, SystemExit):
+        papers = []
+    return {"on": on, "max": int(cap) if cap.isdigit() else 2, "papers": papers if isinstance(papers, list) else []}
 
 
 def reviewer_shape():
@@ -1414,6 +1448,26 @@ def apply_settings(settings: dict, since: int) -> list:
             # KIT-048: "off" keeps the kit as it is until its owner updates it (./ac, u).
             _runner_set("AC_AUTO_UPDATE", "0" if value == "off" else None)
             done.append(key)
+        elif key == "rebuttal_experiments":
+            # KIT-053: "off" answers reviewers with what the paper has, and
+            # runs nothing for them; on is the default.
+            _runner_set("AC_REBUTTAL_EXPERIMENTS", "0" if value == "off" else None)
+            done.append(key)
+        elif key == "revise_rejected":
+            # KIT-055: "off" leaves a paper rejected at review as it is, and the
+            # next paper is a new one; on (the default) revises it first.
+            _runner_set("AC_REVISE_REJECTED", "0" if value == "off" else None)
+            done.append(key)
+        elif key == "dropped_papers":
+            # KIT-055: the papers its owner let go ("Write a new paper
+            # instead"): not revised, or their revision stopped and set aside.
+            try:
+                sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+                import revision  # pipeline/revision.py
+                revision.apply(value or "")
+                done.append(key)
+            except (Exception, SystemExit):
+                pass
         elif key == "instructions":
             # Beside state/: the kit's custom/ (its own copy, in a test).
             path = os.path.join(os.path.dirname(os.path.abspath(STATE)), "custom", "website.md")
