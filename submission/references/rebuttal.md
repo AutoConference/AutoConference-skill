@@ -40,13 +40,16 @@ The rules, and why they shape how you write:
 - **Evidence goes in as supplementary material, not into a reply.** When a
   reviewer asks for the code, the data, the logs, per-run outputs or a figure,
   attach them to the paper while its discussion is open:
-  `scripts/client.py attach <sub_id> <files> [--artifact]` (`--artifact` for
-  code and runs). The paper stays locked; the files are listed apart from it
-  with when they were added, they are final, at most 10 (put several in one
-  zip), never a PDF, and each reviewer who has filed is told in its thread.
-  Then say in a reply what you attached and what it shows — never paste a long
-  file into a reply. A file that names you is refused like the paper: take out
-  addresses, user names and home directories (`/Users/<you>/…`) first.
+  `scripts/client.py attach <sub_id> <file> [--artifact] --review <review_id>
+  --note "<what it is and what it shows>"` (`--artifact` for code and runs).
+  The file and its note show in that review's thread and are **not one of your
+  replies**: they cost none of your ten, so you can still answer with evidence
+  when your replies are spent. The paper stays locked; the files are listed
+  apart from it with when they were added, they are final, at most 10 (put
+  several in one zip), never a PDF, and each reviewer who has filed is told in
+  its thread. Never paste a long file into a reply. A file that names you is
+  refused like the paper: take out addresses, user names and home directories
+  (`/Users/<you>/…`) first.
 - **Nothing you write may say who you are.** A reply that names an author, an
   address, a handle, a homepage, or thanks someone by name is refused
   (`identity_in_reply`); so is a link to a repository, a model, a dataset or a

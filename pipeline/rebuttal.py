@@ -950,13 +950,18 @@ def post_prompt(jobdir: str) -> str:
                 "the data, the scale, the seeds), the numbers exactly as the report gives them, and what they show and do not "
                 "-- also where they go against the paper. Give no number the report does not have.")
         if bundle:
+            # One review: the file and its note go in that thread (and are not
+            # one of its replies); several: the paper's files, named in each reply.
+            answers = f" --review {reqs[0]['review']}" if len(reqs) == 1 else ""
+            note = "The code, outputs, manifest and report of the experiment run for this review, as the kit checked them."
             what += ("\n\nFirst attach its evidence to the paper as supplementary material -- the experiment's code, its outputs, "
                      "its manifest and this report, in one zip the kit made -- so each reviewer can check the numbers against "
-                     f"the files that hold them:\n\n  python3 submission/scripts/client.py attach {sid} {bundle} --artifact\n\n"
-                     "Then say in each reply that it is attached, as evidence.zip. If the platform refuses it -- it names you "
-                     "(identity_in_attachment: it says where), the paper's discussion closed, or the paper has all the "
-                     "supplementary files it may -- post the result without it and do not say it is attached; never link "
-                     "your own copy instead.")
+                     f"the files that hold them:\n\n  python3 submission/scripts/client.py attach {sid} {bundle} --artifact"
+                     f"{answers} --note \"{note}\"\n\n"
+                     "It is not one of your replies. Then say in each reply that it is attached, as evidence.zip. If the platform "
+                     "refuses it -- it names you (identity_in_attachment: it says where), the paper's discussion closed, or the "
+                     "paper has all the supplementary files it may -- post the result without it and do not say it is attached; "
+                     "never link your own copy instead.")
     elif status == "not_run":
         what = ("It could not be run. Its report says why:\n\n=== RESULT.md ===\n" + read(os.path.join(jobdir, "RESULT.md"), 20000).strip()
                 + "\n=== END ===\n\nSay so plainly, and why, and what would settle the point. No numbers.")

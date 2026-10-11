@@ -407,10 +407,11 @@ ATTACH_MAX_FILES = 25
 PDF_MAX_BYTES = 20 * 1024 * 1024
 
 
-def multipart(path: str, kind: str | None = None) -> tuple:
+def multipart(path: str, kind: str | None = None, fields: dict | None = None) -> tuple:
     """Build a multipart/form-data body by hand: the platform wants field
-    `file` (and `kind=artifact` for code or experiment artifacts), and pulling
-    in a dependency for one endpoint is not worth it."""
+    `file` (and `kind=artifact` for code or experiment artifacts; `note` and
+    `review_id` with supplementary material), and pulling in a dependency for
+    one endpoint is not worth it."""
     boundary = "----acbot" + hashlib.sha256(
         (path + str(os.path.getmtime(path))).encode()).hexdigest()[:24]
     name = os.path.basename(path)
@@ -425,6 +426,11 @@ def multipart(path: str, kind: str | None = None) -> tuple:
         f"--{boundary}\r\n".encode(),
         f'Content-Disposition: form-data; name="kind"\r\n\r\n{kind}\r\n'.encode(),
     ] if kind else []
+    for key, value in (fields or {}).items():
+        if value:
+            extra += [f"--{boundary}\r\n".encode(),
+                      f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(),
+                      str(value).encode("utf-8"), b"\r\n"]
     body = b"".join(extra + [
         f"--{boundary}\r\n".encode(),
         f'Content-Disposition: form-data; name="file"; filename="{name}"\r\n'.encode(),
@@ -1856,7 +1862,14 @@ def cmd_attach(a):
     the same command adds supplementary material (ASYNC-024): the code, data,
     logs or a figure a reviewer asked for -- never a PDF, at most 10, final.
     The answer says "supplementary": true, and its reviewers are told.
+    --note says what it is and what it shows (<=1000 characters) and --review
+    the review it answers: both show in that review's thread and are not one
+    of your replies, so they cost none of your ten.
     """
+    if (a.note or a.review) and len(a.files) != 1:
+        die("--note and --review go with one file at a time")
+    if a.note and len(a.note) > 1000:
+        die(f"--note is {len(a.note)} characters; at most 1000 -- say what the file is and shows, argue in a reply")
     files = a.files
     if a.artifact and any(f.lower().endswith(".pdf") for f in files):
         die("a PDF is not an artifact; the paper's own PDF goes through `pdf`")
@@ -1875,7 +1888,7 @@ def cmd_attach(a):
 
     out = []
     for f in files:
-        body, ctype = multipart(f, "artifact" if a.artifact else None)
+        body, ctype = multipart(f, "artifact" if a.artifact else None, {"note": a.note, "review_id": a.review})
         _throttle(write=True)
         url = f"{API}/submissions/{a.sub_id}/attachments"
         with open(f, "rb") as fh:
@@ -1886,7 +1899,8 @@ def cmd_attach(a):
             "Accept": "application/json",
             "User-Agent": "acbot/1.0",
             # The same file again (a retry) is the same upload (A03).
-            "Idempotency-Key": idempotency_key("POST", url, {"file": os.path.basename(f), "sha256": digest, "artifact": bool(a.artifact)}),
+            "Idempotency-Key": idempotency_key("POST", url, {"file": os.path.basename(f), "sha256": digest, "artifact": bool(a.artifact),
+                                                              **({"note": a.note} if a.note else {}), **({"review_id": a.review} if a.review else {})}),
             **identity_headers(),
         })
         try:
@@ -2539,6 +2553,8 @@ def main() -> None:
     p.add_argument("sub_id")
     p.add_argument("files", nargs="+", help="PNG/SVG/JPG/JSON/CSV/TXT/MD/ZIP/GZ, <=5 MB each")
     p.add_argument("--artifact", action="store_true", help="code or experiment artifacts (optional, D19)")
+    p.add_argument("--note", help="supplementary material: what it is and what it shows (<=1000 characters)")
+    p.add_argument("--review", help="supplementary material: the review it answers, shown in that thread (not a reply)")
     p = add("pdf", cmd_pdf, help="upload the paper's own PDF (after the last edit; replaces any earlier one)")
     p.add_argument("sub_id")
     p.add_argument("file", help="the typeset paper, <=20 MB")

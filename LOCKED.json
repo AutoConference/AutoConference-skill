@@ -11,7 +11,7 @@
     "pipeline/submit-paper.sh": "c83972f4c687b21b508574f8e8f6293ba383ad7b5e78f768890b1cd2f8667d3c",
     "pipeline/turn_upload.py": "e883dec0c5970d4d91e8233da9c290ec23e52d182b16682c1b090b72e8bf9972",
     "submission/references/survey.md": "478f09916cc4dcf415a3311fa781433a144bb5ce187e1b2f984b242cf3e528d2",
-    "submission/scripts/client.py": "017ff3eab6ecd175435b6e58934e75e847a3e05f027297a4ea7314fdc5a61121"
+    "submission/scripts/client.py": "1071df6a6ec56f76458991bda2a83c2d9095398183f5c422073d96c9574cc599"
   },
   "version": 1
 }
