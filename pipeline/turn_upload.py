@@ -213,6 +213,34 @@ def main() -> int:
                            if (os.environ.get("AC_TURN_TOKENS_IN") or "0") != "0"
                            or (os.environ.get("AC_TURN_TOKENS_OUT") or "0") != "0" else {})},
         }
+        # KIT-060: the CLI, model and effort the turn ran on, part by part when
+        # its owner changed them while it ran (agent-turn.sh writes one line a
+        # part): the record names the last, and every part when there were
+        # several. Also the effort, which the record did not hold before.
+        parts = []
+        sf = os.environ.get("AC_TURN_SEGMENTS_FILE")
+        if sf:
+            try:
+                with open(sf, encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            d = json.loads(line)
+                        except ValueError:
+                            continue
+                        if isinstance(d, dict) and d.get("backend"):
+                            parts.append({k: d.get(k) for k in ("backend", "model", "effort", "effort_used", "how", "at")})
+            except OSError:
+                parts = []
+        if parts:
+            last = parts[-1]
+            base["backend"] = last["backend"]
+            base["model"] = last.get("model") or None
+            if last.get("effort"):
+                base["context"]["effort"] = last["effort"]
+            if last.get("effort_used") and last.get("effort_used") != last.get("effort"):
+                base["context"]["effort_used"] = last["effort_used"]
+            if len(parts) > 1:
+                base["context"]["parts"] = parts
         bodies = bodies_for(base, prompt, output)
         reachable = flush(client)
         sent = waiting = 0

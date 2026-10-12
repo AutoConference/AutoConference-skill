@@ -84,6 +84,11 @@ def backend() -> str:
     return pf.runner_env("AC_BACKEND")
 
 
+# A first-party CLI's model, by its own name: a paper whose turns moved
+# between CLIs (KIT-060) has each CLI's models in the one log.
+OWN_MODELS = (("claude-", "anthropic"), ("gpt-", "openai"), ("gemini-", "google"))
+
+
 def as_reported(cli: str, model: str) -> str:
     """provider/model, as the loop stamps the platform's record (A11)."""
     m = (model or "").strip()
@@ -91,6 +96,10 @@ def as_reported(cli: str, model: str) -> str:
         return ""
     if "/" in m or cli in ("opencode", "crush", "custom", ""):
         return m
+    if cli in ("claude", "codex", "gemini"):
+        for prefix, provider in OWN_MODELS:
+            if m.startswith(prefix):
+                return provider + "/" + m
     return PROVIDER.get(cli, cli) + "/" + m
 
 
@@ -116,12 +125,57 @@ def models_used(ws: str, cli: str) -> list:
                         add(as_reported(cli, line[len("[session] model="):].split()[0] if line[len("[session] model="):].split() else ""))
     except OSError:
         pass
+    # KIT-060: its owner moved a turn onto another model (or CLI) while it
+    # ran: each, with its own CLI's provider.
+    for c, m in switch_pairs(ws):
+        if m != "-":
+            add(as_reported(c, m))
     return found[:20] or ["unknown (the CLI did not report which model answered)"]
 
 
-def agent_line(cli: str) -> str:
-    name = "a custom agent CLI" if cli == "custom" else CLI_NAME.get(cli, "an agent CLI")
-    return f"AutoConference kit {kit_version()} on {name}"
+# agent-turn.sh's lines when its owner moved a turn onto other settings while
+# it ran (KIT-060): the part stopped and the part that carried it on -- or,
+# when the settings chosen could not run, the way back.
+SWITCH = re.compile(r"^\[switch\] from cli=(\S+) model=(\S+) effort=\S+ to cli=(\S+) model=(\S+) effort=\S+")
+BACK = re.compile(r"^\[switch\] back to cli=\S+ model=\S+ effort=\S+: cli=(\S+) model=(\S+) effort=\S+ could not run")
+
+
+def switch_pairs(ws: str) -> list:
+    """(cli, model) for each part of a turn its [switch] lines name, in order,
+    less one that could not run; "-" is the CLI's own model."""
+    pairs = []
+    log = os.path.join(ws, "pipeline.out")
+    try:
+        if os.path.isfile(log) and os.path.getsize(log) <= 50 * 1024 * 1024:
+            with open(log, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    m = SWITCH.match(line)
+                    if m:
+                        pairs += [(m.group(1), m.group(2)), (m.group(3), m.group(4))]
+                        continue
+                    b = BACK.match(line)
+                    if b and pairs and pairs[-1] == (b.group(1), b.group(2)):
+                        pairs.pop()
+    except OSError:
+        pass
+    return pairs
+
+
+def clis_used(ws: str, cli: str) -> list:
+    """The CLI the paper was written on -- and, when its owner moved it onto
+    another while it ran (KIT-060), each of them, in the order used."""
+    found = [cli]
+    for c, _m in switch_pairs(ws):
+        if c != "-" and c not in found:
+            found.append(c)
+    return found
+
+
+def agent_line(cli: str, also: list = ()) -> str:
+    def name(c):
+        return "a custom agent CLI" if c == "custom" else CLI_NAME.get(c, "an agent CLI")
+    names = [name(c) for c in [cli, *[c for c in also if c != cli]]]
+    return f"AutoConference kit {kit_version()} on {' and '.join(names)}"
 
 
 def load_json(path: str):
@@ -363,7 +417,7 @@ def statements(ws: str, own: bool = False) -> dict:
     return {
         "resource_statement": {
             "models": models_used(ws, cli),
-            "agent": agent_line(cli),
+            "agent": agent_line(cli, clis_used(ws, cli)),
             "compute": compute_line(ws, own, f.get("cycle"), float(f.get("workspace_created_at") or 0)),
             "data": data_line(ws, own),
             "tokens": tokens_used(f.get("cycle"), float(f.get("workspace_created_at") or 0), own),

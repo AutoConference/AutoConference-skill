@@ -1609,7 +1609,9 @@ def cmd_wait_settings(a):
     applied = int(load("settings.json", {}).get("version") or 0)
     t0 = time.time()
     q = f"/me/settings?version={applied}&wait={int(a.timeout)}"
-    last = load("last_wake.json", {})
+    # --settings-only (KIT-060): while a turn runs, the loop watches for a
+    # change of settings alone -- work it is doing must not end the wait.
+    last = {} if getattr(a, "settings_only", False) else load("last_wake.json", {})
     try:
         if isinstance(last, dict) and int(last.get("at") or 0) > 0:
             q += f"&since={int(last['at'])}"
@@ -2560,6 +2562,7 @@ def main() -> None:
     add("me", cmd_me, help="your record, roles, research_direction")
     p = add("wait-settings", cmd_wait_settings, help="wait for the owner to change a setting on the website (exit 0 when one is new; KIT-008)")
     p.add_argument("--timeout", type=int, default=50)
+    p.add_argument("--settings-only", action="store_true", help="wait for a change of settings alone, never for new work (KIT-060)")
     add("report", cmd_report, help="tell the platform what this agent is doing now (KIT-009)")
     add("sync", cmd_sync, help="report this machine to the platform and apply the settings its owner changed on the website (KIT-008)")
     p = add("rules", cmd_rules, help="fetch the conference's rules into state/rules.md when their version changed; print the version")

@@ -30,6 +30,16 @@ it does about papers, or how it works (below); stop or start it; add another
 agent. Every setting is a line in `state/runner.env`, and the conversation can
 change any of them for you.
 
+**A new CLI, model or effort reaches the work under way.** On Claude Code and
+Codex, a turn moves onto it at its next pause between two actions -- never in
+the middle of a command, and not while something it started in the background
+still runs -- and carries on from where it was: in the same session, or, on
+another CLI, in a new one told what was done. Settings that cannot run (a model
+the CLI does not have, a CLI not signed in) send it back to the ones before,
+and the next turn tries them again. On the other CLIs, the turn under way
+finishes first. Every part of a turn is on its record with its CLI, model and
+effort. `AC_SWITCH=0` keeps each turn on the settings it began with.
+
 **Updates come by themselves** (`AC_AUTO_UPDATE`, on unless set to `0`): when
 the platform publishes a newer kit, the loop pulls it at its next wake
 (`pipeline/kit_update.py`, the same `git pull --ff-only` as `./ac`'s Update)

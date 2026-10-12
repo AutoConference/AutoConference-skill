@@ -34,6 +34,7 @@ import json
 import os
 import re
 import select
+import shutil
 import sys
 import time
 
@@ -68,6 +69,145 @@ def live(kind: str, text: str) -> None:
         pass
 
 
+# ── Moving onto another CLI, model or effort, between two of the CLI's actions ──
+# KIT-060 (owner, 2026-10-12: "用户切换了模型，cli，effort越快apply越好并且不要有
+# mess up或者让用户前面做的东西白费"). Under the loop, agent-turn.sh names the
+# turn's directory (AC_SWITCH_DIR), the settings file, and what this part of
+# the turn runs on. When its owner chooses another CLI, model or effort, the
+# CLI is stopped at the first moment none of its tools is running, nothing it
+# left running in the background is still going, and every line it printed
+# has been read -- never in the middle of a command, an experiment or a
+# subagent -- and agent-turn.sh, started again in this process, carries the
+# turn on with the new settings: in the same session where the CLI resumes
+# one, else in a new one told what was done. Only the CLI itself is
+# signalled. Claude Code and Codex alone, whose stop and resume were tried
+# with them (2026-10-12): both end what they started in the background when
+# they exit, which would end an experiment with them, so while one runs the
+# turn carries on as it is.
+class Watch:
+    def __init__(self) -> None:
+        # The turn's controls, from agent-turn.sh, and never the CLI's: taken
+        # out of the environment it inherits. The turn's directory holds what
+        # it was asked, its transcript so far, and the stop (the switch file).
+        env = os.environ
+        self.dir = env.pop("AC_SWITCH_DIR", "") or ""
+        self.settings = env.pop("AC_SWITCH_SETTINGS", "") or ""
+        # What this part of the turn runs on, "cli|model|effort", and the CLI
+        # it runs on when none is set.
+        self.now = env.pop("AC_SWITCH_NOW", "") or ""
+        self.auto = env.pop("AC_SWITCH_AUTO", "") or ""
+        # How this part began: start, resumed, restarted (after a stop), back
+        # (the settings chosen could not run); and whether it may be stopped
+        # (ten parts in one turn at most).
+        self.part = env.pop("AC_SWITCH_PART", "") or ""
+        self.more = env.pop("AC_SWITCH_MORE", "") == "1"
+        self.file = os.path.join(self.dir, "switch") if self.dir and self.now else ""
+        self.transcript = os.path.join(self.dir, "transcript") if self.dir else ""
+        self.tools = 0  # tool calls it made in this part
+        self.errored = False  # it said the turn failed
+        self.last = ""  # the last line it printed
+        self.tracks = False  # the CLI's stream says when each tool starts and ends
+        self.pending: set = set()  # tools running now
+        self.background: set = set()  # what it left running in the background
+        self.session = None
+        self.events = 0
+        self.stamp = None
+        self.settle = None
+        self.wanted = None
+        self.stopped_at = None
+        self.finished = False  # its last event came: nothing left to move
+        self.completed = False  # ...and it said the turn was done, not cut short
+        # What the file said as this part began: only a change made after
+        # that moves it (a setting given on the loop's own command line for
+        # one run differs from the file from the start, and is no change).
+        self.base = None
+        if self.file and self.settings:
+            try:
+                self.stamp = os.stat(self.settings).st_mtime_ns
+            except OSError:
+                self.stamp = None
+            self.base = self.target()
+
+    def on(self) -> bool:
+        return bool(self.file and self.settings and self.now and self.tracks and self.more)
+
+    def keep(self, text: str) -> None:
+        """The transcript a CLI taking the turn over is given: the work, not
+        the CLI's own bookkeeping."""
+        if text.strip():
+            self.last = text
+        # Every format shows a tool call as a [tool] line.
+        if text.startswith("[tool] "):
+            self.tools += 1
+        if not self.transcript or text.startswith(("[system] ", "[event] ")):
+            return
+        try:
+            with open(self.transcript, "a", encoding="utf-8") as f:
+                f.write(text + "\n")
+        except OSError:
+            pass
+
+    def target(self):
+        """The settings file's CLI, model and effort now (its last line for a key wins)."""
+        values = {}
+        try:
+            with open(self.settings, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    k, eq, v = line.rstrip("\n").partition("=")
+                    if eq and k in ("AC_BACKEND", "AC_MODEL", "AC_EFFORT"):
+                        values[k] = v
+        except OSError:
+            return None
+        return f"{values.get('AC_BACKEND') or self.auto}|{values.get('AC_MODEL', '')}|{values.get('AC_EFFORT', '')}"
+
+    def idle(self) -> bool:
+        return not self.pending and not self.background
+
+    def due(self) -> bool:
+        """A change to move onto, now: asked only when every line the CLI printed
+        has been read, and true only while nothing it started is running."""
+        if not self.on() or self.stopped_at is not None or self.finished:
+            return False
+        try:
+            st = os.stat(self.settings).st_mtime_ns
+        except OSError:
+            return False
+        now = time.time()
+        if st != self.stamp:
+            # Read once the file has stood still for a second: the website's
+            # settings arrive a line at a time (client.py sync).
+            self.stamp, self.settle = st, now + 1.0
+            return False
+        if self.settle is not None and now >= self.settle:
+            self.settle = None
+            t = self.target()
+            # Never onto a CLI this machine does not have: the turn carries on,
+            # and the next turn says what is missing.
+            self.wanted = t if t and t != self.base and t != self.now and shutil.which(t.split("|")[0]) else None
+        # Not before the CLI has started (its session is named as it starts).
+        return bool(self.wanted) and self.idle() and self.events > 0
+
+    def tool_started(self, key) -> None:
+        self.pending.add(key)
+
+    def tool_ended(self, key) -> None:
+        self.pending.discard(key)
+
+    def task(self, ev) -> None:
+        """Claude Code's background tasks -- a command, a subagent, a monitor
+        left running while the turn goes on, which it ends when it exits."""
+        st = ev.get("subtype")
+        if st == "background_tasks_changed":
+            self.background = {t.get("task_id") for t in ev.get("tasks") or [] if isinstance(t, dict)}
+        elif st == "task_started" and ev.get("is_backgrounded"):
+            self.background.add(ev.get("task_id"))
+        elif st == "task_notification" and ev.get("status") not in ("running", "started", "pending", "in_progress"):
+            self.background.discard(ev.get("task_id"))
+
+
+WATCH = Watch()
+
+
 def write_line(text: str) -> None:
     """One line to standard output, whatever mode the pipe is in. The CLI this
     runs writes its standard error to the same pipe, and a node CLI (Claude
@@ -95,6 +235,7 @@ def write_line(text: str) -> None:
 
 def emit(text: str) -> None:
     write_line(text)
+    WATCH.keep(text)
     if LIVE:
         m = re.match(r"\[([a-z_]+)\]( |$)", text)
         if m and m.group(1) in ("thinking", "tool", "input", "result", "error", "user", "session", "done", "todo"):
@@ -189,10 +330,13 @@ def claude(events) -> int:
     final = None
     for ev in events:
         kind = ev.get("type")
+        WATCH.events += 1
         if kind == "system":
             if ev.get("subtype") == "init":
+                WATCH.session = ev.get("session_id") or WATCH.session
                 emit(f"[session] model={ev.get('model')} cwd={ev.get('cwd')}")
             else:
+                WATCH.task(ev)
                 unknown(ev, "system")
         elif kind == "assistant":
             for block in (ev.get("message") or {}).get("content") or []:
@@ -206,6 +350,7 @@ def claude(events) -> int:
                 elif t == "redacted_thinking":
                     emit("[thinking] (withheld by the provider)")
                 elif t == "tool_use":
+                    WATCH.tool_started(block.get("id") or f"claude-{WATCH.events}")
                     tool_lines(block.get("name"), block.get("input"))
                 else:
                     unknown(block, f"block:{t}")
@@ -216,6 +361,7 @@ def claude(events) -> int:
                 continue
             for block in content or []:
                 if isinstance(block, dict) and block.get("type") == "tool_result":
+                    WATCH.tool_ended(block.get("tool_use_id"))
                     tag = "[error]" if block.get("is_error") else "[result]"
                     emit(f"{tag} {result_text(block.get('content'))}")
                 elif isinstance(block, dict) and block.get("type") == "text":
@@ -223,6 +369,10 @@ def claude(events) -> int:
                 else:
                     unknown(block, "block")
         elif kind == "result":
+            # Stopped, Claude Code still ends with a result, as an error.
+            WATCH.finished = True
+            WATCH.completed = ev.get("subtype") == "success" and not ev.get("is_error")
+            WATCH.errored = bool(ev.get("is_error"))
             final = ev
         elif kind == "stream_event":
             continue  # progress only (Qwen Code's goal state, Claude Code's partial messages)
@@ -257,7 +407,19 @@ def codex(events) -> int:
         kind = ev.get("type")
         item = ev.get("item") or {}
         t = item.get("type")
+        WATCH.events += 1
+        # Whatever it starts -- a command, a tool, a patch, a search -- runs
+        # until it completes: a command it left running in the background
+        # never does in this turn. A subagent runs on past the call that
+        # started it, so a turn that started one is not stopped.
+        if kind == "item.started" and t not in ("agent_message", "reasoning", "todo_list", "error"):
+            WATCH.tool_started(item.get("id") or f"codex-{WATCH.events}")
+        elif kind == "item.completed":
+            WATCH.tool_ended(item.get("id"))
+        if t == "collab_tool_call":
+            WATCH.background.add("subagents")
         if kind == "thread.started":
+            WATCH.session = ev.get("thread_id") or WATCH.session
             emit(f"[session] thread={ev.get('thread_id')}")
         elif kind == "turn.started":
             continue  # nothing in it
@@ -305,10 +467,12 @@ def codex(events) -> int:
             else:
                 unknown(ev)
         elif kind == "turn.completed":
+            WATCH.finished = WATCH.completed = True
             u = ev.get("usage") or {}
             emit(f"[done] tokens_in={int(u.get('input_tokens') or 0)} tokens_out={int(u.get('output_tokens') or 0)}"
                  f" cache_read={int(u.get('cached_input_tokens') or 0)} reasoning={int(u.get('reasoning_output_tokens') or 0)}")
         elif kind == "turn.failed":
+            WATCH.errored = True
             emit(f"[error] {((ev.get('error') or {}).get('message')) or json.dumps(ev, ensure_ascii=False)}")
         elif kind == "error":
             emit(f"[error] {ev.get('message') or json.dumps(ev, ensure_ascii=False)}")
@@ -706,6 +870,54 @@ def passthrough(stream) -> int:
     return 0
 
 
+def watched_lines(proc):
+    """The CLI's output line by line, as run() reads it under a switch watch.
+    Whenever every line it printed has been read and rendered and nothing more
+    is waiting -- after each batch, or a quiet second -- the watch is asked
+    whether to move onto new settings now (Watch.due); if so the CLI is asked
+    to stop: an interrupt, then, if it has not stopped ten seconds later and
+    nothing of its is running, a terminate, after thirty a kill. What it
+    prints as it stops is still read and rendered."""
+    import signal
+    fd = proc.stdout.fileno()
+    buf = b""
+    sent = set()
+
+    def waiting() -> bool:
+        return bool(select.select([fd], [], [], 0)[0])
+
+    while True:
+        ready, _, _ = select.select([fd], [], [], 1.0)
+        if ready:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                yield line.decode("utf-8", errors="replace").rstrip("\r")
+            if buf or waiting():
+                continue
+        if WATCH.stopped_at is None:
+            if not buf and WATCH.due() and not waiting():
+                WATCH.stopped_at = time.time()
+                try:
+                    proc.send_signal(signal.SIGINT)
+                except OSError:
+                    pass
+            continue
+        waited = time.time() - WATCH.stopped_at
+        for after, sig in ((10, signal.SIGTERM), (30, signal.SIGKILL)):
+            if waited > after and sig not in sent and proc.poll() is None and WATCH.idle():
+                sent.add(sig)
+                try:
+                    proc.send_signal(sig)
+                except OSError:
+                    pass
+    if buf:
+        yield buf.decode("utf-8", errors="replace").rstrip("\r")
+
+
 def run(cmd, render) -> int:
     """Run the CLI as this process's child and render what it prints.
 
@@ -717,29 +929,79 @@ def run(cmd, render) -> int:
     import io
     import signal
     import subprocess
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    except OSError as e:
-        emit(f"[error] could not start {cmd[0]}: {e}")
-        return 127
-    live("start", cmd[0])
+    # The handlers go in before the CLI starts. Run in the background -- a
+    # paper's steps, which the loop starts with `&` -- this process began with
+    # interrupts ignored, and a CLI started from it then would ignore them too:
+    # the gentle stop for new settings (KIT-060) among them. A signal that
+    # comes before the CLI has started is passed on once it has.
+    held = {"proc": None, "sig": None, "outside": False}
 
     def forward(sig, _frame):
+        # A signal from outside -- a step's timeout, the loop stopping -- ends
+        # the turn, a stop for new settings under way or not.
+        held["outside"] = True
+        if held["proc"] is None:
+            held["sig"] = sig
+            return
         try:
-            proc.send_signal(sig)
+            held["proc"].send_signal(sig)
         except OSError:
             pass
 
     for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(s, forward)
-    stream = io.TextIOWrapper(proc.stdout, encoding="utf-8", errors="replace")
-    if render is None:
-        passthrough(stream)
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    except OSError as e:
+        emit(f"[error] could not start {cmd[0]}: {e}")
+        return 127
+    held["proc"] = proc
+    if held["sig"] is not None:
+        forward(held["sig"], None)
+    live("start", cmd[0])
+    if WATCH.on() and render is not None:
+        render(events(watched_lines(proc)))
     else:
-        render(events(stream))
+        stream = io.TextIOWrapper(proc.stdout, encoding="utf-8", errors="replace")
+        if render is None:
+            passthrough(stream)
+        else:
+            render(events(stream))
     rc = proc.wait()
     rc = 128 - rc if rc < 0 else rc
     live("end", str(rc))
+    # Stopped to move onto new settings (KIT-060) -- unless the CLI had
+    # finished the turn as the stop reached it, and its answer stands, or a
+    # signal from outside ended the turn: agent-turn.sh carries the turn on,
+    # in this same process, from what the switch file says.
+    carry = None
+    if WATCH.stopped_at is not None and not WATCH.completed and not held["outside"]:
+        carry = {"session": WATCH.session, "from": WATCH.now, "to": WATCH.wanted}
+    # The part that was to carry it on could not start on the new settings --
+    # a model this CLI does not have, a CLI that is not signed in, a limit
+    # reached: it failed before it did anything. Back to the settings before,
+    # in the session before, rather than lose the turn; once.
+    elif (WATCH.part in ("resumed", "restarted") and WATCH.stopped_at is None and not held["outside"]
+          and not WATCH.completed and WATCH.tools == 0 and (rc != 0 or WATCH.errored)):
+        try:
+            with open(os.path.join(WATCH.dir, "previous"), encoding="utf-8") as f:
+                session, settings = (f.readline().rstrip("\n").split("\t") + [""])[:2]
+        except OSError:
+            session = settings = ""
+        if settings:
+            carry = {"session": session, "from": WATCH.now, "to": settings, "back": True, "error": WATCH.last[-300:]}
+    if carry is not None:
+        try:
+            with open(WATCH.file or os.path.join(WATCH.dir, "switch"), "w", encoding="utf-8") as f:
+                json.dump({**carry, "exit": rc, "at": int(time.time())}, f)
+            sys.stdout.flush()
+            os.environ["AC_SWITCH_DIR"] = WATCH.dir
+            here = os.path.dirname(os.path.abspath(__file__))
+            os.execvp("bash", ["bash", os.path.join(here, "agent-turn.sh"), "--switched"])
+        except OSError as e:
+            emit(f"[error] could not carry the turn on with the new settings: {e}")
+    if WATCH.dir:
+        shutil.rmtree(WATCH.dir, ignore_errors=True)
     # A file the turn was given (Droid reads its instruction from one) goes with it.
     if os.environ.get("AC_TURN_CLEANUP"):
         try:
@@ -760,6 +1022,10 @@ def main() -> int:
         fmt, args = args[1], args[2:]
     render = {"claude": claude, "codex": codex, "gemini": gemini, "opencode": opencode, "cursor": cursor,
               "copilot": copilot, "goose": goose, "droid": droid, "kimi": kimi}.get(fmt)
+    # KIT-060: Claude Code and Codex can be stopped between two actions and
+    # resumed; the others carry on to the end of their turn (Qwen Code and Amp
+    # print Claude Code's format, but are not Claude Code).
+    WATCH.tracks = fmt in ("claude", "codex") and WATCH.now.split("|")[0] == fmt
     if args[:1] == ["--"] and len(args) > 1:
         return run(args[1:], render)
     if render is None:

@@ -51,17 +51,65 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-MODE=duties; DIR=$PWD; WHICH=""; PROMPT=""
+MODE=duties; DIR=$PWD; WHICH=""; PROMPT=""; SWITCHED=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --mode) MODE=${2:?--mode needs duties or research}; shift 2 ;;
     --dir) DIR=${2:?--dir needs a directory}; shift 2 ;;
     --which) WHICH=1; shift ;;
+    --switched) SWITCHED=1; shift ;;  # KIT-060: the next part of a turn (below)
     -) PROMPT=$(cat); shift ;;
     *) PROMPT=$1; shift ;;
   esac
 done
+# KIT-060: the next part of a turn whose owner changed its settings while it
+# ran. render_stream.py stopped the CLI between two of its actions and started
+# this script again in its own process, so a signal meant for the turn still
+# reaches whatever runs it; the turn's directory (AC_SWITCH_DIR) holds what it
+# was asked and where.
+SD=""; SW_SESSION=""; SW_FROM=""; SW_TO=""; SW_BACK=""; SW_ERROR=""
+if [ -n "$SWITCHED" ]; then
+  SD=${AC_SWITCH_DIR:-}
+  [ -n "$SD" ] && [ -s "$SD/instruction" ] && [ -s "$SD/switch" ] || { echo "agent-turn: --switched without its turn's directory" >&2; exit 2; }
+  MODE=$(cat "$SD/mode"); DIR=$(cat "$SD/dir")
+  # The session to carry on, what it ran on and what it moves onto -- or,
+  # "back", the settings it ran on before, when those chosen could not run.
+  IFS=$'\t' read -r SW_SESSION SW_FROM SW_TO SW_BACK SW_ERROR < <(python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+f = lambda v: " ".join(str(v or "").split())[:300]
+print("\t".join([f(d.get("session")), f(d.get("from")), f(d.get("to")), "1" if d.get("back") else "", f(d.get("error"))]))' "$SD/switch" 2>/dev/null)
+  rm -f "$SD/switch"
+fi
 case "$MODE" in duties|research) ;; *) echo "agent-turn: unknown --mode $MODE" >&2; exit 2 ;; esac
+
+# KIT-060 (owner, 2026-10-12: "用户切换了模型，cli，effort越快apply越好"): under the
+# loop, the CLI, model and effort are what state/runner.env says now. The loop's
+# own environment holds what they were when it started, and a paper step, which
+# runs on in the background while the loop starts again on a change, would
+# keep those to its end. One its owner gave the loop on its command line, for
+# that run (AC_GIVEN_ENV), stands until the file changes (AC_SETTINGS_STAMP), as
+# it does for the loop itself (restart_self).
+settings_now() {
+  [ -n "${AC_IN_LOOP:-}" ] && [ -f "$ROOT/state/runner.env" ] || return 0
+  local k v t changed=""
+  # The file's time in whole seconds, as the loop took it (mtime in run-heartbeat.sh).
+  t=$(python3 -c 'import os, sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$ROOT/state/runner.env" 2>/dev/null)
+  case "$t${AC_SETTINGS_STAMP:-0}" in *[!0-9]*) changed=1 ;; *) [ "$t" -gt "${AC_SETTINGS_STAMP:-0}" ] && changed=1 ;; esac
+  for k in AC_BACKEND AC_MODEL AC_EFFORT; do
+    if [ -z "$changed" ]; then
+      case " ${AC_GIVEN_ENV:-} " in *" $k "*) continue ;; esac
+    fi
+    v=$(sed -n "s/^$k=//p" "$ROOT/state/runner.env" | tail -1)
+    if [ -n "$v" ]; then export "$k=$v"; else unset "$k"; fi
+  done
+}
+if [ -n "$SW_BACK" ]; then
+  # Set even when empty, so the file's line does not stand in (below).
+  IFS='|' read -r b m e <<<"$SW_TO"
+  export AC_BACKEND="$b" AC_MODEL="$m" AC_EFFORT="$e"
+else
+  settings_now
+fi
 
 # state/runner.env as the loop reads it (load_settings in run-heartbeat.sh) and
 # ./ac shows it: the last line for a setting wins, and a value already set --
@@ -89,14 +137,17 @@ export PATH="$ROOT/state/bin:$PATH"
 export AC_LIVE_FILE=${AC_LIVE_FILE-$ROOT/state/logs/live.jsonl}
 export AC_LIVE_LABEL=${AC_LIVE_LABEL:-$MODE}
 
-BACKEND=${AC_BACKEND:-}
-if [ -n "${AC_BACKEND_CMD:-}" ]; then
-  BACKEND=custom
-elif [ -z "$BACKEND" ]; then
+# The CLI: AC_BACKEND_CMD's, else AC_BACKEND, else the first of these installed.
+detect_backend() {
+  if [ -n "${AC_BACKEND_CMD:-}" ]; then echo custom; return 0; fi
+  if [ -n "${AC_BACKEND:-}" ]; then echo "$AC_BACKEND"; return 0; fi
+  local c
   for c in claude codex gemini opencode cursor-agent copilot qwen amp droid goose crush kimi; do
-    command -v "$c" >/dev/null 2>&1 && { BACKEND=$c; break; }
+    command -v "$c" >/dev/null 2>&1 && { echo "$c"; return 0; }
   done
-fi
+}
+
+BACKEND=$(detect_backend)
 if [ -z "$BACKEND" ]; then
   cat >&2 <<'NOCLI'
 No agent CLI found. Install one and sign it in: a subscription or an API key
@@ -121,6 +172,74 @@ if [ "$BACKEND" != custom ] && ! command -v "$BACKEND" >/dev/null 2>&1; then
 fi
 
 MODEL=${AC_MODEL:-}
+
+# ── KIT-060: moving onto new settings while a turn is under way ────────────
+# Under the loop a turn on Claude Code or Codex can run as more than one part.
+# Its owner choosing another CLI, model or effort stops the part under way at
+# its next pause between two actions -- every tool it started has returned,
+# nothing it left running in the background is still going, and every line it
+# printed has been read (render_stream.py, Watch), never in the middle of a
+# command, an experiment or a subagent -- and the next part carries the turn
+# on with the new settings: the same session, resumed, on the same CLI; a new
+# one on another, given what was done so far and the instruction. Nothing the
+# turn did is undone: its files stay where they are. A turn on another CLI
+# carries on to its end, as before, and the next turn runs on the new
+# settings. AC_SWITCH=0 turns it off.
+RESUMABLE=" claude codex "
+# "cli model effort" for people: "-" where the CLI runs its own.
+said() { local b m e; IFS='|' read -r b m e <<<"$1"; printf 'cli=%s model=%s effort=%s' "${b:--}" "${m:--}" "${e:--}"; }
+RESUME=""; PART=start; SEGMENTS_FILE=${AC_TURN_SEGMENTS:-}
+if [ -n "$SD" ]; then
+  # The part before was stopped: carry the turn on, in its session where this
+  # CLI is the one that ran it and resumes one.
+  SEGMENTS_FILE=$(cat "$SD/segments" 2>/dev/null)
+  if [ -n "$SW_BACK" ]; then
+    PART=back
+    why="Your owner changed this agent's settings to $(said "$SW_FROM") while you were working, but the turn could not run on them here${SW_ERROR:+ ($SW_ERROR)}. You carry on as before, on $(said "$SW_TO")"
+  else
+    why="Your owner changed this agent's settings while you were working: it now runs on $(said "$SW_TO")"
+  fi
+  if [ -n "$SW_SESSION" ] && { [ "$BACKEND" = "${SW_FROM%%|*}" ] || [ -n "$SW_BACK" ]; } && [ "${RESUMABLE#* $BACKEND }" != "$RESUMABLE" ]; then
+    RESUME=$SW_SESSION; [ -z "$SW_BACK" ] && PART=resumed
+    PROMPT="$why. You were stopped between two of your actions, and nothing you did is lost. Carry on with the task from where you stopped; do not redo what is done."
+  else
+    [ -z "$SW_BACK" ] && PART=restarted
+    PROMPT="$why, and you take the turn over from the part of it that ran before, which was stopped between two of its actions. Nothing it did is lost: the files it wrote are where it wrote them. What it did so far, as its transcript$( [ "$(wc -c < "$SD/transcript" 2>/dev/null || echo 0)" -gt 60000 ] && echo " (its last part)"):
+
+<<<
+$(tail -c 60000 "$SD/transcript" 2>/dev/null)
+>>>
+
+Do not redo what is done -- check the files it wrote and what came back -- and finish the instruction below.
+
+---- The instruction ----
+$(cat "$SD/instruction")"
+  fi
+  if [ -n "$SW_BACK" ]; then
+    echo "[switch] back to $(said "$SW_TO"): $(said "$SW_FROM") could not run${SW_ERROR:+ ($SW_ERROR)}" >&2
+  else
+    echo "[switch] from $(said "$SW_FROM") to $(said "$SW_TO") ($PART)" >&2
+    # The way back, should the new settings not run: the session and the
+    # settings of the part before.
+    printf '%s\t%s\n' "$SW_SESSION" "$SW_FROM" > "$SD/previous"
+  fi
+  # A custom command prints what it prints: nothing to read a stop or a
+  # failure from.
+  [ "$BACKEND" = custom ] && { rm -rf "$SD"; SD=""; }
+elif [ -z "$WHICH" ] && [ -n "${AC_IN_LOOP:-}" ] && [ "${AC_SWITCH:-1}" != 0 ] && [ -n "$PROMPT" ]; then
+  case "$BACKEND" in
+    claude|codex)
+      if SD=$(mktemp -d "${TMPDIR:-/tmp}/ac-turn.XXXXXX"); then
+        printf '%s' "$MODE" > "$SD/mode"; printf '%s' "$DIR" > "$SD/dir"
+        printf '%s' "$PROMPT" > "$SD/instruction"; printf '%s' "$SEGMENTS_FILE" > "$SD/segments"
+      else
+        SD=""
+      fi ;;
+  esac
+fi
+# The turn's own controls never reach the CLI: a command it runs that starts
+# a turn of its own starts a turn of its own.
+unset AC_SWITCH_DIR AC_TURN_SEGMENTS
 
 # Codex pointed at another provider -- a model this machine serves (Ollama, LM
 # Studio) or any OpenAI-compatible endpoint, named by model_provider in its
@@ -165,6 +284,25 @@ if [ -n "${AC_EFFORT:-}" ]; then
   case "$EFFORT" in low|medium|high|xhigh|max) ;; *) EFFORT="" ;; esac
 fi
 
+# KIT-060: what the turn, or this part of it, runs on -- on the turn's record
+# (AC_TURN_SEGMENTS, one line a part) and, for a turn that can move onto new
+# settings, for the watch (render_stream.py): with the CLI it would run on
+# with none set, which the watch reads a setting removed as.
+if [ -n "$SEGMENTS_FILE" ]; then
+  python3 -c 'import json, sys, time
+print(json.dumps({"backend": sys.argv[1], "model": sys.argv[2] or None, "effort": sys.argv[3] or None, "effort_used": sys.argv[4] or None, "how": sys.argv[5], "at": int(time.time())}))' \
+    "$BACKEND" "$MODEL" "${AC_EFFORT:-}" "$EFFORT" "$PART" >> "$SEGMENTS_FILE" 2>/dev/null || true
+fi
+# A CLI run without the renderer (one too old for its event flag) leaves no
+# one to clear the turn's directory: it goes before.
+bare() { [ -n "$SD" ] && rm -rf "$SD"; exec "$@"; }
+if [ -n "$SD" ]; then
+  PARTS=$(( $(cat "$SD/parts" 2>/dev/null || echo 0) + 1 )); echo "$PARTS" > "$SD/parts"
+  export AC_SWITCH_DIR="$SD" AC_SWITCH_SETTINGS="$ROOT/state/runner.env" AC_SWITCH_PART="$PART" \
+    AC_SWITCH_NOW="$BACKEND|$MODEL|${AC_EFFORT:-}" AC_SWITCH_AUTO="$(AC_BACKEND="" detect_backend)"
+  # Ten parts in one turn at most: the tenth runs on without moving again.
+  [ "$PARTS" -lt 10 ] && export AC_SWITCH_MORE=1
+fi
 # The research steps name ARIS skills the way Claude Code invokes them,
 # `/name args`. Claude Code resolves that itself from .claude/skills/. The
 # other CLIs have no such convention, so they are told what it means; the
@@ -227,7 +365,7 @@ case "$BACKEND" in
       # tells every reviewing step to review its own work instead. No prompt
       # may follow --disallowedTools, which takes any number of values; it
       # comes on stdin.
-      exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} ${EFFORT:+--effort "$EFFORT"} --permission-mode bypassPermissions "${STREAM[@]}" \
+      exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} ${EFFORT:+--effort "$EFFORT"} ${RESUME:+--resume "$RESUME"} --permission-mode bypassPermissions "${STREAM[@]}" \
         --disallowedTools ScheduleWakeup CronCreate CronDelete RemoteTrigger \
                           mcp__manual_review__review mcp__manual_review__review_reply <<<"$PROMPT"
     fi
@@ -274,7 +412,7 @@ case "$BACKEND" in
         echo "agent-turn: AC_DUTY_COMMANDS: left out \"$c\" (only a script in custom/, run as bash custom/<path>.sh or python3 custom/<path>.py)" >&2
       done
     fi
-    exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} ${EFFORT:+--effort "$EFFORT"} --permission-mode acceptEdits "${STREAM[@]}" \
+    exec python3 "$RENDER" --format claude -- claude -p ${MODEL:+--model "$MODEL"} ${EFFORT:+--effort "$EFFORT"} ${RESUME:+--resume "$RESUME"} --permission-mode acceptEdits "${STREAM[@]}" \
       --disallowedTools mcp__manual_review__review mcp__manual_review__review_reply "Edit(custom/**)" "Write(custom/**)" \
       --allowedTools "WebSearch" "WebFetch" \
                      "Bash(python3 submission/scripts/client.py:*)" \
@@ -303,13 +441,24 @@ case "$BACKEND" in
     # summaries, asked for in full.
     # (The help is read whole first: `--help | grep -q` under pipefail fails
     # whenever grep stops reading before the CLI stops writing.)
-    run() { exec "$@"; }
+    run() { bare "$@"; }
     case "$(codex exec --help 2>/dev/null)" in
       *--json*) run() { exec python3 "$RENDER" --format codex -- "$1" "$2" --json -c 'model_reasoning_summary="detailed"' "${@:3}"; } ;;
     esac
     # KIT-051: the effort as Codex's own setting, for this turn only. Its API
     # refuses one the model does not list and the turn fails, so only one
     # pipeline/models.py found in the model's list gets here.
+    # KIT-060: the same session, resumed with the settings now. `exec resume`
+    # takes the sandbox as settings and no -C: this turn is in its directory.
+    if [ -n "$RESUME" ]; then
+      case "$MODE" in
+        research) RESUME_SANDBOX=(--dangerously-bypass-approvals-and-sandbox) ;;
+        *) RESUME_SANDBOX=(-c 'sandbox_mode="workspace-write"' -c 'sandbox_workspace_write.network_access=true' -c 'web_search="live"') ;;
+      esac
+      exec python3 "$RENDER" --format codex -- codex exec resume --json -c 'model_reasoning_summary="detailed"' \
+        "${RESUME_SANDBOX[@]}" --skip-git-repo-check ${MODEL:+-m "$MODEL"} ${EFFORT:+-c "model_reasoning_effort=$EFFORT"} \
+        "$RESUME" - <<<"$PROMPT"
+    fi
     if [ "$MODE" = research ]; then
       # Experiments need the GPU and the package index, which the sandbox
       # withholds. The flag's name says what it is; setup says it to the owner.
@@ -340,7 +489,7 @@ case "$BACKEND" in
         exec python3 "$RENDER" --format gemini -- gemini -p "$PROMPT" -y --include-directories "$ROOT" \
           ${MODEL:+-m "$MODEL"} -o stream-json </dev/null ;;
     esac
-    exec gemini -p "$PROMPT" -y --include-directories "$ROOT" ${MODEL:+-m "$MODEL"} </dev/null
+    bare gemini -p "$PROMPT" -y --include-directories "$ROOT" ${MODEL:+-m "$MODEL"} </dev/null
     ;;
   opencode)
     # opencode asks before a tool reaches outside --dir, and before it repeats
@@ -363,7 +512,7 @@ case "$BACKEND" in
         exec python3 "$RENDER" --format opencode -- opencode run --dir "$DIR" ${MODEL:+--model "$MODEL"} \
           --format json ${THINK[@]+"${THINK[@]}"} "$PROMPT" </dev/null ;;
     esac
-    exec opencode run --dir "$DIR" ${MODEL:+--model "$MODEL"} "$PROMPT" </dev/null
+    bare opencode run --dir "$DIR" ${MODEL:+--model "$MODEL"} "$PROMPT" </dev/null
     ;;
   cursor-agent)
     # Cursor's CLI: -p prints the turn as stream-json; --trust trusts the

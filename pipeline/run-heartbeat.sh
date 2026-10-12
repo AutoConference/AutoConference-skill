@@ -213,6 +213,12 @@ export PATH="$ROOT/state/bin:$PATH"
 # value carried over (KIT-053: a switch turned back on stayed off; so did a cap
 # changed on the website, and kit updates turned back on).
 FROM_FILE=""
+# KIT-060: the CLI, model and effort given in this loop's own environment for
+# one run (`AC_MODEL=x pipeline/run-heartbeat.sh`): a turn keeps them until the
+# settings file changes (agent-turn.sh, settings_now), as the loop does.
+AC_GIVEN_ENV=""
+for k in AC_BACKEND AC_MODEL AC_EFFORT; do [ -n "${!k:-}" ] && AC_GIVEN_ENV="$AC_GIVEN_ENV $k"; done
+export AC_GIVEN_ENV
 load_settings() {
   [ -f state/runner.env ] || return 0
   local k v given
@@ -598,7 +604,9 @@ rm -f state/turn state/stopping
 python3 submission/scripts/client.py backfill-statements 2>>"$LOG" 9>&- | while IFS= read -r line; do log "$line"; done
 # Only our own pid file is ours to remove: a loop that exits must not erase
 # the running one's.
+WATCHER=""  # the settings watch of a turn under way (settings_watch, below)
 drop_pid() {
+  [ -n "$WATCHER" ] && kill "$WATCHER" 2>/dev/null
   [ "$(cut -d' ' -f1 state/heartbeat.pid 2>/dev/null)" = "$$" ] && rm -f state/heartbeat.pid
   [ "$(cut -d' ' -f1 state/turn 2>/dev/null)" = "$$" ] && rm -f state/turn
   [ "$(cat state/stopping 2>/dev/null)" = "$$" ] && rm -f state/stopping
@@ -615,29 +623,64 @@ trap 'drop_pid' EXIT
 # /legal/consent-to-data-use.
 # wake <prompt> <mode> [<paper's cycle>]: the third names the paper the turn
 # is for (an owner's paper being converted), for this machine's token ledger.
+# settings_watch: while a turn runs (KIT-060), a setting its owner changes on
+# the website reaches this machine as it is saved -- client.py sync writes it
+# to state/runner.env, and the turn moves onto it at its next pause
+# (render_stream.py) -- not when the turn ends. Settings alone: work the turn
+# is doing does not end the wait. Once the turn is over the loop finds the
+# file changed and starts again on it, as for a change made here.
+settings_watch() {
+  local w="" rc loop=$$
+  trap '[ -n "$w" ] && kill "$w" 2>/dev/null; exit 0' TERM
+  while :; do
+    # A loop gone without ending it (killed outright) leaves it nothing to do.
+    kill -0 "$loop" 2>/dev/null || return 0
+    python3 submission/scripts/client.py wait-settings --timeout 50 --settings-only >/dev/null 2>&1 &
+    w=$!; wait "$w"; rc=$?; w=""
+    case $rc in
+      0) python3 submission/scripts/client.py sync >state/sync.json 2>>"$LOG" ;;
+      2|5) return 0 ;;  # no such route, or the key is no longer taken
+    esac
+  done
+}
 wake() {
-  local prompt=$1 mode=$2 out start t0 rc turn=duties
+  local prompt=$1 mode=$2 out start t0 rc turn=duties segs
   # Describing the machine runs probes (nvidia-smi, rocm-smi, python), which
   # the duties mode does not allow.
   [ "$mode" = machine ] && turn=research
   out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
+  # The CLI, model and effort each part of the turn ran on (KIT-060), for its record.
+  segs=$(mktemp 2>/dev/null) || segs=""
+  settings_watch 9>&- & WATCHER=$!
+  export AC_TURN_SEGMENTS="$segs"
   printf '%s %s\n' "$$" "$turn" > state/turn
   run_turn "$prompt" "$turn" "$mode" 2>&1 | tee -a "$LOG" | tee "$out" >/dev/null
   rc=${PIPESTATUS[0]}
   rm -f state/turn
+  unset AC_TURN_SEGMENTS
+  kill "$WATCHER" 2>/dev/null; wait "$WATCHER" 2>/dev/null; WATCHER=""
   log "turn done (exit $rc)"
-  # The CLI's own report of the model that answered, when it gives one.
-  local seen
-  seen=$(sed -n 's/^\[session\] model=\([^ ]*\).*/\1/p' "$out" | tail -1)
+  # The CLI's own report of the model that answered, when it gives one -- in
+  # the turn's last part, on the CLI it ended on (KIT-060: its owner may have
+  # moved it onto another while it ran); else the model that part was set to.
+  local seen endcli=$BACKEND endmodel=""
+  if [ -s "$segs" ]; then
+    IFS=$'\t' read -r endcli endmodel < <(tail -1 "$segs" | python3 -c 'import json, sys
+d = json.load(sys.stdin); print((d.get("backend") or "") + "\t" + (d.get("model") or ""))' 2>/dev/null)
+    endcli=${endcli:-$BACKEND}
+  fi
+  seen=$(awk '/^\[switch\] /{m=""} /^\[session\] model=/{sub(/^\[session\] model=/,""); split($0,a," "); m=a[1]} END{print m}' "$out")
+  [ -z "$seen" ] && seen=$endmodel
   if [ -n "$seen" ] && [ "$seen" != None ]; then
-    case "$BACKEND" in
+    case "$endcli" in
       claude) seen="anthropic/$seen" ;; codex) seen="openai/$seen" ;; gemini) seen="google/$seen" ;;
       qwen) seen="qwen/$seen" ;; droid) seen="factory/$seen" ;; amp) seen="amp/$seen" ;;
       cursor-agent) seen="" ;;  # its session line names the model for people, not by id
     esac
     [ -n "$seen" ] && printf '%s\n' "$seen" > state/model.txt
   fi
-  upload_turn "$BACKEND" "${MODEL:-}" "$prompt" "$mode" "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "${3:-}"
+  AC_TURN_SEGMENTS_FILE="$segs" upload_turn "$BACKEND" "${MODEL:-}" "$prompt" "$mode" "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "${3:-}"
+  [ -n "$segs" ] && rm -f "$segs"
   # KIT-015: a turn the model was not there for says until when, and why.
   local mb
   if [ "$rc" -ne 0 ] && mb=$(quota_retry_at "$out") && [ -n "$mb" ]; then
@@ -985,8 +1028,12 @@ pipeline_steps() {
     # A step that stops says why here (step 10 does): only this run's counts.
     rm -f "$ws/refine-logs/STOP-step-$n.md"
     log "paper $cyc: pipeline step $n/15"
+    # Each turn of the step takes the CLI, model and effort as they are now
+    # (KIT-060: agent-turn.sh), and moves onto a change at its next pause;
+    # the step's record says what each part ran on.
+    local segs; segs=$(mktemp 2>/dev/null) || segs=""
     env AC_WORKSPACE="$ws" ${MODEL:+AC_MODEL="$MODEL"} ${SUBMISSION_CLOSES_AT:+AC_SUBMISSION_CLOSES_AT="$SUBMISSION_CLOSES_AT"} \
-      AC_PIPELINE="${PH_PIPE:-sync}" AC_LIVE_LABEL="paper step $n/15" \
+      AC_PIPELINE="${PH_PIPE:-sync}" AC_LIVE_LABEL="paper step $n/15" AC_TURN_SEGMENTS="$segs" \
       "$ROOT/pipeline/run-pipeline.sh" "$seed" "$dir" --step "$n" </dev/null 2>&1 | tee "$out"
     rc=${PIPESTATUS[0]}
     # The record carries what the model was actually asked (every model call in
@@ -994,9 +1041,10 @@ pipeline_steps() {
     # platform cannot see for itself. A step with no model call says so.
     local asked
     asked=$(cat "$ws/.step-prompts" 2>/dev/null)
-    upload_turn "$BACKEND" "${MODEL:-}" \
+    AC_TURN_SEGMENTS_FILE="$segs" upload_turn "$BACKEND" "${MODEL:-}" \
       "${asked:-run-pipeline.sh step $n/15: a deterministic check, no model call}" \
       writing "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "$cyc" "$n/15"
+    [ -n "$segs" ] && rm -f "$segs"
     # A step that ran again after the model came back (below: the usage-limit
     # wait) has not succeeded until nothing its cut-off attempt had finished
     # is gone or shrunk without a reason (pipeline/resume.py; a tester's
@@ -1553,9 +1601,11 @@ ASSEMBLE
   fi
   log "own paper: submitting to $cyc"
   out=$(mktemp); prompts=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
-  AC_STEP_PROMPTS=$prompts pipeline/submit-paper.sh "$ws" 2>&1 9>&- | tee -a "$LOG" > "$out"
+  local segs; segs=$(mktemp 2>/dev/null) || segs=""
+  AC_TURN_SEGMENTS="$segs" AC_STEP_PROMPTS=$prompts pipeline/submit-paper.sh "$ws" 2>&1 9>&- | tee -a "$LOG" > "$out"
   rc=${PIPESTATUS[0]}
-  upload_turn "$BACKEND" "${MODEL:-}" "$(cat "$prompts")" own-paper-submit "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "$cyc"
+  AC_TURN_SEGMENTS_FILE="$segs" upload_turn "$BACKEND" "${MODEL:-}" "$(cat "$prompts")" own-paper-submit "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "$cyc"
+  [ -n "$segs" ] && rm -f "$segs"
   if grep -q 'submitted: ' "$out"; then
     mkdir -p state/submitted state/own-paper-submitted; touch "state/submitted/$cyc"
     rm -rf "state/own-paper-submitted/$cyc"; mv "$ws" "state/own-paper-submitted/$cyc"
@@ -1669,7 +1719,7 @@ with_timeout() {
 # own process group: stopping the loop stops it, and it goes on at the next
 # start from what it left).
 rebuttal_job() {
-  local job=$1 secs=$2 ws cyc prompt out start t0 rc mb status=failed tries=0
+  local job=$1 secs=$2 ws cyc prompt out start t0 rc mb status=failed tries=0 segs
   ws=$(cd "$job/../../.." && pwd) || return 1
   cyc=$(basename "$ws")
   # Claude Code finds the research skills through a workspace's .claude.
@@ -1677,15 +1727,17 @@ rebuttal_job() {
   while :; do
     prompt=$(python3 "$ROOT/pipeline/rebuttal.py" prompt "$job") || break
     out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
+    segs=$(mktemp 2>/dev/null) || segs=""
     log "rebuttal: an experiment for the reviewers of $cyc's paper (up to $((secs / 60)) min)"
     (
       # The owner's GPUs, and only those (A21), as for a paper's steps.
       case "${AC_GPUS:-}" in ''|none|NONE) ;; *) export CUDA_VISIBLE_DEVICES="$AC_GPUS" ;; esac
       [ "${AC_GPUS:-}" = none ] && export CUDA_VISIBLE_DEVICES=""
-      AC_LIVE_LABEL="experiment for reviewers" with_timeout "$secs" "$ROOT/pipeline/agent-turn.sh" --mode research --dir "$job" - <<<"$prompt"
+      AC_LIVE_LABEL="experiment for reviewers" AC_TURN_SEGMENTS="$segs" with_timeout "$secs" "$ROOT/pipeline/agent-turn.sh" --mode research --dir "$job" - <<<"$prompt"
     ) 2>&1 | tee "$out" >> "$job/turns.log"
     rc=${PIPESTATUS[0]}
-    upload_turn "$BACKEND" "${MODEL:-}" "$prompt" rebuttal "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "$cyc"
+    AC_TURN_SEGMENTS_FILE="$segs" upload_turn "$BACKEND" "${MODEL:-}" "$prompt" rebuttal "$out" "$rc" "$start" "$(( $(date +%s) - t0 ))" "$cyc"
+    [ -n "$segs" ] && rm -f "$segs"
     # The model was not there: back in the queue, to go on from what it left
     # once it is (A36, KIT-015).
     if [ "$rc" -ne 0 ] && mb=$(quota_retry_at "$out") && [ -n "$mb" ]; then
@@ -1911,6 +1963,10 @@ else: print("cannot reach the platform (%s)" % (d.get("message") or d.get("reaso
 # What state/runner.env was when this loop started: a later change to it --
 # ./ac, an edit, a conversation with the agent -- starts the loop again.
 ENV_MTIME=$(mtime state/runner.env)
+# KIT-060: and every turn's, which takes the file as it is now once it has
+# changed since (agent-turn.sh): a paper step running on in the background
+# while this loop starts again moves onto the new settings at once.
+export AC_SETTINGS_STAMP="$ENV_MTIME"
 WATCH=1
 # Sleep until the next wake, or until a setting changes: on the website (the
 # platform answers a held request the moment the owner saves, so this applies

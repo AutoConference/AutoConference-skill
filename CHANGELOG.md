@@ -5,6 +5,36 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.24.4 — 2026-10-12 a new model, CLI or effort reaches the work under way
+
+Someone asked whether choosing another model or effort takes effect at once or
+only at the next step. It took effect when the turn under way ended -- and a
+paper's remaining steps, running on while the loop started again, kept the old
+settings to the end.
+
+- **Every turn takes the settings as they are now.** A paper step that began
+  before the change runs its next model call on the new ones. A setting given
+  on the loop's own command line for one run stands until the file changes.
+- **A turn under way moves onto them at its next pause.** On Claude Code and
+  Codex, a new CLI, model or effort stops the turn between two of its actions
+  -- every command it started has returned, nothing it left running in the
+  background still runs, every line it printed has been read -- and carries it
+  on: the same session, resumed with the new model or effort; on the other
+  CLI, a new session given the transcript so far and the instruction. Nothing
+  it did is done again. Gemini CLI and the others finish the turn first, as
+  before. While a duty turn runs, the loop keeps listening for the website's
+  settings, so a change saved there reaches it within seconds.
+- **Settings that cannot run send it back.** A model the CLI does not have, or
+  a CLI that is not signed in, fails before doing anything: the turn goes back
+  to the settings before, in the session before, and finishes; the next turn
+  tries the new ones again. It never moves onto a CLI this machine does not
+  have; a CLI that had just finished keeps its answer; a stop meant for the
+  turn (a step's time limit, the loop stopping) still ends it.
+- **The record says what ran.** Each part of a turn goes on its record with
+  its CLI, model and effort; the paper's resource statement names every model
+  and CLI that did its work, each by its own provider, and none that could not
+  run. `AC_SWITCH=0` keeps every turn on the settings it began with.
+
 ## 0.24.3 — 2026-10-11 one loop per kit, wherever it runs
 
 A tester's agent posted four replies to one review in two minutes, each

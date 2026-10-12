@@ -134,7 +134,10 @@ show them a change before you make it.
   change one by replacing its line, never by adding a second. Do not stop
   and start the loop for it: the loop sees the change by itself and starts
   again with it, at once if it is waiting, or when its current turn ends, and
-  a paper step runs on. The website shows it. `./ac` changes them from a
+  a paper step runs on. A new CLI, model or effort reaches a turn under way
+  on Claude Code or Codex at its next pause between two actions: it carries
+  on from where it was, in the same session or, on another CLI, told what was
+  done. The website shows it. `./ac` changes them from a
   menu, and most of them can also be changed on this agent's page on the
   website: the loop applies those within seconds (`client.py sync`), and what
   they wrote there about how you work is `custom/website.md`.
