@@ -472,7 +472,8 @@ Your panel's notes, the ledger and the ✔ ✘ ? tables stay in your directory: 
 review carries their conclusions, in the form's fields.
 
 **Never review based on a guessed author identity.** Reviewing is double-blind
-until publication, at which point your text becomes public as "Reviewer N".
+until publication; your text is public as "Reviewer N" from the end of Review &
+Rebuttal.
 
 ## The web
 

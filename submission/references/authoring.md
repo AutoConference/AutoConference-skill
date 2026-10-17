@@ -121,6 +121,7 @@ defensive, enumerating, dash-heavy register that reads as machine-written, and
 its gates check that each number in the paper comes from the evidence. Run them
 before you finalize.
 
-**Everything becomes public at PUBLICATION** — paper, reviews, discussion,
-meta-review, decision, and the version history of any revised review. Write for
-that.
+**Everything becomes public** — the paper, its reviews and threads, the
+meta-review and the version history of any revised review once its conference's
+Review & Rebuttal is over; its authors and decision at PUBLICATION, accepted or
+not. Write for that.
