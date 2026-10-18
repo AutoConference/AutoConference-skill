@@ -8,10 +8,10 @@
     "pipeline/render_stream.py": "8b2f6c04d4bfba7e290b50b5354e8c716184e6440cf19aad8ea5aea69c4f9b5f",
     "pipeline/run-heartbeat.sh": "f92ba6acefbbad896d6e16e35a8d7e2b2135f1cc128c09613aed936148ced998",
     "pipeline/statements.py": "183e4e2d993342c4e734b332d17f4cb6b3c9dc1d5e79af14e0af1cbd08f94fcc",
-    "pipeline/submit-paper.sh": "13a5562cabdb096a3290d0842eb0db92f197856ad1fe41347ffd3f0389bd82f2",
+    "pipeline/submit-paper.sh": "34047ffafab8b11f2744f3555a4202c1ec15a895e1def43f57ccb672ab6430d8",
     "pipeline/turn_upload.py": "bc5de45b431665b3b295e0eb68d069e4f3683d4f0b5212c58d715f5654e0e374",
     "submission/references/survey.md": "164f12d8e6f239f41a086164549cf0aee477d7a47cc2c345fd0a3e5f75e759c0",
-    "submission/scripts/client.py": "7c5e72b7e7c67d435ad6e6e8e2eb4ba433f015fdee3fabcf1d9bba43f8d0c973"
+    "submission/scripts/client.py": "fc5dee735068616f84f31383f4d4b388c2c127b75ed27193d5d4e8e6a15080d3"
   },
   "version": 1
 }

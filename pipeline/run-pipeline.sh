@@ -1067,6 +1067,84 @@ if want 10; then
   fi
 fi
 
+# The paper's source is the LaTeX step 11 writes (paper/). make_submission.py
+# renders it into submission.json, figures/ and the evidence ledger, which says
+# where in that text each \ev value stands: step 14 re-reads every one at its
+# place. So the rendered file is never edited by hand -- a change there moves
+# every place after it, and the next render from the source undoes it. (A
+# tester's report, 2026-10-17: step 13 answered its attack in submission.json;
+# step 14 then found 698 values out of place and sent the paper back to step
+# 11, whose render lost the answer -- and round again.) A paper with no source
+# (its owner's own, brought as markdown) is answered in submission.json, which
+# no ledger points into.
+has_source() { [ -f "$W/paper/main.tex" ]; }
+# render_paper <label> [answer]: paper/ rendered and put in place -- 0, or
+# make_submission.py's status with nothing changed. A new rendering is a new
+# paper to attack, so step 13's attack and its answers go; not after step 13's
+# own answer ("answer"), which is judged against the attack it answers.
+render_paper() {
+  local label=$1 mode=${2:-}
+  run "$label" python3 "$ROOT/submission/scripts/make_submission.py" "$W" --out "$W/.submission-build" || return $?
+  [ -n "$DRY" ] && return 0
+  # figures/ must hold exactly the paper's figures: step 15 attaches every PNG
+  # in it and insert_figures appends any the text does not place. Step 7's
+  # plots are kept beside it, not deleted. Only the first time: on a re-run,
+  # figures/ holds the previous render and step 7's plots are already set aside.
+  if [ ! -d "$W/figures-step7" ] && [ -n "$(ls -A "$W/figures" 2>/dev/null)" ]; then
+    mv "$W/figures" "$W/figures-step7"
+  fi
+  rm -rf "$W/figures"; mkdir -p "$W/figures"
+  cp "$W/.submission-build/figures/"* "$W/figures/" 2>/dev/null || true
+  cp "$W/.submission-build/submission.json" "$W/submission.json"
+  # Where each \\ev it prints came from, for step 14 to re-read.
+  cp "$W/.submission-build/evidence-ledger.json" "$W/evidence-ledger.json" 2>/dev/null || rm -f "$W/evidence-ledger.json"
+  # The source this submission.json was rendered from: a later turn's change
+  # to it is rendered before anything is judged or checked (step 13).
+  if has_source; then paper_src keep "$W/.rendered-source.json"; else rm -f "$W/.rendered-source.json"; fi
+  if [ "$mode" != answer ]; then
+    rm -rf "$W/.kill-argument" "$W/KILL_ARGUMENT.json" "$W/KILL_ARGUMENT.md" "$W/refine-logs/KILL_ARGUMENT_ANSWERS.md"
+  fi
+}
+# paper_src keep|changed|restore <file>: the paper's text sources (paper/,
+# every .tex .bib .sty .cls .bst) kept in <file>, compared with it (changed:
+# 0 when they differ), or put back as they were -- so a turn that may not
+# edit the paper (step 13's judging) cannot edit it at its source either.
+paper_src() {
+  python3 - "$1" "$W/paper" "$2" <<'SRC'
+import base64, json, os, sys
+mode, root, saved = sys.argv[1:4]
+EXT = (".tex", ".bib", ".sty", ".cls", ".bst")
+def now():
+    out = {}
+    for dp, dn, fn in os.walk(root):
+        dn[:] = sorted(d for d in dn if not d.startswith("."))
+        for f in sorted(fn):
+            p = os.path.join(dp, f)
+            if f.lower().endswith(EXT) and not os.path.islink(p):
+                with open(p, "rb") as fh:
+                    out[os.path.relpath(p, root)] = base64.b64encode(fh.read()).decode()
+    return out
+if mode == "keep":
+    with open(saved, "w") as fh:
+        json.dump(now(), fh)
+    sys.exit(0)
+with open(saved) as fh:
+    was = json.load(fh)
+cur = now()
+if mode == "changed":
+    sys.exit(0 if cur != was else 1)
+for rel in cur:
+    if rel not in was:
+        os.remove(os.path.join(root, rel))
+for rel, b in was.items():
+    if cur.get(rel) != b:
+        p = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as fh:
+            fh.write(base64.b64decode(b))
+SRC
+}
+
 # ── 11 ─ ours: write it ─────────────────────────────────────────────────────
 # paper-writing/ in place of CCFA's writer. Three parts, and the first two are
 # separate model calls on purpose: the writer may not decide what the evidence
@@ -1275,8 +1353,7 @@ sys.exit(0 if v == "READY" else 1)' "$W/readiness.json" || {
     printf '\n\033[1m===== %s =====\033[0m\n  $ %s\n' "11c/15 render for the platform (ours)" \
       "make_submission.py $W --out $W/.submission-build -> $W/submission.json + figures/"
   else
-    run "11c/15 render for the platform (ours)" \
-      python3 "$ROOT/submission/scripts/make_submission.py" "$W" --out "$W/.submission-build" || {
+    render_paper "11c/15 render for the platform (ours)" || {
       # Too long by the platform's own rule: step 11 again must rewrite it
       # shorter, not render the same text -- so the mark goes, and the writer is
       # told by how much.
@@ -1298,22 +1375,6 @@ PAGES
       fi
       exit 5; }
     rm -f "$W/refine-logs/PAGE_BUDGET.md"
-    # figures/ must hold exactly the paper's figures: step 15 attaches every PNG
-    # in it and insert_figures appends any the text does not place. Step 7's
-    # plots are kept beside it, not deleted.
-    # Only the first time: on a re-run, figures/ holds the previous render and
-    # step 7's plots are already set aside.
-    if [ ! -d "$W/figures-step7" ] && [ -n "$(ls -A "$W/figures" 2>/dev/null)" ]; then
-      mv "$W/figures" "$W/figures-step7"
-    fi
-    rm -rf "$W/figures"; mkdir -p "$W/figures"
-    cp "$W/.submission-build/figures/"* "$W/figures/" 2>/dev/null || true
-    cp "$W/.submission-build/submission.json" "$W/submission.json"
-    # Where each \\ev it prints came from, for step 14 to re-read.
-    cp "$W/.submission-build/evidence-ledger.json" "$W/evidence-ledger.json" 2>/dev/null || rm -f "$W/evidence-ledger.json"
-    # A new rendering is a new paper to attack: step 13's attack on the last
-    # one, and the answers to it, go.
-    rm -rf "$W/.kill-argument" "$W/KILL_ARGUMENT.json" "$W/KILL_ARGUMENT.md" "$W/refine-logs/KILL_ARGUMENT_ANSWERS.md"
     say "submission.json and $(ls "$W/figures" | wc -l | tr -d ' ') figure(s) ready"
   fi
 fi
@@ -1333,7 +1394,11 @@ fi
 # after reading the owner's strategy and instructions, and the pipeline went on
 # whatever KILL_ARGUMENT.json said, or if it said nothing readable):
 #   13a  the attack, judged against the paper as it stands   fresh (skill ... fresh)
-#   13b  the author answers what stands                      the owner's context, as every step
+#   13b  the author answers what stands, in paper/           the owner's context, as every step
+#        (the source), then the writer's gates and a new render -- the
+#        evidence ledger with it, so step 14 finds every \ev where it stands
+#        (a tester's report, 2026-10-17; has_source above). A paper with no
+#        source is answered in submission.json, as before.
 #   13c  the answered paper judged again, point by point     fresh, held to 13a's points
 # research/scripts/check_kill_argument.py computes the verdict from the points
 # (the skill's own table), never from the verdict the file states. A critical
@@ -1341,23 +1406,33 @@ fi
 # answers the same points, told what stood); a file it cannot use is a failed
 # step (exit 1). The attack on this rendering is kept in .kill-argument/ across
 # tries, so a second try answers it rather than starting a new one; step 11's
-# render withdraws it. A judging turn may not edit the paper: it is compared
-# before and after, and put back.
+# render withdraws it; 13b's own render does not. A judging turn may not edit
+# the paper, at its source either: both are compared before and after, and put
+# back.
 KCHECK="$ROOT/research/scripts/check_kill_argument.py"
 KA="$W/KILL_ARGUMENT.json"
 KDIR="$W/.kill-argument"
 paper_sha() { python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$W/submission.json" 2>/dev/null; }
 ka_usable() { python3 "$KCHECK" "$@" >/dev/null 2>&1; [ $? -lt 3 ]; }
 judge() {   # judge <label> <prompt>: a fresh turn that leaves the paper as it found it
-  local label=$1 before
-  [ -n "$DRY" ] || { before=$(paper_sha); cp "$W/submission.json" "$KDIR/paper-before.json"; }
+  local label=$1 before src= edited=
+  if [ -z "$DRY" ]; then
+    before=$(paper_sha); cp "$W/submission.json" "$KDIR/paper-before.json"
+    has_source && { paper_src keep "$KDIR/source-judged.json"; src=1; }
+  fi
   skill "$label" "$2" 3600 fresh || return 1
   [ -n "$DRY" ] && return 0
-  if [ "$(paper_sha)" != "$before" ]; then
+  [ "$(paper_sha)" != "$before" ] && edited="submission.json"
+  # Nor at its source, which the next render would carry into the paper.
+  if [ -n "$src" ] && paper_src changed "$KDIR/source-judged.json"; then
+    paper_src restore "$KDIR/source-judged.json"
+    edited="${edited:+$edited and }the paper's source (paper/)"
+  fi
+  if [ -n "$edited" ]; then
     # Its rulings were made on a paper that is no longer there: they go too.
     cp "$KDIR/paper-before.json" "$W/submission.json"
     rm -f "$KA"
-    echo "research: $label edited submission.json, which a judging turn may not do; the paper is put back as it was." >&2
+    echo "research: $label edited $edited, which a judging turn may not do; the paper is put back as it was." >&2
     return 1
   fi
 }
@@ -1426,7 +1501,73 @@ points itself: a file it cannot read stops this step." || exit 1
     fi
   fi
   if [ -n "$DRY" ] || [ "$KV" -eq 1 ] || [ "$KV" -eq 2 ]; then
-    skill "13b/15 answer the attack (the author)" \
+    if has_source; then
+      [ -n "$DRY" ] || { paper_src keep "$KDIR/source-before.json"; cp "$W/submission.json" "$KDIR/rendered-before.json"; }
+      skill "13b/15 answer the attack (the author)" \
+"Answer the attack on this paper. KILL_ARGUMENT.json in this directory holds a
+hostile reviewer's case against it (details.attack_memo), broken into points
+(details.decomposed_points), each judged against the paper as it stood. After
+you, a fresh reader judges every point again, from the paper alone.
+
+The paper's source is paper/, the LaTeX step 11 wrote. submission.json -- the
+paper as the platform reads it -- is rendered from it, with a ledger of where
+each \\ev value stands in that text, and step 14 checks every one at its place.
+So answer in paper/ (its sections, tables, captions, appendix), never in
+submission.json: the pipeline renders the paper again after you, and a change
+made in submission.json would be lost there, and would move every number after
+it from where step 14 looks.
+
+In the paper, answer every point that is still_unresolved, and every one
+partially_answered at critical or major severity:
+  * It lands and the text can fix it -- a claim worded beyond its interval, a
+    missing qualification, an unclear definition, a comparison the results
+    already hold: fix it.
+  * It lands and cannot be fixed at this scale: state it precisely in the
+    limitations, and narrow the claim it undermines -- not a blanket
+    disclaimer.
+  * It does not land: make the paper show why, where a reader would look.
+
+Print a number from the evidence with \\ev, as the paper does (paper/data/EVIDENCE.md
+lists every key); any other number must be one a file under runs/ carries:
+step 14 checks every one. Do not run new experiments, and do not edit paper/data/,
+anything under runs/, readiness.json, the aggregates, KILL_ARGUMENT.json or
+KILL_ARGUMENT.md.
+
+Before you finish, check the paper as the pipeline will, from this directory:
+  bash $ROOT/paper-writing/scripts/gate.sh --project .
+  python3 $ROOT/submission/scripts/make_submission.py . --out .submission-build
+and fix in paper/ every ERROR the gates report and every problem the render
+reports -- a LaTeX command it does not know, a main text over the platform's
+page budget (cut, or move material past the Appendix heading) -- until the
+gates pass and the render says clean.
+
+Write refine-logs/KILL_ARGUMENT_ANSWERS.md: per point id, what you changed and
+where." || exit 1
+      if [ -z "$DRY" ] && ! cmp -s "$W/submission.json" "$KDIR/rendered-before.json"; then
+        # Edited where the render writes: never kept (see has_source above).
+        cp "$KDIR/rendered-before.json" "$W/submission.json"
+        if ! paper_src changed "$KDIR/source-before.json"; then
+          echo "research: the answer edited submission.json and not the paper's source: submission.json is rendered from paper/, so an edit there is lost at the next render and moves every number after it from where step 14 looks. Answer in paper/ (the LaTeX)." >&2
+          exit 1
+        fi
+        say "13b/15 the answer also edited submission.json; the render from paper/ takes its place"
+      fi
+      # The answered source, held to the writer's gates (which build its PDF
+      # again) and rendered: the paper step 13c judges and step 14 checks.
+      # Whenever the source is not the one submission.json was rendered from --
+      # this answer's change, or one an earlier try made and could not render
+      # -- and when that is not known (a paper rendered by an older kit).
+      if [ -n "$DRY" ] || [ ! -f "$W/.rendered-source.json" ] || paper_src changed "$W/.rendered-source.json"; then
+        gated "13b/15 the answered paper's own gates (paper-writing)" \
+              bash "$ROOT/paper-writing/scripts/gate.sh" --project "$W" || {
+          echo "research: the answered paper does not pass paper-writing's gates (above); fix it in paper/." >&2; exit 1; }
+        render_paper "13b/15 render the answered paper (ours)" answer || {
+          echo "research: the answered paper does not render for the platform (above) -- a LaTeX command the converter does not know, or a main text over the platform's page budget; fix it in paper/." >&2
+          exit 1; }
+      fi
+      [ -n "$DRY" ] || verify_evidence "after the answer to the kill-argument" || exit 5
+    else
+      skill "13b/15 answer the attack (the author)" \
 "Answer the attack on this paper. KILL_ARGUMENT.json in this directory holds a
 hostile reviewer's case against it (details.attack_memo), broken into points
 (details.decomposed_points), each judged against the paper as it stood. After
@@ -1452,7 +1593,8 @@ python3 $ROOT/submission/scripts/page_count.py submission.json; if it says
 
 Write refine-logs/KILL_ARGUMENT_ANSWERS.md: per point id, what you changed and
 where." || exit 1
-    [ -n "$DRY" ] || verify_evidence "after the answer to the kill-argument" || exit 5
+      [ -n "$DRY" ] || verify_evidence "after the answer to the kill-argument" || exit 5
+    fi
     judge "13c/15 kill-argument: the answered paper, judged again" \
 "You are an area chair judging, for the first time, whether this paper answers a
 hostile reviewer. This turn is that judging and nothing else.

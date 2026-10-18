@@ -648,7 +648,7 @@ The paper as its reviewers read it is {ws}/submission.json (its title, abstract 
 
 Do each experiment this machine and this time allow, held to the standard of the paper's own (interfaces/quality.example.json, which the paper was held to):
 
-- Work only in {jobdir}. Copy the code you need from the paper into it, and read the paper's files by their absolute path, written into your code. Never change a file of the paper: it is locked in review, and so is its evidence.
+- Work only in {jobdir}. Copy the code you need from the paper into it, and read the paper's files by their absolute path, written into your code: the kit re-runs it from a copy elsewhere. That path names this machine and maybe you, so the kit takes this machine's paths and names out of everything it sends the reviewers; never write them into RESULT.md yourself. Never change a file of the paper: it is locked in review, and so is its evidence.
 - Your code writes what it measured as JSON declared outputs under {jobdir}/runs/results/ -- each a summary of a run: its metrics, its settings, n, the seeds -- and {jobdir}/runs/REPLAY_MANIFEST.json names, per script, the output it writes and which of its fields must reproduce (exact, tolerant, timing), in the shape step 10 uses ({REPLAY}, at its top). A difference, a ratio or an interval you will report is computed by your code into an output, too. After you stop, the kit runs each script again from a clean copy of this directory and compares.
 - A mean or a rate is given with its interval, and seeds redraw what actually varies, as in the paper.
 - Then write {jobdir}/RESULT.md: one section per review, headed "## Review <review id>", saying what you ran (the setup, the data, the scale, the seeds), the numbers, and what they show and what they do not -- including where they go against the paper. Every number in it is one your code wrote into a declared output, or one the paper itself prints; the kit checks each, and a report with a number it cannot find is not posted.
@@ -947,6 +947,16 @@ def evidence_bundle(jobdir: str):
     return None
 
 
+def deidentified(text: str, jobdir: str) -> str:
+    """The text with this machine and its person taken out -- the home
+    directory, user and host names, git's author, the agent's name, keys -- by
+    the research record's scrubber, as client.py does to every file it sends:
+    the report is posted to reviewers who must not learn who ran it."""
+    sys.path.insert(0, os.path.join(ROOT, "submission", "scripts"))
+    import research_record as rr  # noqa: PLC0415
+    return rr.scrubber(rr.identity(jobdir), rr.secrets_in_env(), rr.learn([text]))(text, {})
+
+
 def post_prompt(jobdir: str) -> str:
     jobdir = os.path.abspath(jobdir)
     info, status = job_of(jobdir), done_status(jobdir) or "failed"
@@ -956,7 +966,7 @@ def post_prompt(jobdir: str) -> str:
     bundle = evidence_bundle(jobdir) if status == "verified" else None
     if status == "verified":
         what = ("The kit checked its report: every number in it traced to what its code wrote, and that code re-ran from a "
-                "clean copy with the same result. Its report:\n\n=== RESULT.md ===\n" + read(os.path.join(jobdir, "RESULT.md"), 40000).strip()
+                "clean copy with the same result. Its report:\n\n=== RESULT.md ===\n" + deidentified(read(os.path.join(jobdir, "RESULT.md"), 40000), jobdir).strip()
                 + "\n=== END ===\n\nPost it: say plainly that it is new and not in the reviewed paper, what was run (the setup, "
                 "the data, the scale, the seeds), the numbers exactly as the report gives them, and what they show and do not "
                 "-- also where they go against the paper. Give no number the report does not have.")
@@ -974,7 +984,7 @@ def post_prompt(jobdir: str) -> str:
                      "paper has all the supplementary files it may -- post the result without it and do not say it is attached; "
                      "never link your own copy instead.")
     elif status == "not_run":
-        what = ("It could not be run. Its report says why:\n\n=== RESULT.md ===\n" + read(os.path.join(jobdir, "RESULT.md"), 20000).strip()
+        what = ("It could not be run. Its report says why:\n\n=== RESULT.md ===\n" + deidentified(read(os.path.join(jobdir, "RESULT.md"), 20000), jobdir).strip()
                 + "\n=== END ===\n\nSay so plainly, and why, and what would settle the point. No numbers.")
     else:
         what = (f"It gives no result to report: {STATUS_WORDS.get(status, status)}.\n\nSay so plainly -- you said in the "

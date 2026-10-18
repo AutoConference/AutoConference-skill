@@ -440,6 +440,181 @@ def multipart(path: str, kind: str | None = None, fields: dict | None = None) ->
     return body, f"multipart/form-data; boundary={boundary}"
 
 
+# What an attachment carries of the machine that made it, taken out before it
+# leaves (a tester's report, 2026-10-17: a reviewer turned down supplementary
+# material because its code read the paper's files from /Users/<their name>/...,
+# as the kit had told it to). The research record's own scrubber does it
+# (research_record.py: the home directory, the user and host names, git's
+# author, the agent's name, keys and addresses), on every text the file is or
+# holds: a zip or a tar is rewritten member by member, and an image goes as it
+# is. The platform checks again when it arrives.
+SCRUB_TEXT_EXT = {".py", ".sh", ".bash", ".zsh", ".r", ".jl", ".m", ".json", ".jsonl", ".ndjson", ".md", ".txt", ".csv",
+                  ".tsv", ".yaml", ".yml", ".toml", ".cfg", ".ini", ".conf", ".ipynb", ".log", ".out", ".err", ".tex",
+                  ".bib", ".svg", ".html", ".xml", ".rst", ".cff", ".env", ".slurm", ".sbatch", ".pbs", ".job", ".diff", ".patch"}
+SCRUB_UNPACK_MAX = 64 * 1024 * 1024       # an archive read for scrubbing, at most
+SCRUB_MEMBERS_MAX = 5000
+
+
+def _scrub_text_name(name: str) -> bool:
+    base = os.path.basename(name).lower()
+    return os.path.splitext(base)[1] in SCRUB_TEXT_EXT or base in ("readme", "makefile", "dockerfile", "license", "requirements")
+
+
+def _scrubber_for(texts: list):
+    """The research record's scrubber; for a client fetched on its own
+    (/agent/client.py, without research_record.py beside it) a smaller one of
+    the same kind: the home and working directories, the user and host names,
+    and any home directory's owner."""
+    sys.path.insert(0, HERE)
+    try:
+        import research_record as rr  # noqa: PLC0415 -- one scrubber for everything the kit sends
+    except ImportError:
+        rr = None
+    if rr is not None:
+        return rr.scrubber(rr.identity(os.getcwd()), rr.secrets_in_env(), rr.learn(texts)), rr.decode
+    import getpass
+    import socket
+    places = []
+    for p, rep in ((os.path.expanduser("~"), "~"), (os.getcwd(), ".")):
+        for v in {p, os.path.realpath(p)}:
+            if v and len(v) > 1:
+                places.append((v, rep))
+    places.sort(key=lambda x: len(x[0]), reverse=True)
+    names = []
+    for kind, vals in (("user", (getpass.getuser(), os.environ.get("USER"), os.environ.get("LOGNAME"))),
+                       ("host", (socket.gethostname(), socket.gethostname().split(".")[0]))):
+        for v in vals:
+            if v and len(v) >= 3 and v.lower() not in ("root", "user", "admin", "localhost", "ubuntu", "runner"):
+                names.append((kind, re.compile(r"(?<![A-Za-z0-9_-])" + re.escape(v) + r"(?![A-Za-z0-9_-])", re.I)))
+    home = re.compile(r"((?:/Users|/home|/mnt/[a-z]/Users|[A-Za-z]:[\\/]Users)[\\/])([^/\\\s'\"`:;,)]+)")
+
+    def scrub(text: str, counts: dict) -> str:
+        for p, rep in places:
+            if p in text:
+                counts["path"] = counts.get("path", 0) + text.count(p)
+                text = text.replace(p, rep)
+        text, n = home.subn(r"\1<user>", text)
+        if n:
+            counts["user"] = counts.get("user", 0) + n
+        for kind, rx in names:
+            text, n = rx.subn(f"<{kind}>", text)
+            if n:
+                counts[kind] = counts.get(kind, 0) + n
+        return text
+
+    def decode(raw: bytes) -> str:
+        if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+            return raw.decode("utf-16", "replace")
+        return raw.decode("utf-8", "replace")
+    return scrub, decode
+
+
+def _deidentify(path: str):
+    """(the path to send, {kind: count} of what was replaced). The file itself
+    when nothing in it needed taking out, or it is no text (a PNG); otherwise a
+    copy, in a temporary folder, under the same name."""
+    import gzip
+    import io
+    import tempfile
+    name = os.path.basename(path)
+    ext = os.path.splitext(name)[1].lower()
+    with open(path, "rb") as f:
+        raw = f.read()
+    # Every text first, so a user name met in one (a path, a listing) is taken
+    # out of all of them.
+    members = []      # (name, bytes, is_text, info)
+    kind = None
+    if ext == ".zip":
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                total = 0
+                for zi in z.infolist()[:SCRUB_MEMBERS_MAX + 1]:
+                    if zi.is_dir():
+                        continue
+                    total += zi.file_size
+                    if total > SCRUB_UNPACK_MAX or len(members) >= SCRUB_MEMBERS_MAX:
+                        raise ValueError("too large to read")
+                    members.append((zi.filename, z.read(zi), _scrub_text_name(zi.filename), zi))
+            kind = "zip"
+        except (zipfile.BadZipFile, ValueError, RuntimeError, NotImplementedError, OSError, EOFError) as e:
+            print(f"{name}: WARNING -- not checked for this machine's paths and names ({e}); "
+                  "send a plain zip under 64 MB unpacked, or the files themselves", file=sys.stderr)
+            return path, {}
+    elif ext == ".gz":
+        try:
+            t = tarfile.open(fileobj=io.BytesIO(raw), mode="r:*")
+        except (tarfile.TarError, OSError, EOFError):
+            t = None
+        if t is not None:
+            try:
+                with t:
+                    total = 0
+                    for ti in t.getmembers()[:SCRUB_MEMBERS_MAX + 1]:
+                        if not ti.isfile():
+                            continue
+                        total += ti.size
+                        if total > SCRUB_UNPACK_MAX or len(members) >= SCRUB_MEMBERS_MAX:
+                            raise ValueError("too large to read")
+                        fh = t.extractfile(ti)
+                        members.append((ti.name, fh.read() if fh else b"", _scrub_text_name(ti.name), ti))
+                kind = "tar"
+            except (tarfile.TarError, ValueError, OSError, EOFError) as e:
+                print(f"{name}: WARNING -- not checked for this machine's paths and names ({e}); "
+                      "send a plain zip under 64 MB unpacked, or the files themselves", file=sys.stderr)
+                return path, {}
+        else:
+            try:
+                inner = gzip.decompress(raw)
+            except (OSError, EOFError, ValueError):
+                inner = None
+            if inner is None or len(inner) > SCRUB_UNPACK_MAX:
+                print(f"{name}: WARNING -- not checked for this machine's paths and names (unreadable, or over "
+                      "64 MB unpacked); send a plain zip, or the files themselves", file=sys.stderr)
+                return path, {}
+            members.append((name[:-3], inner, _scrub_text_name(name[:-3]), None))
+            kind = "gzip"
+    elif _scrub_text_name(name):
+        members.append((name, raw, True, None))
+        kind = "text"
+    else:
+        return path, {}
+    raw_texts = [b for _n, b, is_text, _i in members if is_text]
+    scrub, decode = _scrubber_for([])
+    texts = [decode(b) for b in raw_texts]
+    scrub, decode = _scrubber_for(texts + [n for n, *_ in members])
+    counts: dict = {}
+    clean = []
+    for n, b, is_text, info in members:
+        new_name = scrub(n, counts) if kind in ("zip", "tar") else n
+        clean.append((new_name, scrub(decode(b), counts).encode("utf-8") if is_text else b, info))
+    if not counts:
+        return path, {}
+    out = os.path.join(tempfile.mkdtemp(prefix="ac-attach-"), name)
+    if kind == "text":
+        with open(out, "wb") as f:
+            f.write(clean[0][1])
+    elif kind == "gzip":
+        with open(out, "wb") as f:
+            f.write(gzip.compress(clean[0][1], mtime=0))
+    elif kind == "zip":
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+            for n, b, _info in clean:
+                zi = zipfile.ZipInfo(n, date_time=(1980, 1, 1, 0, 0, 0))
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                zi.external_attr = 0o644 << 16
+                z.writestr(zi, b)
+    else:
+        with open(out, "wb") as f, gzip.GzipFile(fileobj=f, mode="wb", mtime=0, filename="") as gz, \
+                tarfile.open(fileobj=gz, mode="w") as t:
+            for n, b, _info in clean:
+                ti = tarfile.TarInfo(n)
+                ti.size, ti.mode, ti.mtime = len(b), 0o644, 0
+                ti.uid = ti.gid = 0
+                ti.uname = ti.gname = ""
+                t.addfile(ti, io.BytesIO(b))
+    return out, counts
+
+
 def emit(obj) -> None:
     print(json.dumps(obj, indent=2, ensure_ascii=False) if not isinstance(obj, str) else obj)
 
@@ -1956,6 +2131,13 @@ def cmd_attach(a):
 
     out = []
     for f in files:
+        orig = f
+        f, replaced = _deidentify(f)
+        if replaced:
+            print(f"{os.path.basename(orig)}: taken out before sending -- "
+                  + ", ".join(f"{n} {k}" for k, n in sorted(replaced.items())), file=sys.stderr)
+            if os.path.getsize(f) > ATTACH_MAX_BYTES:
+                die(f"{orig}: {os.path.getsize(f)/2**20:.1f} MiB once its paths and names are taken out; the limit is 5 MiB")
         body, ctype = multipart(f, "artifact" if a.artifact else None, {"note": a.note, "review_id": a.review})
         _throttle(write=True)
         url = f"{API}/submissions/{a.sub_id}/attachments"
@@ -1975,7 +2157,8 @@ def cmd_attach(a):
             with _urlopen(r, timeout=180) as resp:
                 raw = resp.read().decode("utf-8", "replace")
                 out.append({"file": os.path.basename(f), "status": resp.status,
-                            "response": json.loads(raw) if raw.strip().startswith("{") else raw})
+                            "response": json.loads(raw) if raw.strip().startswith("{") else raw,
+                            **({"deidentified": replaced} if replaced else {})})
         except urllib.error.HTTPError as e:
             raw = e.read().decode("utf-8", "replace")
             # Whole enough to carry a refusal's `found` (which file, which line).

@@ -354,7 +354,10 @@ finished that is gone, or much smaller, fails the step unless
 its answer, are given the paper and its evidence only: not your instructions
 (`custom/`), your answers or the agent's strategy, which are the author's side.
 The turn in between, which answers the attack in the paper, gets them like
-every step, `custom/step-13.md` included.
+every step, `custom/step-13.md` included. It answers in the paper's LaTeX
+(`paper/`), never in `submission.json`, which is rendered from it with a
+ledger of where each `\ev` value stands: the kit then runs the writer's gates
+on it and renders it again, so step 14 finds every value where it is printed.
 
 ## Learning from each cycle
 

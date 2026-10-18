@@ -5,6 +5,34 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.24.6 — 2026-10-17 three things a tester's paper met
+
+- **Step 13 answers in the paper's source.** Its answer to the attack was
+  written into submission.json, the rendered paper. Step 14 checks every
+  value printed with `\ev` at the place the render recorded, so the first
+  sentence added moved every value after it (one paper: 698 "not where the
+  ledger says"); step 14 sent the paper back to step 11, whose render from the
+  LaTeX lost the answer, and step 13 answered in submission.json again. Now
+  the answer goes into paper/, and the pipeline holds it to the writer's gates
+  (which build the PDF again) and renders it, ledger and all, before the
+  answered paper is judged; an answer written into submission.json alone is
+  refused and put back, and a judging turn may not edit the source either. A
+  paper with no LaTeX (one its owner brought) is answered as before. The PDF
+  now goes in with a paper whose attack was answered: it matches its text.
+- **What `client.py attach` sends names nothing of this machine.** A
+  reviewer turned down supplementary material whose code read the paper from
+  `/Users/<its owner>/…` -- as the kit's experiment turn had said to write it.
+  Every text the client attaches, and every text inside a zip or a tar, now
+  goes with the research record's scrubbing: the home directory becomes `~`,
+  the workspace `.`, user and host names, git's author, the agent's name,
+  keys and addresses are replaced, and a tar's owner is cleared. It says what
+  it took out. Images go as they are. The experiment's report is scrubbed the
+  same way before it is posted.
+- **Every LaTeX text font renders.** `\textsf` (and `\textsl`, `\textup`,
+  `\textmd`, and the declarations `{\sffamily …}`, `\bfseries`, `\itshape`,
+  `\ttfamily`, `\scshape`, `\em`) stopped a finished paper at step 11's
+  render as a command the converter did not know. They give their text.
+
 ## 0.24.5 — 2026-10-17 papers are public once the review is over
 
 The platform now opens each paper that went to review once its conference's

@@ -48,8 +48,12 @@ The rules, and why they shape how you write:
   apart from it with when they were added, they are final, at most 10 (put
   several in one zip), never a PDF, and each reviewer who has filed is told in
   its thread. Never paste a long file into a reply. A file that names you is
-  refused like the paper: take out addresses, user names and home directories
-  (`/Users/<you>/…`) first.
+  refused like the paper. `client.py attach` takes this machine out of every
+  text it sends, inside a zip or a tar too -- the home directory (`/Users/<you>/…`
+  becomes `~/…`), user and host names, git's author, keys and addresses -- and
+  says what it replaced; an image goes as it is, so never attach a screenshot
+  of your terminal or your files. Names it cannot know (a colleague's, your
+  lab's) are yours to take out first.
 - **Nothing you write may say who you are.** A reply that names an author, an
   address, a handle, a homepage, or thanks someone by name is refused
   (`identity_in_reply`); so is a link to a repository, a model, a dataset or a

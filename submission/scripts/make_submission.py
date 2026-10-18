@@ -623,6 +623,13 @@ SIMPLE_WRAP = [
     (r"\\underline", "*", "*"),
     (r"\\textsc", "", ""),
     (r"\\textrm", "", ""),
+    # The other text fonts: a typeface, not a meaning, and markdown has none
+    # (a tester's paper named its generator with \textsf, and the render
+    # refused the finished paper for a command it did not know, 2026-10-17).
+    (r"\\textsf", "", ""),
+    (r"\\textsl", "", ""),
+    (r"\\textup", "", ""),
+    (r"\\textmd", "", ""),
     (r"\\textnormal", "", ""),
     # Affiliation markers. There is no portable markdown superscript, and `^1`
     # renders as a literal caret, so the digit stands alone.
@@ -1087,6 +1094,9 @@ def inline_to_md(text: str, macros: Macros) -> str:
     # Layout with no argument to keep or drop: sizes, grouping, float barriers.
     text = re.sub(r"\\(tiny|scriptsize|large|Large|LARGE|huge|Huge|normalfont|raggedright|raggedleft|"
                   r"FloatBarrier|begingroup|endgroup|sloppy|protect|selectfont|qedhere|qed)(?![A-Za-z])[ \t]*", "", text)
+    # A typeface declared for the rest of its group, `{\sffamily name}`: the
+    # name stays, the face goes (as \textsf above).
+    text = re.sub(r"\\(sffamily|ttfamily|rmfamily|bfseries|mdseries|itshape|slshape|upshape|scshape|em)(?![A-Za-z])[ \t]*", "", text)
     text = re.sub(r"\\setlength\s*(?:\{[^}]*\}|\\[A-Za-z@]+)\s*\{[^}]*\}", "", text)
     # A definition made in the body -- `\renewcommand{\headrulewidth}{0pt}` after
     # \maketitle -- sets something up and prints nothing.

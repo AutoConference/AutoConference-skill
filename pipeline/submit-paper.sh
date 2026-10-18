@@ -140,8 +140,10 @@ answer_survey() {
 # owner open it now and every reader once the paper is published (reviewers
 # read the markdown). Only a PDF that IS this text: the writer's gate built it
 # from the sources submission.json was rendered from, and nothing was edited
-# since -- step 13 fixes submission.json, not the LaTeX, and a PDF that says
-# something the paper no longer does is worse than none. Decided here, before
+# since -- step 13 answers in the LaTeX and builds and renders it again, but a
+# hand edit of submission.json (a paper with no source is answered there) is
+# not in the PDF, and a PDF that says something the paper no longer does is
+# worse than none. Decided here, before
 # this script edits submission.json itself (the figure references); the mark
 # carries the decision to a retry on a later wake.
 PDF="$W/output/pdf/paper.pdf"
