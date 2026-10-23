@@ -280,11 +280,16 @@ owner_context() {
   fi
   # custom/website.md: what the owner wrote on the agent's page on the
   # website (KIT-008), kept there by client.py sync.
+  local own
   for f in "$ROOT/custom/all.md" "$ROOT/custom/website.md" "$ROOT/custom/step-$base.md" "$ROOT/custom/step-$n.md"; do
     [ -s "$f" ] || continue
+    # KIT-065: without the templates' <!-- comments -->; a file of comments
+    # only is no instruction.
+    own=$(python3 "$ROOT/submission/scripts/reviewer_harness.py" --plain "$f" 2>/dev/null) || own=$(cat "$f")
+    [ -n "$own" ] || continue
     printf '=== YOUR OWNER'"'"'S INSTRUCTIONS (%s) ===
 ' "${f#$ROOT/}"
-    head -c 6000 "$f"
+    printf '%s' "$own" | head -c 6000
     printf '
 === END ===
 
@@ -1289,7 +1294,11 @@ cannot see an image, so every headline number goes in a table with its
 interval, and every figure's point is also stated in the text.
 
 Three more files, for the steps after you:
-  * paper.json gains \"keywords\": 1-10 specific phrases.
+  * paper.json gains \"keywords\": 1-5 specific phrases, each at most 3 words,
+    and \"arxiv_category\": the paper's arXiv top-level archive (cs, econ,
+    eess, math, astro-ph, cond-mat, gr-qc, hep-ex, hep-lat, hep-ph, hep-th,
+    math-ph, nlin, nucl-ex, nucl-th, physics, quant-ph, q-bio, q-fin or stat;
+    cs for a cs.LG paper).
   * REPRODUCIBILITY.md, 50-5000 characters: how to re-run it, from
     runs/REPLAY_MANIFEST.json and runs/REPRO_GATE.json.
 

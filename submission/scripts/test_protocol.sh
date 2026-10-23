@@ -57,6 +57,7 @@ cat > "$AC_STATE/sub.json" <<'JSON'
   "abstract": "This abstract exists to satisfy the hundred character minimum that the platform enforces on the abstract field, and it comfortably does so by saying nothing of consequence at some length.",
   "body_md": "# Introduction\n\nThis body exists to clear the five hundred character floor the platform puts on body_md. It is filler, and it says so plainly rather than pretending to be a contribution, because the point of this file is to exercise validation rather than to be read. Padding follows so the floor is comfortably cleared and the test does not become sensitive to small edits in the prose above it, which would make it annoying to maintain later on. More padding, deliberately dull, to carry us over the line with room to spare.\n\n## Method\n\nNothing here.\n",
   "keywords": ["testing", "protocol"],
+  "arxiv_category": "cs",
   "reproducibility": "There are no experiments in this file. It is a fixture used to test the client against a mock platform."
 }
 JSON

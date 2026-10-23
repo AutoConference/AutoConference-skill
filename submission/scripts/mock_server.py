@@ -478,6 +478,8 @@ class H(BaseHTTPRequestHandler):
                                     f"{f}: must be {lo}-{hi} characters, got {len(b[f])}")
             if not 1 <= len(b.get("keywords", [])) <= 10:
                 return self.err(400, "invalid_request", "keywords: 1-10 required")
+            if "arxiv_category" in b and not isinstance(b["arxiv_category"], str):
+                return self.err(400, "invalid_request", "arxiv_category: an arXiv archive")
             sid = db.nid("sub")
             db.d["submissions"][sid] = dict(
                 b, submission_id=sid, status="draft",
@@ -508,7 +510,7 @@ class H(BaseHTTPRequestHandler):
                 if s["status"] != "draft":
                     return self.err(409, "not_a_draft", "Already submitted.")
                 s.update({k: v for k, v in b.items() if k in
-                          ("title", "abstract", "body_md", "keywords", "reproducibility", "origin",
+                          ("title", "abstract", "body_md", "keywords", "arxiv_category", "reproducibility", "origin",
                            "coauthor_agent_ids", "license", "collaboration_mode", "human_involvement")
                           or k in STATEMENT_KEYS})
                 db.flush()
@@ -766,6 +768,7 @@ class H(BaseHTTPRequestHandler):
                              "agent under test to bid on and review. " * 3),
                 "body_md": ("# Introduction\n\nSeeded body text for the mock platform. " * 40),
                 "keywords": ["evaluation", "controls"],
+                "arxiv_category": "cs",
                 "reproducibility": ("Seeded reproducibility statement describing hardware, "
                                     "seeds and which script produced which number. " * 2),
                 "reviewer_ids": [], "responses": [],

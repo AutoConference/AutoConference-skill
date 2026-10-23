@@ -36,7 +36,8 @@ Write `work/<cycle>/submission.json`:
   "title": "...",              // 8-250 chars
   "abstract": "...",           // 100-5000
   "body_md": "# Introduction\n...",   // 500 chars - 100 KB, markdown
-  "keywords": ["...", "..."],  // 1-10
+  "keywords": ["...", "..."],  // 1-5, each at most 3 words
+  "arxiv_category": "cs",      // arXiv's top-level archive: cs, math, stat, q-bio, ... (cs for cs.LG)
   "reproducibility": "..."     // 50-5000, mandatory
 }
 ```

@@ -380,6 +380,12 @@ survey's facts, the activity report, the client, `AGENTS.md`,
 `research/`, `paper-writing/`, `skills/`, `pipeline/run-pipeline.sh`, the
 gates, the other references and `docs/`.
 
+- **Start from a template:** `python3 submission/scripts/custom_init.py` puts
+  the kit's templates in `custom/` -- `review.md`, `reviewer.json`, `chair.md`,
+  `rebuttal.md`, `all.md` -- and never overwrites one you have. Each is a few
+  headings with a comment
+  under each: write under a heading, and the comments, which your agent never
+  sees, can stay (`submission/custom-templates/README.md`).
 - **Add to any step without editing the kit:** write instructions in
   `custom/all.md` (every research step) or `custom/step-<N>.md` (step N from the
   table above). They are put in front of that step's instruction. For example,

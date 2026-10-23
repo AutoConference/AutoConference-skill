@@ -128,8 +128,11 @@ def parse_skill(path: str) -> dict:
     for k in ("id", "name", "version", "match"):
         if not head.get(k):
             raise ValueError(f"{path}: the header has no {k}")
+    # Optional: the arXiv archives (SUB-022) whose papers this field skill fits
+    # whatever their words, comma-separated: "arxiv: q-bio, physics".
+    arxiv = [a.strip() for a in head.get("arxiv", "").split(",") if a.strip()]
     return {"id": head["id"], "name": head["name"], "version": head["version"],
-            "match": re.compile(head["match"], re.I), "body": m.group(2).strip(),
+            "match": re.compile(head["match"], re.I), "arxiv": arxiv, "body": m.group(2).strip(),
             "path": path, "hash": sha(text)}
 
 
@@ -210,6 +213,12 @@ def paper_head(text: str) -> str:
     return t[: cut.start()] if cut else t[:4000]
 
 
+def paper_category(head: str) -> str:
+    """The arXiv archive the paper was filed under (audit_scan.py's header), or ''."""
+    m = re.search(r"^arXiv category:\s*([a-z-]+)\s*$", head, re.M)
+    return m.group(1) if m else ""
+
+
 def choose(domains: dict, cfg: dict, head: str, forced: list | None) -> list:
     """The field skills for this paper, best match first."""
     if forced is not None:
@@ -221,15 +230,19 @@ def choose(domains: dict, cfg: dict, head: str, forced: list | None) -> list:
     picked = [(domains[d], "always") for d in always]
     if auto:
         cap = cap_of(cfg)
+        cat = paper_category(head)
         scored = []
         for s in domains.values():
             if any(s is p for p, _ in picked):
                 continue
             hits = len(s["match"].findall(head))
-            if hits:
-                scored.append((hits, s["id"], s))
+            filed = bool(cat) and cat in s.get("arxiv", [])
+            if hits or filed:
+                # The paper's own arXiv archive counts as two matches: what its
+                # authors filed it under, against words a related-work line shares.
+                scored.append((hits + (2 if filed else 0), s["id"], s, filed))
         scored.sort(key=lambda x: (-x[0], x[1]))
-        picked += [(s, f"matched {n}x") for n, _, s in scored[:cap]]
+        picked += [(s, f"matched {n}x" + (f", filed under {cat}" if filed else "")) for n, _, s, filed in scored[:cap]]
     return picked
 
 
@@ -248,10 +261,33 @@ def owner_files() -> list:
     return files
 
 
+def uncomment(text: str) -> str:
+    """The text without its <!-- comments -->: the templates' guidance for the
+    owner (submission/custom-templates/), never read as an instruction. Each
+    comment leaves its line breaks, so a line keeps its number for --check.
+    A heading with nothing under it -- a template's, not yet filled in -- goes
+    too, as a blank line."""
+    lines = re.sub(r"<!--.*?-->", lambda m: "\n" * m.group(0).count("\n"), text.replace("\r\n", "\n"), flags=re.S).split("\n")
+    heading = re.compile(r"^\s*#{1,6}\s")
+    for i, line in enumerate(lines):
+        if heading.match(line):
+            nxt = next((x for x in lines[i + 1:] if x.strip()), None)
+            if nxt is None or heading.match(nxt):
+                lines[i] = ""
+    return "\n".join(lines)
+
+
+def plain(path: str) -> str:
+    """An owner's file as a turn reads it: uncommented, blank lines run together.
+    The loop's turns use it for custom/chair.md, custom/rebuttal.md and the
+    research steps' custom files (KIT-065); empty when only comments are left."""
+    return re.sub(r"\n{3,}", "\n\n", uncomment(read_owner(path))).strip()
+
+
 def screen(text: str, rel: str):
     """The owner's lines, less any that ask for what layer 1 settles."""
     kept, left_out = [], []
-    for i, line in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
+    for i, line in enumerate(uncomment(text).split("\n"), 1):
         rule = breaks(line)
         if rule:
             left_out.append({"file": rel, "line": i, "text": line.strip()[:200], "rule": rule})
@@ -277,6 +313,13 @@ def owner_text() -> str:
                  "conference's rules, the form or the review guide settle. "
                  "python3 submission/scripts/reviewer_harness.py --check lists them.)")
     return kept
+
+
+def _has_text(path: str) -> bool:
+    try:
+        return bool(uncomment(read_owner(path)).strip())
+    except OSError:
+        return False
 
 
 def config() -> dict:
@@ -306,7 +349,8 @@ def config() -> dict:
         "fields": always,
         "available": sorted(domains),
         "own_fields": sorted(d for d, s in domains.items() if s["origin"] == "owner"),
-        "owner_instructions": bool(owner_files()),
+        # A template left as it came (only its comments) is no instruction.
+        "owner_instructions": any(_has_text(f) for f in owner_files()),
         "files": files,
         "config_hash": sha(json.dumps(files, sort_keys=True)),
         "notes": notes,
@@ -404,10 +448,14 @@ def main() -> None:
     ap.add_argument("--show", action="store_true", help="this reviewer's set-up: fields, versions, hashes")
     ap.add_argument("--owner-text", action="store_true", help=argparse.SUPPRESS)  # the loop's review turns
     ap.add_argument("--report", action="store_true", help=argparse.SUPPRESS)  # client.py sync
+    ap.add_argument("--plain", metavar="FILE", help=argparse.SUPPRESS)  # the loop's owner files (KIT-065)
     a = ap.parse_args()
 
     if a.owner_text:
         print(owner_text())
+        return
+    if a.plain:
+        print(plain(a.plain))
         return
     if a.report:
         print(json.dumps(report()))

@@ -54,7 +54,10 @@ LIMITS = {
     "body_md": (500, 100_000),
     "reproducibility": (50, 5000),
 }
-MAX_KEYWORDS = 10
+# SUB-022: 1-5 keywords of at most three words, and one of arXiv's top-level
+# archives (client.py ARXIV_ARCHIVES, which checks both before anything is sent).
+MAX_KEYWORDS = 5
+MAX_KEYWORD_WORDS = 3
 
 
 def warn(msg: str) -> None:
@@ -1813,7 +1816,9 @@ def main() -> int:
     ap.add_argument("--out", default=None, help="output dir (default: <project>/submission)")
     ap.add_argument("--reproducibility", default=None,
                     help="file holding the reproducibility prose; the research side owns it")
-    ap.add_argument("--keywords", default=None, help="comma-separated, if paper.json has none")
+    ap.add_argument("--keywords", default=None, help="comma-separated, if paper.json has none (1-5, at most 3 words each)")
+    ap.add_argument("--arxiv-category", default=None,
+                    help="arXiv's top-level archive (cs, math, stat, q-bio, ...), if paper.json has no arxiv_category")
     ap.add_argument("--page-limit", type=float, default=None,
                     help="the venue's main-text page budget, 0 = none (default: the platform's, "
                          "from state/phase.json; else AC_PAGE_LIMIT; else 10)")
@@ -1885,7 +1890,11 @@ def main() -> int:
         except json.JSONDecodeError:
             warn("paper.json is not valid JSON")
     keywords = meta.get("keywords") or ([k.strip() for k in a.keywords.split(",")] if a.keywords else [])
-    keywords = [k for k in keywords if k][:MAX_KEYWORDS]
+    keywords = [k for k in keywords if k]
+    if len(keywords) > MAX_KEYWORDS:
+        warn(f"{len(keywords)} keywords: the platform takes {MAX_KEYWORDS}; the first {MAX_KEYWORDS} were kept")
+        keywords = keywords[:MAX_KEYWORDS]
+    arxiv_category = (meta.get("arxiv_category") or a.arxiv_category or "").strip()
 
     repro = ""
     repro_path = Path(a.reproducibility) if a.reproducibility else project / "REPRODUCIBILITY.md"
@@ -1942,6 +1951,7 @@ def main() -> int:
         "abstract": abstract,
         "body_md": body_md,
         "keywords": keywords,
+        "arxiv_category": arxiv_category,
         "reproducibility": repro,
     }
 
@@ -1990,8 +2000,16 @@ def main() -> int:
             warn(f"{field} is {n} chars, outside the platform's {lo}-{hi}")
             problems += 1
     if not keywords:
-        warn("no keywords: the platform requires 1-10, and paper.json carries none "
+        warn("no keywords: the platform requires 1-5, and paper.json carries none "
              "(paper-writing's paper.json is a DESIGN file -- pass --keywords)")
+        problems += 1
+    long_kw = [k for k in keywords if len(k.split()) > MAX_KEYWORD_WORDS]
+    if long_kw:
+        warn(f"keywords of more than {MAX_KEYWORD_WORDS} words, which the platform refuses: {', '.join(long_kw)}")
+        problems += 1
+    if not arxiv_category:
+        warn("no arxiv_category: every paper names one of arXiv's top-level archives (cs, math, stat, ...) "
+             "-- add \"arxiv_category\" to paper.json or pass --arxiv-category")
         problems += 1
     if not repro:
         warn("reproducibility is empty. It has no source in the LaTeX tree by "

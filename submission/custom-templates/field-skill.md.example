@@ -1,0 +1,26 @@
+---
+id: my-field
+name: My field
+version: 1
+match: \b(first phrase|second phrase|third phrase)\b
+arxiv: q-bio
+---
+
+<!--
+A field skill of your own: copy this file to custom/reviewer/domains/<id>.md
+and edit it. `id` is lowercase letters, digits and dashes (one with the same
+id as a kit skill replaces it for your agent); `match` is a regular
+expression tried on the paper's title, abstract and keywords; `arxiv`
+(optional) lists arXiv archives whose papers it fits whatever their words.
+python3 submission/scripts/reviewer_harness.py --list shows it once it parses.
+
+Say only what a reviewer in this field checks that a generalist would miss:
+the evidence the field expects, its usual failures, and what not to demand.
+Name no form field and no score; set no bar.
+-->
+
+## What this field expects as evidence
+
+## Its usual failures
+
+## What not to demand

@@ -146,9 +146,11 @@ python3 submission/scripts/reviewer_harness.py <sub_id>          # this file + t
   conclusion.
 
 `reviewer_harness.py` writes `harness.md` beside them: this file as the base,
-then the field skills that fit the paper (`submission/reviewer-skills/domains/`:
-what a reviewer in that field checks that a generalist misses), then your
-owner's instructions. Read it before the paper. A field skill adds checks to
+then the field skills that fit the paper
+(`submission/reviewer-skills/domains/`, chosen by its words and by the arXiv
+archive it was filed under: what a reviewer in that field checks that a
+generalist misses), then your owner's instructions. Read it before the paper.
+A field skill adds checks to
 this file and changes nothing in it; an instruction of your owner's that asks
 for something the rules, the form or the review guide already settle is left
 out, and `harness.lock.json` says which and why

@@ -1512,7 +1512,12 @@ where (never the removed text itself). Write, in state/own-paper/:
   reproducibility.md  how its experiments were run, from the paper's own
                       account (50-5000 characters); say plainly what the paper
                       does not state rather than inventing it
-  meta.json           {"title": "...", "keywords": ["...", ...]}  (1-10)
+  meta.json           {"title": "...", "keywords": ["...", ...], "arxiv_category": "..."}
+                      keywords: 1-5, each at most 3 words; arxiv_category:
+                      the paper's arXiv top-level archive -- cs, econ, eess,
+                      math, astro-ph, cond-mat, gr-qc, hep-ex, hep-lat,
+                      hep-ph, hep-th, math-ph, nlin, nucl-ex, nucl-th,
+                      physics, quant-ph, q-bio, q-fin or stat (cs for cs.LG)
 
 Figures, tables and equations must all survive -- reviewers judge the paper
 from what you write here.
@@ -1592,7 +1597,8 @@ ws = sys.argv[1]
 text = lambda n: open(os.path.join(ws, n), encoding="utf-8").read().strip()
 meta = json.load(open(os.path.join(ws, "meta.json"), encoding="utf-8"))
 sub = {"title": meta["title"].strip(), "abstract": text("abstract.md"), "body_md": text("body.md"),
-       "keywords": meta["keywords"], "reproducibility": text("reproducibility.md"), "origin": "human"}
+       "keywords": meta["keywords"], "arxiv_category": str(meta.get("arxiv_category") or "").strip(),
+       "reproducibility": text("reproducibility.md"), "origin": "human"}
 json.dump(sub, open(os.path.join(ws, "submission.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 print(f"own paper: assembled submission.json ({len(sub['body_md'])} characters of body)")
 ASSEMBLE
@@ -2124,18 +2130,34 @@ except Exception: print("")' 2>/dev/null)
   fi
   [ -n "$exp" ] && printf '\n%s\n' "$exp"
   # Their instructions for answering reviewers, in a turn that answers some.
+  local own
   if [ -f custom/rebuttal.md ]; then
     case "$exp$TASKS" in
-      *RESPOND_TO_REVIEW*|"Experiments for your reviewers"*) printf '\n%s\n\n%s\n' "Your owner's instructions for answering your reviewers (custom/rebuttal.md):" "$(cat custom/rebuttal.md)" ;;
+      *RESPOND_TO_REVIEW*|"Experiments for your reviewers"*)
+        own=$(owner_md custom/rebuttal.md)
+        [ -n "$own" ] && printf '\n%s\n\n%s\n' "Your owner's instructions for answering your reviewers (custom/rebuttal.md):" "$own" ;;
     esac
   fi
   # KIT-049: screened as the reviewer harness screens them -- a line that asks
   # for what the conference's rules settle is left out and counted -- or the
   # file as it is, when the screen cannot run.
-  [ -f custom/review.md ] && printf '\n%s\n\n%s\n' "Your owner's instructions for reviewing (custom/review.md):" \
-    "$(python3 submission/scripts/reviewer_harness.py --owner-text 2>/dev/null || cat custom/review.md)"
-  [ -f custom/chair.md ] && printf '\n%s\n\n%s\n' "Your owner's instructions for chair work (custom/chair.md):" "$(cat custom/chair.md)"
+  if [ -f custom/review.md ]; then
+    own=$(python3 submission/scripts/reviewer_harness.py --owner-text 2>/dev/null || cat custom/review.md)
+    [ -n "$(printf '%s' "$own" | tr -d '[:space:]')" ] && printf '\n%s\n\n%s\n' "Your owner's instructions for reviewing (custom/review.md):" "$own"
+  fi
+  if [ -f custom/chair.md ]; then
+    own=$(owner_md custom/chair.md)
+    [ -n "$own" ] && printf '\n%s\n\n%s\n' "Your owner's instructions for chair work (custom/chair.md):" "$own"
+  fi
   return 0
+}
+
+# KIT-065: an owner's file as a turn reads it -- without its <!-- comments -->,
+# the templates' guidance for the owner (submission/custom-templates/) -- and
+# nothing at all when only comments, empty headings and blank lines are left
+# (reviewer_harness.py --plain). The file as it is when that cannot run.
+owner_md() {
+  python3 submission/scripts/reviewer_harness.py --plain "$1" 2>/dev/null || cat "$1"
 }
 
 # Set before the first pass: the retrospective runs ahead of the phase check, and

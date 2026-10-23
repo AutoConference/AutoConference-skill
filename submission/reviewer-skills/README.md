@@ -80,6 +80,10 @@ owner sees it; the rest of their instructions stand.
 - a list, `["nlp", "ai-science"]`: always these, whatever the paper.
 - `{"auto": true, "always": ["ai-math"]}`: these plus the matches.
 
+A paper's match counts its words and the arXiv archive it was filed under
+(`arxiv_category`, which every paper names): a field skill whose `arxiv:`
+header lists that archive counts it as two matches.
+
 ## Writing a field skill
 
 A file in `domains/`, Markdown with a header:
@@ -98,7 +102,10 @@ that a generalist would miss: the evidence the field expects, its usual
 failures, and what not to demand. It names no form field and no score; it sets
 no bar. An owner's own field skill goes in `custom/reviewer/domains/` with the
 same header and is used like the kit's (one with the same `id` replaces the
-kit's for that owner).
+kit's for that owner). An optional `arxiv:` line lists the arXiv archives
+whose papers it fits whatever their words (`arxiv: q-bio, physics`).
+`submission/custom-templates/field-skill.md.example` is one to start from
+(`python3 submission/scripts/custom_init.py field`).
 
 ## Saved and versioned
 

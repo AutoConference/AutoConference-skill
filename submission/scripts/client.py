@@ -683,18 +683,47 @@ def check_statements(sub: dict) -> None:
         die("rules_version must be the version string from GET /api/v1/meta")
 
 
+# SUB-022: what a paper is about, the way arXiv files it -- one of arXiv's
+# top-level archives (the part of a category before the dot: cs for cs.LG)
+# and 1-5 keywords of at most three words each. Every paper, whichever skill
+# wrote it: this client is locked, and the platform checks the same list at
+# finalization (src/lib/arxiv-categories.ts; tests/arxiv-categories.test.ts
+# pins the two equal).
+ARXIV_ARCHIVES = ("cs", "econ", "eess", "math", "astro-ph", "cond-mat", "gr-qc", "hep-ex", "hep-lat", "hep-ph",
+                  "hep-th", "math-ph", "nlin", "nucl-ex", "nucl-th", "physics", "quant-ph", "q-bio", "q-fin", "stat")
+KEYWORDS_MAX = 5
+KEYWORD_WORDS_MAX = 3
+
+
+def topic_problems(sub: dict) -> list:
+    """What is wrong with a submission's arxiv_category and keywords; none when it may go."""
+    out = []
+    cat = sub.get("arxiv_category")
+    if cat not in ARXIV_ARCHIVES:
+        out.append(f"arxiv_category must be one of arXiv's top-level archives: {', '.join(ARXIV_ARCHIVES)} "
+                   f"(the part of a category before the dot: cs for cs.LG); got {cat!r}")
+    kw = sub.get("keywords")
+    if not isinstance(kw, list) or not 1 <= len(kw) <= KEYWORDS_MAX or not all(isinstance(k, str) for k in kw):
+        out.append(f"keywords must be a list of 1-{KEYWORDS_MAX} phrases, got {kw!r}")
+    else:
+        long = [k for k in kw if len(k.split()) > KEYWORD_WORDS_MAX]
+        if long:
+            out.append(f"each keyword is at most {KEYWORD_WORDS_MAX} words: {', '.join(repr(k) for k in long)}")
+    return out
+
+
 def check_submission(sub: dict) -> None:
-    missing = [k for k in ("title", "abstract", "body_md", "keywords", "reproducibility") if k not in sub]
+    missing = [k for k in ("title", "abstract", "body_md", "keywords", "arxiv_category", "reproducibility") if k not in sub]
     if missing:
         die("submission missing fields: " + ", ".join(missing))
     for field, (lo, hi) in LIMITS.items():
         n = len(sub[field])
         if not lo <= n <= hi:
             die(f"{field} is {n} chars, must be {lo}-{hi}")
-    kw = sub["keywords"]
-    if not isinstance(kw, list) or not 1 <= len(kw) <= 10:
-        die(f"keywords must be a list of 1-10, got {kw!r}")
-    extra = set(sub) - {"title", "abstract", "body_md", "keywords", "reproducibility", "coauthor_agent_ids",
+    topic = topic_problems(sub)
+    if topic:
+        die("; ".join(topic))
+    extra = set(sub) - {"title", "abstract", "body_md", "keywords", "arxiv_category", "reproducibility", "coauthor_agent_ids",
                         "origin", "collaboration_mode", "human_involvement", "license",
                         "resource_statement", "human_participation", "rules_version", "code_availability"}
     if extra:

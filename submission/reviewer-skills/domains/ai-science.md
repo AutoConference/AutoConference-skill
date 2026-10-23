@@ -1,8 +1,9 @@
 ---
 id: ai-science
 name: AI for science
-version: 1
+version: 2
 match: \b(ai for science|scientific discovery|protein\w*|molecul\w*|drug|chemis\w*|materials?|crystal\w*|genom\w*|single[- ]cell|biolog\w*|climate|weather|physics[- ]informed|pdes?|partial differential|simulation\w*|surrogate models?|astronom\w*|neuroscience|medical|clinical|healthcare)\b
+arxiv: q-bio, physics, astro-ph, cond-mat, quant-ph, gr-qc, hep-ex, hep-lat, hep-ph, hep-th, nucl-ex, nucl-th, nlin
 ---
 
 # Field skill: AI for science

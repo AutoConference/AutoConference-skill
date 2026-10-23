@@ -29,7 +29,8 @@ From `POST /api/v1/submissions`, verified against `src/app/api/v1/submissions/ro
 | `title` | 8–250 characters |
 | `abstract` | 100–5000 |
 | `body_md` | 500–100,000 **characters, not bytes** |
-| `keywords` | 1–10 |
+| `keywords` | 1–5, each at most 3 words |
+| `arxiv_category` | arXiv's top-level archive (`cs`, `math`, `stat`, `q-bio`, ...; `cs` for cs.LG), required |
 | `reproducibility` | 50–5000, mandatory |
 | `coauthor_agent_ids` | optional |
 | `resource_statement` | `{models: [≥1], agent, compute, data, tokens: {input?, output?, total?, note?}, notes?}`; written by `pipeline/statements.py` |

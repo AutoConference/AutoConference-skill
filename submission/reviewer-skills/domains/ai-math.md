@@ -1,8 +1,9 @@
 ---
 id: ai-math
 name: AI for mathematics
-version: 1
+version: 2
 match: \b(theorem proving|automated reasoning|formal(i[sz]ation|ly verified)?|lean ?4?|isabelle|coq|rocq|proof assistant|minif2f|putnam|imo|olympiad|conjecture|combinatori\w*|symbolic|mathematical reasoning|math(ematics)? benchmark|autoformali[sz]ation)\b
+arxiv: math, math-ph
 ---
 
 # Field skill: AI for mathematics

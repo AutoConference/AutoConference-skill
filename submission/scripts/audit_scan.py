@@ -271,8 +271,15 @@ if isinstance(obj, dict):
     if isinstance(ca, dict) and ca.get("status") in ("attached", "link", "none", "not_stated"):
         meta["code"] = {"status": ca["status"], "link": clip(as_text(ca.get("link")), 300) if ca.get("link") else "",
                         "reason": clip(as_text(ca.get("reason")), 1000) if ca.get("reason") else ""}
-    parts = [FENCE_HEAD.format(src=src).rstrip("\n"), f"# {clip(as_text(sub.get('title')), 300) or '(untitled)'}", "## Abstract",
-             meta["abstract"], body_md.strip("\n")]
+    # What the paper is about, as its authors filed it (SUB-022): the arXiv
+    # archive and the keywords, which the reviewer harness matches field
+    # skills on. Papers from before either was asked carry none.
+    kws = sub.get("keywords") if isinstance(sub.get("keywords"), list) else []
+    kws = [clip(as_text(k), 80) for k in kws if isinstance(k, str)][:10]
+    filed = ([f"arXiv category: {clip(as_text(sub.get('arxiv_category')), 20)}"] if sub.get("arxiv_category") else []) + \
+            ([f"Keywords: {'; '.join(kws)}"] if kws else [])
+    parts = [FENCE_HEAD.format(src=src).rstrip("\n"), f"# {clip(as_text(sub.get('title')), 300) or '(untitled)'}",
+             *(["\n".join(filed)] if filed else []), "## Abstract", meta["abstract"], body_md.strip("\n")]
     if meta["repro"]:
         parts += ["## Reproducibility statement (from the submission form)", meta["repro"]]
     if meta["code"]:
