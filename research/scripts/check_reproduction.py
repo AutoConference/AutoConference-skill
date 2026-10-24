@@ -89,6 +89,7 @@ checker could not run) -- for a person, not a rewrite.
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import json
 import math
@@ -1764,10 +1765,13 @@ def entry_fingerprint(runs: str, exp: dict) -> str:
     return h.hexdigest()
 
 
-def shared_fingerprint(work: str, own_scripts: set) -> str:
-    """Every other file the clean copy carries, so a repair that changed one --
-    a module two scripts import, a cache -- runs every entry again."""
-    h = hashlib.sha256()
+# What shared_fingerprint counts, as of 0.26.1: hidden folders no longer. A
+# state written before says nothing comparable (shared_v).
+SHARED_V = 2
+
+
+def shared_files(work: str, own_scripts: set):
+    """(relative path, absolute path) of every file shared_fingerprint counts."""
     for dirpath, dirnames, filenames in os.walk(work):
         top = os.path.abspath(dirpath) == os.path.abspath(work)
         # Nor a hidden folder: tool state -- a job wrapper's scripts and logs
@@ -1790,8 +1794,34 @@ def shared_fingerprint(work: str, own_scripts: set) -> str:
             p = os.path.join(dirpath, fn)
             if os.path.abspath(p) in own_scripts:
                 continue
-            h.update(os.path.join(rel_dir, fn).encode() + b"\0" + file_sha(p).encode() + b"\n")
+            yield os.path.join(rel_dir, fn), p
+
+
+def shared_fingerprint(work: str, own_scripts: set) -> str:
+    """Every other file the clean copy carries, so a repair that changed one --
+    a module two scripts import, a cache -- runs every entry again."""
+    h = hashlib.sha256()
+    for rel, p in shared_files(work, own_scripts):
+        h.update(rel.encode() + b"\0" + file_sha(p).encode() + b"\n")
     return h.hexdigest()
+
+
+def changed_since(work: str, own_scripts: set, when: str) -> bool:
+    """Whether any file shared_fingerprint counts was written after `when`
+    (the earlier run's generated_at): how a state from before SHARED_V is
+    compared, once -- its hash counted hidden folders, which no longer count.
+    Unreadable or missing, it says changed."""
+    try:
+        t = datetime.datetime.strptime(when, "%Y-%m-%dT%H:%M:%S%z").timestamp()
+    except (TypeError, ValueError):
+        return True
+    for _rel, p in shared_files(work, own_scripts):
+        try:
+            if os.path.getmtime(p) > t:
+                return True
+        except OSError:
+            return True
+    return False
 
 
 def manifest_fingerprint(man: dict) -> str:
@@ -1801,7 +1831,7 @@ def manifest_fingerprint(man: dict) -> str:
 
 def fingerprints(work: str, runs: str, man: dict, exps: list) -> dict:
     own = {os.path.abspath(script_path(runs, e["script"])) for e in exps}
-    return {"manifest": manifest_fingerprint(man), "shared": shared_fingerprint(work, own),
+    return {"manifest": manifest_fingerprint(man), "shared": shared_fingerprint(work, own), "shared_v": SHARED_V,
             "entries": [{"script": e["script"], "output": e["output"], "fingerprint": entry_fingerprint(runs, e)}
                         for e in exps]}
 
@@ -1831,7 +1861,11 @@ def plan_retry(work: str, runs: str, man: dict, exps: list, deps: list, now: dic
     if state.get("manifest") != now["manifest"]:
         return None, removed, "the manifest's env or python changed"
     if state.get("shared") != now["shared"]:
-        return None, removed, "files besides the entries' own scripts changed"
+        # A state from before SHARED_V hashed hidden folders too: what it
+        # counts is compared by time instead, once.
+        own = {os.path.abspath(script_path(runs, e["script"])) for e in exps}
+        if state.get("shared_v") == SHARED_V or changed_since(work, own, state.get("generated_at") or ""):
+            return None, removed, "files besides the entries' own scripts changed"
     before = {(s.get("script"), s.get("output")): s.get("fingerprint") for s in state.get("entries") or []}
     rerun, keep = set(), {}
     for i, (e, fp) in enumerate(zip(exps, now["entries"])):

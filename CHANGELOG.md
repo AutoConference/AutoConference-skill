@@ -5,6 +5,13 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.26.2 — 2026-10-24 the same, for a step 10 begun before 0.26.1
+
+- A retry compares what changed against the earlier run's record. One made
+  before 0.26.1 counted hidden folders too, so it never matched again and
+  every entry would have run anyway: such a record is compared once by when
+  the files it counts were last written (KIT-067).
+
 ## 0.26.1 — 2026-10-24 a job wrapper's logs do not re-run what passed
 
 - **Step 10 keeps what passed when a repair ran scripts through a job
