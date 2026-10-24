@@ -1054,6 +1054,18 @@ pipeline_steps() {
       python3 "$ROOT/pipeline/resume.py" check "$ws" "$n" >>"$out" 2>&1 || rc=8
       log "paper $cyc: $(tail -1 "$out")"
     fi
+    # KIT-066: its owner's answer to the stop sent the paper back to an
+    # earlier step (run-pipeline.sh exit 6, the step in pipeline.next): the
+    # answer's turn found it needs that step again, or was asked to.
+    if [ "$rc" -eq 6 ]; then
+      local back
+      back=$(tr -dc '0-9' 2>/dev/null < "$ws/pipeline.next" | cut -c1-2)
+      if [ -n "$back" ] && [ "$back" -ge 1 ] && [ "$back" -lt "$n" ]; then
+        log "paper $cyc: its owner's answer sends it back to step $back"
+        python3 "$ROOT/pipeline/resume.py" forget "$ws" "$back" >/dev/null 2>&1
+        rm -f "$out" "$ws"/.retry-*; n=$back; continue
+      fi
+    fi
     # A NO-GO from the feasibility gate (step 3, exit 3) is not a fault to
     # hand to a person: it says the plan does not fit this machine, and why.
     # Twice, the loop goes back to step 1 with the reasons written where step 1
@@ -1209,27 +1221,42 @@ UNTRACE
       {
         printf '\n## %s — the %s paper stopped at pipeline step %s/15 (exit %s)\n\n' \
           "$(date +%Y-%m-%dT%H:%M:%S%z)" "$cyc" "$n" "$rc"
-        # What the step itself says failed comes first, its last lines after
+        # Stopped again after its owner answered: what the answer's turn did
+        # comes first (KIT-066).
+        if [ -s "$ws/refine-logs/OWNER_ANSWER_REPLY.md" ]; then
+          printf '**What it did with your last answer:**\n\n'
+          head -c 1500 "$ws/refine-logs/OWNER_ANSWER_REPLY.md"
+          printf '\n\n'
+        fi
+        # What the step itself says failed comes next, its last lines after
         # (a tester's report, 2026-10-06: the last lines were timing drifts,
         # and the two crashes that stopped the paper were above them).
         local said=25
         if [ -s "$ws/refine-logs/STOP-step-$n.md" ]; then
           cat "$ws/refine-logs/STOP-step-$n.md"
-          printf '\nIts last lines:\n\n'
           said=12
         fi
+        # What its owner can answer, before the last lines: the website shows
+        # a note's first 4000 characters (a user's, 2026-10-24: the note said
+        # only how to edit files on the agent's machine).
+        printf '\n**What you can answer:** what to change, or which step to run again. A turn reads your answer first, does what it asks within the rules of step %s, and the paper goes on from this step or the earlier one it names (5 runs the experiments again).\n' "$n"
+        printf '\nIts last lines:\n\n'
         echo '```'
         python3 -c 'import re,sys; sys.stdout.write(re.sub(r"\x1b\[[0-9;]*m", "", sys.stdin.read()))' <"$out" | tail -"$said"
         echo '```'
         echo
-        echo "The lines above say what failed and, for a gate, which earlier step to redo."
-        echo "To resume: write that step's number to work/$cyc/pipeline.next (or leave it"
-        echo "to retry step $n), then delete work/$cyc/PIPELINE_STOPPED."
+        echo "By hand on its machine instead: write a step's number to work/$cyc/pipeline.next"
+        echo "(or leave it to retry step $n), then delete work/$cyc/PIPELINE_STOPPED."
       } >> state/ASK_HUMAN.md
+      [ -f "$ws/refine-logs/OWNER_ANSWER_REPLY.md" ] && \
+        mv "$ws/refine-logs/OWNER_ANSWER_REPLY.md" "$ws/refine-logs/OWNER_ANSWER_REPLY-$(date +%Y%m%dT%H%M%S).md"
       log "paper $cyc: step $n failed (exit $rc); stopped — see state/ASK_HUMAN.md"
       rm -f "$out"; return 1
     fi
     rm -f "$ws/.quota-count" "$ws/.retry-$n" "$ws/refine-logs/RETRY-step-$n.md" "$ws/refine-logs/STOP-step-$n.md"
+    # What an owner's answer's turn did is kept, not shown at a later stop.
+    [ -f "$ws/refine-logs/OWNER_ANSWER_REPLY.md" ] && \
+      mv "$ws/refine-logs/OWNER_ANSWER_REPLY.md" "$ws/refine-logs/OWNER_ANSWER_REPLY-$(date +%Y%m%dT%H%M%S).md"
     unblock_model
     if [ "$n" -eq 15 ]; then
       if grep -q 'submitted: ' "$out"; then

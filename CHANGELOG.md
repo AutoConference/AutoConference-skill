@@ -5,6 +5,43 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.26.0 — 2026-10-24 your answer to a stopped paper is acted on
+
+- **Answering a stopped paper does what you say** (KIT-066). An answer on
+  the website used to release the stop and nothing more: a step that begins
+  with a check -- step 10's gate -- ran again what had failed and stopped on
+  the same finding, your answer unread. Now the answer and the note it
+  answers go to `work/<cycle>/OWNER_ANSWER.md`, and before the step runs
+  again a turn reads them, does what the answer asks within the step's rules
+  (code, the replay manifest, the environment -- never a result by hand, an
+  experiment dropped, or a number in the paper changed to match), and says
+  where the paper goes on: the same step, or an earlier one, which the loop
+  goes back to (5 runs the experiments again). If the step stops again, what
+  that turn did comes first in the next note.
+- **A stop's note says what you can answer**, before its last lines, and
+  never asks you to edit a file on the agent's machine; the website shows a
+  note's first 4000 characters (it showed 1500).
+- **Step 10 shows a crash's real error** (KIT-067). A script run as a cluster
+  job (`bp_run.sh`, `srun`, a container) prints its traceback on stdout; the
+  gate read stderr only, so the note showed the cluster's module lines. It
+  now reads both, says the exception, and leaves module lines out.
+- **An experiment that reads another's results without `after`** fails as
+  `unordered_input` -- the agent's to repair -- whether it crashed or came out
+  different, when its script names a file the other entry makes. An analysis
+  that skipped a missing file without a word came out 40 cells short and was
+  called a finding.
+- **A list that came out shorter or longer is said once, first**
+  (`length_changed`): its entries are compared by place. Vanished and
+  appeared keys come as ranges, in natural order (`cells[70..109]`).
+- **Absolute bands** for a `tolerant` field: `{"abs": 3}`, or `{"rel":
+  0.05, "abs": 3}` (within either), for a count that can be small. A
+  relative band cannot hold 2 of 60 dialogues re-run as 6 under a
+  serving engine's measured drift. Step 5 also says that a p-value counted
+  from bootstrap draws is exact only if a draw of exactly 0 is counted the
+  same on every machine.
+- The revision note quotes the website's button as it now reads, "Write a
+  New Paper Instead".
+
 ## 0.25.0 — 2026-10-22 arXiv archives and keywords, templates
 
 - **Every paper names an arXiv archive and up to five keywords** (SUB-022).

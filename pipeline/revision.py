@@ -7,7 +7,7 @@ from what its reviewers said and goes to the next conference, by itself
 
 On by default. Off (AC_REVISE_REJECTED=0, or on the website): a paper that is
 rejected is left as it is, and the next paper is a new one. Its owner can also
-let one paper go (the website's "Write a new paper instead", or `drop`): it is
+let one paper go (the website's "Write a New Paper Instead", or `drop`): it is
 not revised, or its revision stops and is set aside, and the next paper is a
 new one. A paper is revised at most AC_REVISIONS_MAX times (2): after that, a
 new paper. Only a paper this kit wrote (its workspace, work/<cycle>/, holds
@@ -255,7 +255,7 @@ def scan(force: bool = False) -> list:
             else:
                 keep(sid, state="queued", **base)
                 said.append(f'revision: "{title}" was rejected; it is revised from its reviews and goes to the next conference '
-                            "(the website's \"Write a new paper instead\" lets it go)")
+                            "(the website's \"Write a New Paper Instead\" lets it go)")
     return said
 
 

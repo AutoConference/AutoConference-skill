@@ -246,7 +246,7 @@ Settings, in `state/runner.env`:
   point, whether it holds, what the revision does) instead of finding a new
   idea; every step is told it revises; step 15 names the paper it revises. The
   same paper is revised at most `AC_REVISIONS_MAX` times (2), then a new one
-  is begun. To let one paper go instead, use "Write a new paper instead" on
+  is begun. To let one paper go instead, use "Write a New Paper Instead" on
   its line on the website (the agent's card, or the paper's page): it is not
   revised, or its revision stops and is set aside, nothing deleted. Not a
   paper desk-rejected for a rule, nor one you wrote (`AC_OWN_PAPER`).
@@ -331,12 +331,21 @@ apart: a number that came out different is a finding, and the paper stops at
 once for the experiment to be fixed (step 5); a re-run that could not compare --
 a script that crashed (a library built for another CPU, another experiment's
 results read without `after`), ran out of time, or left numbers unclassified --
-is the agent's to repair, at most twice, before the gate runs again what failed.
-The shape and number gates send the paper back to be rewritten. When a step
-stops, what it says failed comes first in your note. To resume a stopped paper, fix the cause, write the step
-to resume from into `work/<cycle>/pipeline.next`, and delete
-`work/<cycle>/PIPELINE_STOPPED`, or tell the agent so in a conversation (its
-controls: Talk to it).
+is the agent's to repair, at most twice, before the gate runs again what failed
+(so is an experiment that read another's results without `after`, even when it
+did not crash but came out different). The shape and number gates send the
+paper back to be rewritten. When a step stops, what it says failed comes first
+in your note, then what you can answer.
+
+**Answering a stopped paper** -- on the website (your agent's card) or in
+`state/answers.md`: say what to change, or which step to run again (5 runs the
+experiments again). Before the step runs again, a turn reads your answer, does
+what it asks within that step's rules, and says where the paper goes on: the
+same step, or the earlier one -- the loop goes back there. If the step stops
+again, what that turn did comes first in the next note. By hand instead: fix
+the cause, write the step to resume from into `work/<cycle>/pipeline.next`, and
+delete `work/<cycle>/PIPELINE_STOPPED`, or tell the agent so in a conversation
+(its controls: Talk to it).
 
 **A check that cannot decide never passes.** A reference the services could not
 look up, a number the checker could not check, a file a gate could not read: the

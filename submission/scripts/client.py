@@ -1448,21 +1448,33 @@ def _age_days(at: str):
 ANSWERED_HERE = re.compile(r"^\W{0,4}answer(ed)?\W{0,4}:", re.I | re.M)
 
 
+# How much of a note the website shows (KIT-066: 1500 cut a stopped step's
+# note before it said what its owner could answer).
+QUESTION_BODY_MAX = 4000
+
+
+def _ask_sections() -> list:
+    """The sections of state/ASK_HUMAN.md, oldest first: (id, at, title, body)."""
+    try:
+        text = open(os.path.join(STATE, "ASK_HUMAN.md"), encoding="utf-8").read()
+    except OSError:
+        return []
+    out = []
+    for m in re.finditer(r"^## (\S+) — (.+?)\n(.*?)(?=^## |\Z)", text, re.M | re.S):
+        at, title, body = m.group(1), m.group(2).strip(), m.group(3).strip()
+        out.append((hashlib.sha256((at + "|" + title).encode("utf-8")).hexdigest()[:16], at, title, body))
+    return out
+
+
 def questions() -> list:
     """Its open questions and notes to its owner: the sections of
     state/ASK_HUMAN.md not yet answered, newest first (KIT-009). A section that
     stopped a paper's step says which, so an answer can let it continue; it is
     open while that step is stopped (the newest such section only), and a note
     for two weeks. One answered here, under the question, is not open."""
-    try:
-        text = open(os.path.join(STATE, "ASK_HUMAN.md"), encoding="utf-8").read()
-    except OSError:
-        return []
     answered = load("answers.json", {})
     found, newest = [], {}
-    for m in re.finditer(r"^## (\S+) — (.+?)\n(.*?)(?=^## |\Z)", text, re.M | re.S):
-        at, title, body = m.group(1), m.group(2).strip(), m.group(3).strip()
-        qid = hashlib.sha256((at + "|" + title).encode("utf-8")).hexdigest()[:16]
+    for qid, at, title, body in _ask_sections():
         if qid in answered or ANSWERED_HERE.search(body):
             continue
         stop = re.search(r"work/([a-z0-9-]+)/PIPELINE_STOPPED", body)
@@ -1480,10 +1492,34 @@ def questions() -> list:
             if age is not None and age > 14:
                 continue
             held = None
-        found.append((held, {"id": qid, "at": at[:40], "title": title[:200], "body": body[:1500],
+        found.append((held, {"id": qid, "at": at[:40], "title": title[:200], "body": body[:QUESTION_BODY_MAX],
                              "resume": bool(held), "cycle": stop.group(1) if stop else None, "own": own}))
     out = [q for i, (held, q) in enumerate(found) if held is None or newest[held] == i]
     return list(reversed(out))[:10]
+
+
+def _owner_answer(cyc: str, stopped: str, qid: str, q: dict, text: str) -> None:
+    """KIT-066: the note that stopped a paper's step and its owner's answer,
+    in work/<cycle>/OWNER_ANSWER.md, for the turn that acts on the answer
+    before the step runs again (run-pipeline.sh). A step that begins with a
+    check -- step 10's gate -- reads nobody's answer, and stopped again on the
+    same finding (a user's, 2026-10-24). A second answer before that turn
+    runs is added under the first."""
+    try:
+        step = open(stopped, encoding="utf-8").read().strip()
+    except OSError:
+        step = ""
+    note = next((body for sid, _at, _title, body in _ask_sections() if sid == qid), q.get("body") or "")
+    path = os.path.join(_kit_dir(), "work", cyc, "OWNER_ANSWER.md")
+    when = time.strftime("%Y-%m-%d %H:%M")
+    if os.path.exists(path):
+        add = f"\n## And then ({when})\n\n{text[:4000]}\n"
+    else:
+        add = (f"# Your owner's answer to the stop at step {step or '?'}/15 ({when})\n\n"
+               f"## What stopped it: {q.get('title') or 'the note'}\n\n{note[:12000]}\n\n"
+               f"## Their answer\n\n{text[:4000]}\n")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(add)
 
 
 def apply_answers(answers: list, since: int) -> list:
@@ -1512,6 +1548,7 @@ def apply_answers(answers: list, since: int) -> list:
         if cyc and re.fullmatch(r"[a-z0-9-]+", cyc):
             stopped = os.path.join(_kit_dir(), "work", cyc, "PIPELINE_STOPPED")
             if os.path.exists(stopped):
+                _owner_answer(cyc, stopped, qid, q, text)
                 os.remove(stopped)
         if q.get("own"):
             stopped = os.path.join(STATE, "own-paper", "STOPPED")

@@ -466,6 +466,73 @@ TXT
 
 say "workspace $W   (paper=${PAPER:-none} backend=$("$ROOT/pipeline/agent-turn.sh" --which 2>/dev/null || echo none) kind=${KIND:-undecided} pilot=${AC_PILOT:-0})"
 
+# ── an owner's answer to a stop (KIT-066) ───────────────────────────────────
+# The paper stopped at this step and its owner answered, on the website or in
+# state/answers.md: client.py wrote the note and the answer to
+# OWNER_ANSWER.md and let the step go. A step that begins with a check reads
+# nobody's answer: step 10's gate ran again what had failed and stopped on
+# the same finding, the answer unread (a user's, 2026-10-24). So a turn reads
+# the answer first, does what it asks within the step's rules, and says where
+# the paper goes on: this step again, or an earlier one -- the loop goes back
+# on exit 6, to the step written in pipeline.next.
+owner_answer_prompt() {
+  local s=$1 how=""
+  [ "$s" = 10 ] && how="
+How step 10's gate runs an entry: alone, in no set order, in a fresh copy of
+this workspace that has no runs/results/ -- nor data/, figures/ or any virtual
+environment -- from the script's own folder, with the manifest's \"python\" or
+$GATE_PY ($GATE_ARCH). An entry that reads what another makes names it in
+\"after\" (by script or output): it then runs after it and is given everything
+its re-run wrote. A \`tolerant\` band is a number (relative: 0.05 is 5%) or
+{\"abs\": 3} or {\"rel\": 0.05, \"abs\": 3} (within either), for a count that can be
+small. runs/REPRO_GATE.json has every detail of the last run.
+"
+  cat <<PROMPT
+Your paper stopped at step $s of 15, and your owner answered. What stopped it
+-- the note they answered -- and their answer (work/$(basename "$W")/OWNER_ANSWER.md):
+
+$(head -c 14000 "$W/OWNER_ANSWER.md")
+
+Do what the answer asks, within this step's rules, before the step runs again:
+- Change what it points to: the experiment's code, runs/REPLAY_MANIFEST.json,
+  the environment, a script's plumbing. Write each change, and the answer it
+  follows, in refine-logs/DECISIONS.md.
+- A result changes only by running the script that makes it -- never by editing
+  a file under runs/results/ -- and then whatever reads it runs again too. Never
+  take an experiment out of the manifest to get past a check, and never change
+  a number in the paper to match. A field's class or band changes only as the
+  answer allows, set from run-to-run differences you measured, the same for
+  every entry of its kind, with the measurement named in DECISIONS.md.
+- Then say where the paper goes on: write one step's number to
+  $W/answer-next -- $s to run this step again, or an earlier one if the answer
+  asks for it or what you changed needs it (an experiment's own code changed: 5;
+  only an analysis or the manifest: $s). Never a later step.
+- If the answer asks for what these rules forbid, or for what you cannot do,
+  do not do it, and say so.
+$how
+Then write what you did and why -- a few lines, for a person -- to
+refine-logs/OWNER_ANSWER_REPLY.md: if the paper stops again, your owner reads it
+first.
+PROMPT
+}
+if [ -n "$STEP" ] && [ -s "$W/OWNER_ANSWER.md" ]; then
+  rm -f "$W/answer-next" "$W/refine-logs/OWNER_ANSWER_REPLY.md"
+  skill "${STEP}a/15 your owner's answer (ours)" "$(owner_answer_prompt "$STEP")" 3600 || {
+    echo "research: the turn reading your owner's answer failed (above); the answer is kept for the next try." >&2
+    exit 1; }
+  if [ -z "$DRY" ]; then
+    mkdir -p "$W/refine-logs"
+    mv "$W/OWNER_ANSWER.md" "$W/refine-logs/OWNER_ANSWER-$(date +%Y%m%dT%H%M%S).md"
+    back=$(tr -dc '0-9' 2>/dev/null < "$W/answer-next" | cut -c1-2)
+    rm -f "$W/answer-next"
+    if [ -n "$back" ] && [ "$back" -ge 1 ] && [ "$back" -lt "$STEP" ]; then
+      echo "$back" > "$W/pipeline.next"
+      echo "research: your owner's answer sends the paper back to step $back" >&2
+      exit 6
+    fi
+  fi
+fi
+
 # ── 1 ─ ARIS: paper -> ideas -> plan ─────────────────────────────────────────
 # `ref paper` is ARIS's own parameter for "use this paper as context, do not
 # reproduce it". effort raised from lite to balanced and assurance pinned to
@@ -701,7 +768,14 @@ peer review exists to catch."
     GPU_LIST=${AC_GPUS:-0}; case "$GPU_LIST" in none|NONE) GPU_LIST="" ;; esac
     S5_ENV="\"CUDA_VISIBLE_DEVICES\": \"$GPU_LIST\", \"HF_HOME\": \"$HFH\""
     S5_TAIL="Greedy decoding on fixed instance seeds reproduces here, so accuracy-like
-fields belong in \`exact\`; wall-clock time and throughput go in \`timing\`."
+fields belong in \`exact\`; wall-clock time and throughput go in \`timing\`. If
+your engine does not reproduce run to run (a batching server such as vLLM, a
+sampling simulator), run a slice twice, measure the drift, and give the fields
+computed from model outputs a \`tolerant\` band from it: relative (0.05 is 5%),
+or {\"abs\": 3} for a count that can be small, or both -- {\"rel\": 0.05,
+\"abs\": 3}, within either. A p-value or interval counted from bootstrap draws
+is exact only if a draw of exactly 0 is counted the same on every machine:
+compare with a small tolerance, not bare <= 0."
   else
     if [ "$KIND" = theory ]; then
       S5_HEAD="This study's contribution is its derivations. The experiments are the numerical
@@ -738,7 +812,9 @@ partial run reported as a complete one is the thing peer review exists to catch.
 \`exact\` (a float is compared to floating-point precision, so a process pool
 summing in another order is fine). A result that really varies from run to run
 -- a nondeterministic GPU kernel, thread timing -- goes in \`tolerant\` with the
-band you saw across two runs; wall-clock time and throughput go in \`timing\`."
+band you saw across two runs: relative (0.05 is 5%), or {\"abs\": 3} for a count
+that can be small, or both -- {\"rel\": 0.05, \"abs\": 3}, within either;
+wall-clock time and throughput go in \`timing\`."
   fi
   # How the paper is made is reviewed too (KIT-043, owner 2026-10-07; Luo,
   # Kasirzadeh and Shah, PNAS 2026): the kit attaches runs/ and refine-logs/,
@@ -1041,7 +1117,7 @@ if want 10; then
       0) ;;
       1) # A finding, or what only a person decides: as the summary says it.
          why=$(head -1 "$W/refine-logs/REPRO_FAILURES.md" | sed -e 's/^\*\*The reproducibility gate (step 10): //' -e 's/\*\*$//')
-         case "$why" in *"step 5"*) why="$why To run the experiment again, write 5 to $W/pipeline.next." ;; esac
+         case "$why" in *"step 5"*) why="$why To run the experiments again, answer so: the paper goes back to step 5. Or say what to change -- a script, the manifest, a band you measured -- and this step runs again." ;; esac
          break ;;
       *) why="the gate stopped without a report it could say (above)."; break ;;
     esac

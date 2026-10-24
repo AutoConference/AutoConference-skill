@@ -989,6 +989,46 @@ def replay_aggregation(work: str, runs: str, man: dict, python_cmd: list) -> dic
     return entry
 
 
+def natural(key: str) -> list:
+    """A sort key that puts cells[70] before cells[100]."""
+    return [(0, int(t), "") if t.isdigit() else (1, 0, t) for t in re.split(r"(\d+)", key)]
+
+
+def list_lengths(obj, prefix="") -> dict:
+    """Every list in a nested structure, by the dotted path flatten() gives
+    it, with its length."""
+    out = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            out.update(list_lengths(v, f"{prefix}.{k}" if prefix else str(k)))
+    elif isinstance(obj, list):
+        out[prefix] = len(obj)
+        for i, v in enumerate(obj):
+            out.update(list_lengths(v, f"{prefix}[{i}]"))
+    return out
+
+
+def key_ranges(keys: list) -> str:
+    """Keys as a person reads them: the entries of one list as a range --
+    "cells[70..109] (40 entries)" -- the rest as they are, the first few."""
+    groups, rest = {}, []
+    for k in keys:
+        m = re.match(r"^(.*?)\[(\d+)\]", k)
+        if m:
+            groups.setdefault(m.group(1), set()).add(int(m.group(2)))
+        elif k not in rest:
+            rest.append(k)
+    said = []
+    for name, idx in groups.items():
+        lo, hi = min(idx), max(idx)
+        said.append(f"{name}[{lo}..{hi}] ({len(idx)} entries)" if hi > lo else f"{name}[{lo}]")
+    return ", ".join(said + rest[:5])
+
+
+# How many of the files an entry's re-run wrote its report names.
+MADE_MAX = 200
+
+
 def flatten(obj, prefix=""):
     """Every leaf number in a nested structure, keyed by dotted path."""
     out = {}
@@ -1033,6 +1073,50 @@ def classify(key: str, exact: list, tolerant: dict, timing: list = ()):
         if leaf == name or key == name:
             return ("timing", None) if TIMING_NAME.search(leaf) else ("tolerant", tol)
     return "unclassified", None
+
+
+def band_of(tol) -> tuple:
+    """A `tolerant` band as (relative, absolute), either None: a number is a
+    relative band, as it always was; {"rel": r, "abs": a} names either or
+    both -- an absolute one for a count that can be small (a user's,
+    2026-10-24: 2 dialogues fully right of 60 re-ran as 6, and no relative
+    band fits a count of 1 to 3 that a nondeterministic engine moves by a
+    few). None when it is neither."""
+    if isinstance(tol, bool):
+        return None
+    if isinstance(tol, NUM):
+        return (float(tol), None) if tol >= 0 else None
+    if isinstance(tol, dict) and tol and set(tol) <= {"rel", "abs"}:
+        rel, ab = tol.get("rel"), tol.get("abs")
+        for x in (rel, ab):
+            if x is not None and (isinstance(x, bool) or not isinstance(x, NUM) or x < 0):
+                return None
+        return (None if rel is None else float(rel), None if ab is None else float(ab))
+    return None
+
+
+def within_band(a, b, tol) -> bool:
+    """`b` within the band of `a`: within either bound the band names."""
+    band = band_of(tol)
+    if band is None:
+        return False
+    rel, ab = band
+    diff = abs(b - a)
+    if ab is not None and diff <= ab:
+        return True
+    if rel is not None and diff / (abs(a) if a else 1.0) <= rel:
+        return True
+    return False
+
+
+def band_words(tol) -> str:
+    """A band as a person reads it: "1.1 relative", "±3", "±3 or 1.1 relative"."""
+    band = band_of(tol)
+    if band is None:
+        return str(tol)
+    rel, ab = band
+    parts = ([f"±{ab:g}"] if ab is not None else []) + ([f"{rel:g} relative"] if rel is not None else [])
+    return " or ".join(parts)
 
 
 def same_number(a, b) -> tuple:
@@ -1087,12 +1171,17 @@ LOAD_ERROR = re.compile(
     r"DLL load failed|dlopen\(", re.I)
 NO_MODULE = re.compile(r"ModuleNotFoundError: No module named '([^']+)'")
 NO_FILE = re.compile(r"No such file or directory: '([^']+)'")
+# An exception's last line ("FileNotFoundError: [Errno 2] ...", "KeyError:
+# 'x'", "AssertionError"), and what a cluster's environment modules print on
+# every login, which is never why a script stopped.
+EXCEPTION_LINE = re.compile(r"^(?:[A-Za-z_][\w]*\.)*[A-Za-z_]\w*(?:Error|Exception|Interrupt|Exit)\b")
+MODULE_NOISE = re.compile(r"^\s*(?:Loading|Unloading|Loading requirement:|The following have been reloaded)\b")
 
 # What a failure is. A `mismatch` is a finding about the experiment; the rest
 # kept the gate from comparing at all, and the agent can repair them.
 REPAIRABLE = {"crashed", "timeout", "no_output", "no_recorded_output", "blocked",
               "unclassified", "manifest", "output_too_large", "no_aggregation", "unmade",
-              "undeclared_input", "evidence_changed", "aggregate_mismatch"}
+              "undeclared_input", "evidence_changed", "aggregate_mismatch", "unordered_input"}
 FAILURE_WORDS = {
     "crashed": "crashed before it finished",
     "timeout": "ran out of its time",
@@ -1110,6 +1199,7 @@ FAILURE_WORDS = {
     "undeclared_input": "aggregates from a file no experiment declares",
     "evidence_changed": "reads evidence that changed after it was verified",
     "aggregate_mismatch": "writes aggregates different from the ones under runs/",
+    "unordered_input": "reads what another entry makes without running after it",
 }
 
 
@@ -1126,16 +1216,40 @@ def runs_relative(path: str) -> str:
     return p
 
 
+def said_lines(text: str) -> list:
+    """What a stream says, without what a cluster's shell prints on every
+    login: Lmod's module lines ("Loading gcc/15.2.0", "  Loading requirement:
+    mpfr/4.0.1 ...") say nothing about a script."""
+    return [ln.strip() for ln in (text or "").splitlines() if ln.strip() and not MODULE_NOISE.match(ln)]
+
+
+def last_said(stderr: str, stdout: str) -> str:
+    """The line that says why it stopped: an exception's last line, from
+    either stream (a wrapper that runs the script as a cluster job prints the
+    job's own output on stdout -- a user's, 2026-10-24: the note showed only
+    the cluster's module lines, the FileNotFoundError being on stdout); else
+    the last thing it said on stderr, else on stdout."""
+    for text in (stderr, stdout):
+        hits = [ln for ln in said_lines(text) if EXCEPTION_LINE.match(ln)]
+        if hits:
+            return hits[-1][:300]
+    for text in (stderr, stdout):
+        lines = said_lines(text)
+        if lines:
+            return lines[-1][:300]
+    return ""
+
+
 def diagnose(stderr: str, outputs: dict, own: str, python_cmd: list,
-             after: set | None = None, sources: dict | None = None) -> dict:
-    """Why a script crashed, from what it printed: a cause, the line that
-    says it, and what would fix it. `outputs` maps every entry's output to its
-    script, so reading another entry's results is named as such; `sources`
-    (script -> its text) finds the entry that writes a file it does not
-    declare; `after`, the scripts this entry already runs after."""
-    tail = (stderr or "")[-8000:]
-    lines = [ln.strip() for ln in tail.splitlines() if ln.strip()]
-    last = lines[-1][:300] if lines else ""
+             after: set | None = None, sources: dict | None = None, stdout: str = "") -> dict:
+    """Why a script crashed, from what it printed -- on stderr, and on stdout,
+    where a wrapper running it elsewhere puts the job's own output: a cause,
+    the line that says it, and what would fix it. `outputs` maps every entry's
+    output to its script, so reading another entry's results is named as
+    such; `sources` (script -> its text) finds the entry that writes a file it
+    does not declare; `after`, the scripts this entry already runs after."""
+    tail = (stderr or "")[-8000:] + "\n" + (stdout or "")[-8000:]
+    last = last_said(stderr, stdout)
     interp = " ".join(python_cmd)
     machine = platform.machine() or "this machine's"
     if ARCH_ERROR.search(tail):
@@ -1197,6 +1311,62 @@ def diagnose(stderr: str, outputs: dict, own: str, python_cmd: list,
     return {"cause": "crashed", "last": last,
             "hint": (f"run it as the gate does -- in a clean copy, from its folder, with {interp} -- and fix "
                      f"why it fails, without changing what it computes.")}
+
+
+def names_path(text: str, p: str) -> bool:
+    """`text` (a script) names the file `p` (relative to runs/): as a path
+    with a folder in it, or, at the top of runs/, as a whole quoted name."""
+    if not p:
+        return False
+    if "/" in p:
+        return p in text
+    return f'"{p}"' in text or f"'{p}'" in text
+
+
+def unordered(entry: dict, i: int, exps: list, deps: list, sources: dict, made_paths: dict) -> dict:
+    """A failed entry whose script names a file another entry makes -- its
+    declared output, or a file its re-run wrote -- and that does not run after
+    it, fails as that: unordered_input, the agent's to repair, never a
+    finding. Its copy had no such file (results/ is left out), so whatever it
+    did may be only that. (A user's, 2026-10-24: three analyses read what
+    analyze.py writes without running after it. One crashed on the missing
+    file, one on the None its loader left when it skipped the file without a
+    word, and one came out 40 cells short, which the gate called a finding.)"""
+    if entry.get("verdict") == "PASS" or entry.get("failure") not in ("mismatch", "crashed", "no_output"):
+        return entry
+    # A crash already said for what it is keeps that.
+    if entry.get("failure") == "crashed" and entry.get("cause") not in ("crashed", "missing_file", "reads_recorded_results"):
+        return entry
+    text = sources.get(exps[i]["script"]) or ""
+    if not text:
+        return entry
+    ahead = closure(deps[i], deps)
+    own = set(entry.get("made") or []) | {exps[i]["output"]}
+    found = []
+    for j, e in enumerate(exps):
+        # The same script on other arguments is a sibling (one slice of a
+        # sweep each), not what this one reads.
+        if j == i or j in ahead or e["script"] == exps[i]["script"]:
+            continue
+        for p in [e["output"]] + list(made_paths.get(j) or []):
+            if p not in own and names_path(text, p):
+                found.append((e["script"], p))
+                break
+    if not found:
+        return entry
+    makers = list(dict.fromkeys(s for s, _ in found))
+    files = ", ".join(p for _, p in found[:3])
+    did = {"mismatch": "came out as", "crashed": "crashed on", "no_output": "wrote"}.get(entry["failure"], "did")
+    return {**entry, "failure": "unordered_input", "was": entry["failure"], "reads": makers[0],
+            "reads_all": makers, "reads_files": [p for _, p in found],
+            "why": f"it names {files}, which {' and '.join(makers)} make{'s' if len(makers) == 1 else ''}, "
+                   f"and does not run after {'it' if len(makers) == 1 else 'them'}",
+            "hint": (f"name {'it' if len(makers) == 1 else 'them'} in its manifest entry -- \"after\": "
+                     f"[{', '.join(json.dumps(m) for m in makers)}] -- so it runs after {' and '.join(makers)} and "
+                     f"reads what {'it' if len(makers) == 1 else 'they'} re-made. Its copy had no {found[0][1]}, so "
+                     f"what it {did} may be only that; if it still differs once it runs after "
+                     f"{'it' if len(makers) == 1 else 'them'}, the difference is a finding. A script that reads a "
+                     f"file only when it is there should stop when it is not.")}
 
 
 def copy_workspace(work: str, tmp: str) -> None:
@@ -1325,7 +1495,9 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, feeds: list | Non
                     place(src, os.path.join(tmp, os.path.relpath(src, made_dir)), link=False)
         if os.path.exists(stale):
             os.remove(stale)
-        before = snapshot(tmp) if keep else {}
+        # What it writes, every time: an entry that reads it without running
+        # after it is told so (unordered_input), and a reader is given it.
+        before = snapshot(tmp)
 
         script_abs = script_path(os.path.join(tmp, "runs"), script)
         cmd = list(python_cmd) + [script_abs] + [str(x) for x in exp.get("args", [])]
@@ -1335,12 +1507,18 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, feeds: list | Non
                               capture_output=True, text=True,
                               timeout=exp.get("timeout_s", 3600))
         dt = time.time() - t0
+        after_run = snapshot(tmp)
+        made = sorted((rel for rel, st in after_run.items() if before.get(rel) != st), key=natural)
+        base["made"] = [runs_relative(m) for m in made[:MADE_MAX]]
+        if len(made) > MADE_MAX:
+            base["made_more"] = len(made) - MADE_MAX
         if proc.returncode != 0:
-            d = diagnose(proc.stderr, outputs or {}, out_rel, python_cmd, after, sources)
+            d = diagnose(proc.stderr, outputs or {}, out_rel, python_cmd, after, sources, proc.stdout)
             entry = {**base, "verdict": "FAIL", "failure": "crashed",
                      "why": f"exit {proc.returncode}" + (f": {d['last']}" if d["last"] else ""),
                      "cause": d["cause"], "hint": d["hint"],
-                     "stderr_tail": (proc.stderr or "")[-1200:]}
+                     "stderr_tail": (proc.stderr or "")[-1200:],
+                     "stdout_tail": (proc.stdout or "")[-1200:]}
             if d.get("reads"):
                 entry["reads"] = d["reads"]
             return entry, None
@@ -1355,9 +1533,8 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, feeds: list | Non
             fresh = json.load(f)
         if keep:
             kept = os.path.join(keep, hashlib.sha256(f"{script}\0{out_rel}".encode()).hexdigest()[:16])
-            for rel, st in snapshot(tmp).items():
-                if before.get(rel) != st:
-                    place(os.path.join(tmp, rel), os.path.join(kept, rel), link=True)
+            for rel in made:
+                place(os.path.join(tmp, rel), os.path.join(kept, rel), link=True)
     except subprocess.TimeoutExpired:
         return {**base, "verdict": "FAIL", "failure": "timeout",
                 "why": f"timed out after {exp.get('timeout_s', 3600)}s",
@@ -1379,12 +1556,21 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, feeds: list | Non
     problems, checked = [], {"exact": 0, "tolerant": 0, "timing": 0}
     measured, float_noise = [], 0
 
-    missing = sorted(set(old) - set(new))
-    added = sorted(set(new) - set(old))
+    # A list that came out longer or shorter, said first and once: its
+    # entries are compared by place, so everything after the first one gained
+    # or lost compares unlike with unlike (a user's, 2026-10-24: 110 cells
+    # re-made as 70 read as "cells[68] changed, cells[100] vanished").
+    old_len, new_len = list_lengths(recorded), list_lengths(fresh)
+    for k in sorted(set(old_len) & set(new_len), key=natural):
+        if old_len[k] != new_len[k]:
+            problems.append({"kind": "length_changed", "key": k or "(the output)",
+                             "recorded": old_len[k], "rerun": new_len[k]})
+    missing = sorted(set(old) - set(new), key=natural)
+    added = sorted(set(new) - set(old), key=natural)
     if missing:
-        problems.append({"kind": "vanished", "keys": missing[:20]})
+        problems.append({"kind": "vanished", "keys": missing[:20], "count": len(missing), "ranges": key_ranges(missing)})
     if added:
-        problems.append({"kind": "appeared", "keys": added[:20]})
+        problems.append({"kind": "appeared", "keys": added[:20], "count": len(added), "ranges": key_ranges(added)})
 
     for k in sorted(set(old) & set(new)):
         kind, tol = classify(k, exact, tolerant, timing)
@@ -1406,10 +1592,10 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, feeds: list | Non
             checked["tolerant"] += 1
             denom = abs(a) if a else 1.0
             drift = abs(b - a) / denom
-            if drift > tol:
+            if not within_band(a, b, tol):
                 problems.append({"kind": "outside_tolerance", "key": k,
                                  "recorded": a, "rerun": b,
-                                 "drift": round(drift, 4), "allowed": tol})
+                                 "drift": round(drift, 4), "moved": round(abs(b - a), 6), "allowed": tol})
         else:
             problems.append({"kind": "unclassified", "key": k, "value": a})
 
@@ -1461,6 +1647,12 @@ def check_entries(exps: list) -> None:
         if not isinstance(a, list) or not all(isinstance(x, str) and x for x in a):
             raise ManifestError(f"{e['script']}: \"after\" is a list of the entries whose output it reads, "
                                 f"each named by its script or its output.")
+        tol = e.get("tolerant", {})
+        bad = [k for k, v in tol.items() if band_of(v) is None] if isinstance(tol, dict) else ["(not an object)"]
+        if bad:
+            raise ManifestError(f"{e['script']}: \"tolerant\" maps a field to its band -- a number (relative: "
+                                f"0.05 is 5%) or {{\"abs\": 3}}, {{\"rel\": 0.05, \"abs\": 3}} (within either); "
+                                f"not {', '.join(bad[:3])}.")
 
 
 def dependencies(exps: list) -> list:
@@ -1667,17 +1859,31 @@ def failures_of(experiments: list) -> list:
             continue
         kind = e.get("failure") or ("unsupported_claim" if e.get("script") == "(paper)" else "mismatch")
         f = {"script": e.get("script"), "failure": kind}
-        for k in ("why", "cause", "hint", "reads", "stderr_tail"):
+        for k in ("why", "cause", "hint", "reads", "reads_all", "was", "stderr_tail", "stdout_tail"):
             if e.get(k):
                 f[k] = e[k]
-        if kind in ("mismatch", "unclassified"):
-            f["problems"] = (e.get("problems") or [])[:4]
+        if kind in ("mismatch", "unclassified", "unordered_input"):
+            # A list that changed length first: it is why the rest moved.
+            probs = e.get("problems") or []
+            f["problems"] = ([p for p in probs if p.get("kind") == "length_changed"][:2]
+                             + [p for p in probs if p.get("kind") != "length_changed"])[:4]
         elif kind == "unsupported_claim":
             # Only the values: the step-14 go-back reads every unsupported_claim
             # in the report, and a second copy here would list each twice.
             f["values"] = [p.get("value") for p in (e.get("problems") or [])[:10]]
         out.append(f)
     return out
+
+
+def crash_tail(f: dict, n: int = 8) -> list:
+    """The last lines of a crash a person should see: from the stream that
+    holds the exception -- stdout, when a wrapper ran the script as a job and
+    printed the job's output -- without a cluster's module lines."""
+    for k in ("stderr_tail", "stdout_tail"):
+        lines = said_lines(f.get(k) or "")
+        if any(EXCEPTION_LINE.match(ln) for ln in lines):
+            return lines[-n:]
+    return said_lines(f.get("stderr_tail") or "")[-6:] or said_lines(f.get("stdout_tail") or "")[-6:]
 
 
 def summarize(result: dict, markdown: bool) -> tuple:
@@ -1712,20 +1918,31 @@ def summarize(result: dict, markdown: bool) -> tuple:
         what = FAILURE_WORDS.get(f["failure"], f["failure"])
         why = f": {f['why']}" if f.get("why") else ""
         if markdown:
-            lines.append(f"- `{f['script']}` {what}{why}")
+            line = f"- `{f['script']}` {what}{why}"
             if f.get("hint"):
-                lines.append(f"  {f['hint']}")
+                # Its own line where the note is read as markdown (the
+                # website), not run into the sentence above it.
+                if not line.rstrip().endswith((".", "!", "?")):
+                    line += "."
+                lines += [line + "  ", f"  {f['hint'][:1].upper()}{f['hint'][1:]}"]
+            else:
+                lines.append(line)
             for p in f.get("problems") or []:
-                if p.get("kind") == "exact_mismatch":
+                if p.get("kind") == "length_changed":
+                    lines.append(f"  - `{p['key']}` has {p['rerun']} entries, recorded {p['recorded']}: "
+                                 f"its entries are compared by place, so the ones after it compare unlike with unlike")
+                elif p.get("kind") == "exact_mismatch":
                     lines.append(f"  - `{p['key']}`: recorded {p['recorded']}, re-run {p['rerun']}")
                 elif p.get("kind") == "outside_tolerance":
+                    moved = p.get("moved", p["drift"])
                     lines.append(f"  - `{p['key']}`: recorded {p['recorded']}, re-run {p['rerun']} "
-                                 f"(moved {p['drift']}, allowed {p['allowed']})")
+                                 f"(moved {moved}, allowed {band_words(p['allowed'])})")
                 elif p.get("kind") == "unclassified":
                     lines.append(f"  - `{p['key']}` ({p.get('value')}) is in none of exact, tolerant, timing")
                 elif p.get("kind") in ("vanished", "appeared"):
-                    lines.append(f"  - {p['kind']}: {', '.join(p.get('keys', [])[:5])}")
-            tail = [ln for ln in (f.get("stderr_tail") or "").splitlines() if ln.strip()][-6:]
+                    lines.append(f"  - {p['kind']}: {p.get('ranges') or ', '.join(p.get('keys', [])[:5])}"
+                                 + (f" -- {p['count']} numbers" if p.get("count") else ""))
+            tail = crash_tail(f)
             if tail:
                 lines += ["  ```"] + [f"  {ln}" for ln in tail] + ["  ```"]
         else:
@@ -1897,6 +2114,10 @@ def main() -> None:
         readers = set().union(*(closure(deps[i], deps) for i in wanted)) if wanted else set()
         scratch = tempfile.mkdtemp(prefix="reprogate-keep-")
         made, entries = {}, {}
+        # What each entry's re-run wrote, this run's or, for one kept, the
+        # run's it is kept from: an entry naming one of them without running
+        # after its maker fails as that (unordered_input).
+        made_paths = {j: list(e.get("made") or []) for j, e in keep.items()}
         try:
             for i in order:
                 if i not in wanted:
@@ -1929,10 +2150,15 @@ def main() -> None:
                     entry["first_attempt"] = {"verdict": first["verdict"], "problems": first["problems"]}
                 if kept:
                     made[i] = kept
+                made_paths[i] = list(entry.get("made") or [])
                 entries[i] = entry
                 allok &= entry["verdict"] == "PASS"
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
+        # Once every entry has run, whatever the order: a failed one that names
+        # what another made, and does not run after it, fails as that.
+        for i in list(entries):
+            entries[i] = unordered(entries[i], i, exps, deps, sources, made_paths)
         for i, e in keep.items():
             entries[i] = {**e, "kept": True, "kept_from": e.get("kept_from") or kept_from}
             allok &= e.get("verdict") == "PASS"
