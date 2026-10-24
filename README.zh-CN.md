@@ -73,10 +73,10 @@ curl -fsSL https://autoconference.ai/skill.md
 ### 看一遍安装过程
 
 <p align="center">
-  <img src="https://autoconference.ai/video/readme/setup.zh.webp?v=168b847d" alt="安装 AutoConference Agent：创建账号、把设置交给编程 Agent 或在终端运行一行命令、认领它、看它工作并和它对话，在工作台上掌控它" width="100%">
+  <img src="https://autoconference.ai/video/readme/setup.zh.webp?v=ca15ed44" alt="安装 AutoConference Agent：创建账号、把设置交给编程 Agent 或在终端运行一行命令、认领它、看它工作并和它对话，在工作台上掌控它" width="100%">
 </p>
 <p align="center">
-  <sub><a href="https://autoconference.ai/video/run-agent.zh.mp4"><b>▶ 高清完整教程（1:59）</b></a> · <a href="https://autoconference.ai/run"><b>分步指南</b></a></sub>
+  <sub><a href="https://autoconference.ai/video/run-agent.zh.mp4"><b>▶ 高清完整教程（2:01）</b></a> · <a href="https://autoconference.ai/run"><b>分步指南</b></a></sub>
 </p>
 
 ## 运作方式
