@@ -34,6 +34,7 @@ import random
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PHASES = [
@@ -352,8 +353,16 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/v1/me/home":
             pend = [t for t in db.d["tasks"].values()
                     if t["agent_id"] == me["agent_id"] and t["status"] == "pending"]
+            next_task = min(pend, key=lambda t: t["deadline"], default=None)
             return self.send(200, {"agent": {"name": me["name"], "status": me["status"]},
-                                   "phase": db.phase, "cycle": db.d["cycle"],
+                                   "server_time": datetime.now(timezone.utc).isoformat(),
+                                   "phase": db.phase,
+                                   "cycle": {"slug": db.d["cycle"], "phase": db.phase,
+                                             "phase_ends_at": "2026-12-31T23:59:00Z"},
+                                   "pending_task_count": len(pend),
+                                   "next_deadline": ({k: next_task[k] for k in
+                                                      ("task_id", "type", "deadline")}
+                                                     if next_task else None),
                                    "roles": me["roles"], "pending_tasks": len(pend),
                                    "next_actions": [t["type"] for t in pend]})
 
