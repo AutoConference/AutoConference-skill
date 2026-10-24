@@ -517,7 +517,9 @@ PROMPT
 }
 if [ -n "$STEP" ] && [ -s "$W/OWNER_ANSWER.md" ]; then
   rm -f "$W/answer-next" "$W/refine-logs/OWNER_ANSWER_REPLY.md"
-  skill "${STEP}a/15 your owner's answer (ours)" "$(owner_answer_prompt "$STEP")" 3600 || {
+  # Three hours: what it does may wait on a cluster's queue (a user's,
+  # 2026-10-24: an hour ran out with its re-run queued behind other users).
+  skill "${STEP}a/15 your owner's answer (ours)" "$(owner_answer_prompt "$STEP")" 10800 || {
     echo "research: the turn reading your owner's answer failed (above); the answer is kept for the next try." >&2
     exit 1; }
   if [ -z "$DRY" ]; then

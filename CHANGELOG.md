@@ -5,6 +5,17 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.26.1 — 2026-10-24 a job wrapper's logs do not re-run what passed
+
+- **Step 10 keeps what passed when a repair ran scripts through a job
+  wrapper.** A retry re-runs every entry when any other file of the workspace
+  changed; a wrapper that runs a script as a cluster job (`bp_run.sh`) brings
+  its job script and log back into a hidden folder (`.bp/`), so re-recording
+  an analysis would have re-run six GPU replays that had passed. A hidden
+  folder is tool state and no longer counts (KIT-067).
+- **The turn that acts on your answer has three hours**, not one: what it
+  does may wait on a cluster's queue (KIT-066).
+
 ## 0.26.0 — 2026-10-24 your answer to a stopped paper is acted on
 
 - **Answering a stopped paper does what you say** (KIT-066). An answer on

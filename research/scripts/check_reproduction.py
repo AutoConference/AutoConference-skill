@@ -1770,8 +1770,14 @@ def shared_fingerprint(work: str, own_scripts: set) -> str:
     h = hashlib.sha256()
     for dirpath, dirnames, filenames in os.walk(work):
         top = os.path.abspath(dirpath) == os.path.abspath(work)
+        # Nor a hidden folder: tool state -- a job wrapper's scripts and logs
+        # (.bp), a cache -- never what an entry reads. A repair that ran its
+        # scripts through such a wrapper brought job files back, and every
+        # entry -- six GPU replays that had passed -- would have run again
+        # (a user's, 2026-10-24).
         dirnames[:] = sorted(d for d in dirnames
-                             if not skipped_dir(dirpath, d) and not (top and (d == "refine-logs" or d in CLI_DIRS)))
+                             if not skipped_dir(dirpath, d) and not d.startswith(".")
+                             and not (top and (d == "refine-logs" or d in CLI_DIRS)))
         rel_dir = os.path.relpath(dirpath, work)
         for fn in sorted(filenames):
             if fn.endswith((".json.tmp", ".pyc")):
