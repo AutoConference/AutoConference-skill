@@ -1025,8 +1025,9 @@ pipeline_steps() {
     esac
     out=$(mktemp); start=$(date -u +%Y-%m-%dT%H:%M:%SZ); t0=$(date +%s)
     : > "$ws/.step-prompts"          # run-pipeline.sh appends what it asks the model
-    # A step that stops says why here (step 10 does): only this run's counts.
-    rm -f "$ws/refine-logs/STOP-step-$n.md"
+    # A step that stops says why here (step 10 does): only this run's counts,
+    # as do the files a turn of it waits for (KIT-068).
+    rm -f "$ws/refine-logs/STOP-step-$n.md" "$ws/WAITING_FOR"
     log "paper $cyc: pipeline step $n/15"
     # Each turn of the step takes the CLI, model and effort as they are now
     # (KIT-060: agent-turn.sh), and moves onto a change at its next pause;
@@ -1236,6 +1237,12 @@ UNTRACE
           cat "$ws/refine-logs/STOP-step-$n.md"
           said=12
         fi
+        # A turn of it left a job queued and named what it will produce
+        # (KIT-068): the paper goes on by itself once that has arrived.
+        if [ -n "$(waited_files "$ws")" ]; then
+          printf '\n**It goes on by itself** once these have arrived, which a job it started produces: %s. Answer only to change something; if they never come, the paper is set aside after %s hours.\n' \
+            "$(waited_files "$ws" | paste -sd ',' - | sed 's/,/, /g')" "$(waiting_hours)"
+        fi
         # What its owner can answer, before the last lines: the website shows
         # a note's first 4000 characters (a user's, 2026-10-24: the note said
         # only how to edit files on the agent's machine).
@@ -1351,7 +1358,7 @@ write_paper() {
     log "paper $cyc: a pipeline step from an earlier loop is still running; waiting"; return
   fi
   if [ -f "$ws/PIPELINE_STOPPED" ]; then
-    log "paper $cyc: stopped at step $(cat "$ws/PIPELINE_STOPPED"); waiting on state/ASK_HUMAN.md"; return
+    stopped_paper "$ws" "$cyc" && return
   fi
   if [ -f "$ws/QUOTA_WAIT" ]; then
     local until_at
@@ -1861,6 +1868,74 @@ revision_work() {
   done
 }
 
+# ── A step that waits for a job (KIT-068) ──────────────────────────────────
+#
+# A turn may end while a job it submitted to a cluster's queue has not run:
+# it names the files the job will produce in WAITING_FOR, in the paper's
+# folder, one path a line, with `pid <id>` for the process that brings them
+# back (run-pipeline.sh, turn_note). The step's check then stops the paper as
+# any stop does, and its owner may answer as ever; but once every file has
+# arrived -- there, not empty, written after WAITING_FOR and then left alone
+# for five minutes -- a wake lets the step run again by itself, once: the
+# next stop needs a new WAITING_FOR. A user's paper, 2026-10-25: its
+# calibration job finished two hours after the step stopped, and the paper
+# waited for a person until it was set aside, two days later.
+waited_files() {
+  local ws=$1 line
+  [ -s "$ws/WAITING_FOR" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}; line=${line%%#*}
+    line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    # Paths in the folder only, never the pid line.
+    case "$line" in ''|pid|pid\ *|/*|*..*) continue ;; esac
+    printf '%s\n' "$line"
+  done < "$ws/WAITING_FOR"
+}
+waited_arrived() {
+  local ws=$1 f n=0 since now
+  [ -s "$ws/WAITING_FOR" ] || return 1
+  since=$(mtime "$ws/WAITING_FOR"); now=$(date +%s)
+  while IFS= read -r f; do
+    n=$((n + 1))
+    [ -s "$ws/$f" ] || return 1
+    [ "$(mtime "$ws/$f")" -gt "$since" ] || return 1
+    [ "$(mtime "$ws/$f")" -le $((now - 300)) ] || return 1
+  done < <(waited_files "$ws")
+  [ "$n" -gt 0 ]
+}
+# The process that brings them back, if WAITING_FOR names one, still runs.
+waited_alive() {
+  local pid
+  pid=$(sed -n 's/^[[:space:]]*pid[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p' "$1/WAITING_FOR" 2>/dev/null | head -1)
+  [ -z "$pid" ] || kill -0 "$pid" 2>/dev/null
+}
+waiting_hours() {
+  local h=${AC_WAITING_MAX_HOURS:-168}
+  case "$h" in ''|*[!0-9]*) h=168 ;; esac
+  echo "$h"
+}
+# A stopped paper at a wake: still stopped (0), or let go by the files it
+# waited for (1), said in state/ASK_HUMAN.md -- the website then drops the
+# stop's question, its PIPELINE_STOPPED gone.
+stopped_paper() {
+  local ws=$1 cyc=$2 step files
+  step=$(cat "$ws/PIPELINE_STOPPED" 2>/dev/null)
+  files=$(waited_files "$ws" | paste -sd ',' - | sed 's/,/, /g')
+  if waited_arrived "$ws"; then
+    rm -f "$ws/PIPELINE_STOPPED" "$ws/WAITING_FOR"
+    printf '\n## %s — the %s paper went on by itself\n\nWhat step %s waited for has arrived (%s), so the step runs again. Nothing is needed from you.\n' \
+      "$(date +%Y-%m-%dT%H:%M:%S%z)" "$cyc" "$step" "$files" >> state/ASK_HUMAN.md
+    log "paper $cyc: what step $step waited for has arrived ($files); it runs again"
+    return 1
+  fi
+  if [ -n "$files" ] && waited_alive "$ws"; then
+    log "paper $cyc: stopped at step $step; it goes on by itself once $files arrive, or on an answer in state/ASK_HUMAN.md"
+  else
+    log "paper $cyc: stopped at step $step; waiting on state/ASK_HUMAN.md"
+  fi
+  return 0
+}
+
 # ── A stopped paper does not stop the agent (KIT-054) ──────────────────────
 #
 # Owner, 2026-10-10 (the words above): with nobody to answer, the agent goes
@@ -1899,12 +1974,21 @@ set_aside_stopped() {
   for f in work/*/PIPELINE_STOPPED; do
     [ -f "$f" ] || continue
     ws=${f%/PIPELINE_STOPPED}; cyc=${ws#work/}
+    # Waiting for a job's files (KIT-068): once they are here it goes on by
+    # itself, and while what brings them back still runs it waits longer.
+    local limit=$hours knob=AC_STOPPED_WAIT_HOURS
+    if [ -n "$(waited_files "$ws")" ]; then
+      waited_arrived "$ws" && continue
+      if waited_alive "$ws" && [ "$(waiting_hours)" -gt "$hours" ]; then
+        limit=$(waiting_hours); knob=AC_WAITING_MAX_HOURS
+      fi
+    fi
     age=$(( $(date +%s) - $(mtime "$f") ))
-    [ "$age" -ge $((hours * 3600)) ] || continue
+    [ "$age" -ge $((limit * 3600)) ] || continue
     # Its lesson needs the model; without it, the paper waits a little longer.
     model_blocked >/dev/null && return 0
     step=$(tr -dc '0-9' < "$f"); step=${step:-?}
-    log "paper $cyc: stopped at step $step/15 for $((age / 3600)) hours with no answer; setting it aside (AC_STOPPED_WAIT_HOURS=$hours)"
+    log "paper $cyc: stopped at step $step/15 for $((age / 3600)) hours with no answer; setting it aside ($knob=$limit)"
     local p=${SET_ASIDE_PROMPT//CYCLE/$cyc}
     p=${p//STEP/$step}
     wake "${p//HOURS/$((age / 3600))}" set-aside

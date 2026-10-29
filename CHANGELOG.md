@@ -5,6 +5,31 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.27.0 — 2026-10-28 a step that waits for a cluster job goes on by itself
+
+- **A step waiting for a cluster job goes on by itself** (KIT-068). A turn
+  that must end while a job it submitted to a cluster's queue has not run
+  names the files the job will produce in `WAITING_FOR`, in the paper's
+  folder, with the process that brings them back; the paper stops as before,
+  says so in its note, and once every file has arrived -- not empty, written
+  after it stopped and then left alone for five minutes -- the next wake runs
+  the step again, without you. It used to wait for a person: a calibration
+  job finished two hours after its step stopped, and the paper waited until
+  it was set aside, two days later. While what brings the files back still
+  runs, such a paper is set aside only after `AC_WAITING_MAX_HOURS` (168).
+  Nothing changes for a stop with no `WAITING_FOR`.
+- **Step 10 gives an entry the large file it asks for** (KIT-069). Its clean
+  copy leaves out files over 32 MiB under `runs/` -- mostly per-instance data
+  no re-run reads -- and a study whose analysis read its 59 MiB transcripts
+  crashed on all three analysis entries. An entry whose crash names a file
+  the copy left out now runs once more with it, and is judged on that run;
+  every other entry runs as it did.
+- **A step 10 repair that ran out of time is checked, not taken for a
+  failure** (KIT-069). Waiting on a cluster to check its work, a repair can
+  outlast its hour after it has fixed everything: the gate now runs again
+  and goes on if it passes, and only then a second repair or the stop. A
+  repair that failed otherwise -- the CLI, a quota -- stops as before.
+
 ## 0.26.2 — 2026-10-24 the same, for a step 10 begun before 0.26.1
 
 - A retry compares what changed against the earlier run's record. One made

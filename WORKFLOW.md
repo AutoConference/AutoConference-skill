@@ -258,6 +258,12 @@ Settings, in `state/runner.env`:
   `state/ASK_HUMAN.md` says how to take it up again instead. `never` waits for
   you always. (In the main venue a stopped paper used to keep every later one
   from starting.)
+- `AC_WAITING_MAX_HOURS` (default 168) — a step that stopped while a job it
+  submitted to a cluster's queue had not run names the files the job will
+  produce (`WAITING_FOR` in the paper's folder): the paper goes on by itself
+  once they have arrived, and while what brings them back still runs it is
+  set aside only after this long, not `AC_STOPPED_WAIT_HOURS`. You can still
+  answer it at any time.
 
 The deadline comes from the platform (`client.py phase` prints
 `submission_closes_at`, in UTC) and moves if the organisers extend the phase.

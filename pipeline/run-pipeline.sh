@@ -314,7 +314,7 @@ step_timeout() {
 # paper, with the job still running unobserved (a live test, 2026-09-29: step
 # 4's calibration). Said once, in front of every step.
 turn_note() {
-  printf '=== THIS TURN ===\nThis step is one turn of a coding agent run from a script. When you finish, nothing re-invokes you: no wake-ups, no notifications, no later check-in. Run what the step needs to completion inside this turn -- a long job in the foreground, or started and then waited for until it ends. Never end the turn while a process you started is still running, and never schedule a wake-up: the next step starts the moment you stop, and it checks this step'"'"'s outputs. Other agents may be running on this machine: stop only processes you started, by their process id -- never pkill or killall by name or pattern -- and keep logs and temporary files in this directory, not in /tmp.\nNobody answers questions during this turn. Where a skill says to ask the user or wait for a confirmation, decide as a careful researcher would, from the plan, these files and your owner'"'"'s instructions below; write the decision and why in refine-logs/DECISIONS.md and go on. Stop only for what this machine cannot do or a rule you cannot keep, and then say exactly what is needed.\n=== END THIS TURN ===\n\n'
+  printf '=== THIS TURN ===\nThis step is one turn of a coding agent run from a script. When you finish, nothing re-invokes you: no wake-ups, no notifications, no later check-in. Run what the step needs to completion inside this turn -- a long job in the foreground, or started and then waited for until it ends. Never end the turn while a process you started is still running, and never schedule a wake-up: the next step starts the moment you stop, and it checks this step'"'"'s outputs. Other agents may be running on this machine: stop only processes you started, by their process id -- never pkill or killall by name or pattern -- and keep logs and temporary files in this directory, not in /tmp.\nNobody answers questions during this turn. Where a skill says to ask the user or wait for a confirmation, decide as a careful researcher would, from the plan, these files and your owner'"'"'s instructions below; write the decision and why in refine-logs/DECISIONS.md and go on. Stop only for what this machine cannot do or a rule you cannot keep, and then say exactly what is needed.\nOne exception to waiting: a job you submitted to a cluster'"'"'s queue that cannot start, or finish, within this turn. Leave it queued, and the process that brings its results back running; write the files it will produce, one path a line relative to this directory, to WAITING_FOR in this directory, with a line `pid <id>` for the process that brings them back; and say so. The step stops, and runs again by itself once those files have arrived. Never write WAITING_FOR for anything else.\n=== END THIS TURN ===\n\n'
 }
 # A step trying again after it failed (run-heartbeat.sh) is told what went
 # wrong the last time, ahead of everything else.
@@ -1133,8 +1133,19 @@ if want 10; then
         >> "$W/refine-logs/REPRO_REPAIR_HISTORY.md"
       rm -f "$W/refine-logs/REPRO_REPAIR.md"
     fi
-    skill "10r/15 reproduction repair (ours), $repairs of 2" "$(repro_repair_prompt)" 3600 || {
-      why="the turn repairing the gate failed (above)."; break; }
+    # A repair turn that ran out of its time may have repaired all the same --
+    # waiting on a cluster's queue to check its work, say: the gate, which
+    # never takes a repair's word, runs again and says (a user's paper,
+    # 2026-10-28: its repair was done and checked on the cluster, and the paper
+    # stopped for a day on the turn's timeout). Any other failure stops, as it
+    # did.
+    repair_rc=0
+    skill "10r/15 reproduction repair (ours), $repairs of 2" "$(repro_repair_prompt)" 3600 || repair_rc=$?
+    if [ "$repair_rc" -eq 124 ]; then
+      say "10r/15 the repair turn ran out of its time; the gate runs again to see what it fixed"
+    elif [ "$repair_rc" -ne 0 ]; then
+      why="the turn repairing the gate failed (above)."; break
+    fi
     if head -1 "$W/refine-logs/REPRO_REPAIR.md" 2>/dev/null | grep -q '^NOT REPAIRABLE'; then
       why="the agent found nothing it may fix: $(head -1 "$W/refine-logs/REPRO_REPAIR.md" | cut -c1-300)"
       break

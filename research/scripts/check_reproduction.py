@@ -1370,8 +1370,12 @@ def unordered(entry: dict, i: int, exps: list, deps: list, sources: dict, made_p
                      f"file only when it is there should stop when it is not.")}
 
 
-def copy_workspace(work: str, tmp: str) -> None:
+def copy_workspace(work: str, tmp: str, include: frozenset = frozenset()) -> list:
+    """The workspace copied into `tmp` for a re-run, as SKIP and skipped_dir
+    say. Returns the large files under runs/ it left out (workspace-relative):
+    `include` names those to copy anyway."""
     runs_dir = os.path.join(work, "runs")
+    left_out = []
     for dirpath, dirnames, filenames in os.walk(work):
         dirnames[:] = [d for d in dirnames if not skipped_dir(dirpath, d)]
         rel = os.path.relpath(dirpath, work)
@@ -1381,19 +1385,42 @@ def copy_workspace(work: str, tmp: str) -> None:
         for fn in filenames:
             if fn.endswith(".json.tmp") or fn.endswith(".pyc"):
                 continue
-            # A large recorded file under runs/ (per-instance data) never feeds
-            # a re-run -- runs/results/ is left out for the same reason -- and
+            # A large file under runs/ is mostly per-instance data no re-run
+            # reads -- runs/results/ is left out for the same reason -- and
             # copying it for every entry is what made a big study's gate crawl.
+            # But one can be an entry's input (a study's transcripts, which its
+            # analysis reads): run_one copies those an entry asks for.
             if in_runs and not fn.endswith(CODE_EXT):
+                where = os.path.normpath(os.path.join(rel, fn))
                 try:
-                    if os.path.getsize(os.path.join(dirpath, fn)) > EVIDENCE_FILE_MAX:
-                        continue
+                    big = os.path.getsize(os.path.join(dirpath, fn)) > EVIDENCE_FILE_MAX
                 except OSError:
+                    continue
+                if big and where not in include:
+                    left_out.append(where)
                     continue
             try:
                 shutil.copy2(os.path.join(dirpath, fn), os.path.join(dst, fn))
             except OSError:
                 pass
+    return sorted(left_out)
+
+
+def asked_for(left_out: list, said: str) -> list:
+    """The large files a clean copy left out (copy_workspace) that a crash's
+    output names -- by its path in the workspace, under runs/, or its name:
+    the entry reads them. A user's study, 2026-10-28: its analysis read 59 MiB
+    transcripts the copy did not have, and all three of its entries crashed on
+    them."""
+    def names(s: str) -> bool:
+        # The whole name, not a part of another ("big.npy" is not "big.npy.bak").
+        return re.search(r"(?<![\w.-])" + re.escape(s) + r"(?![\w-]|\.\w)", said) is not None
+    named = []
+    for where in left_out:
+        under_runs = where[len("runs/"):] if where.startswith("runs/") else where
+        if names(where) or names(under_runs) or names(os.path.basename(where)):
+            named.append(where)
+    return named
 
 
 def snapshot(root: str) -> dict:
@@ -1479,10 +1506,15 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, feeds: list | Non
     # __file__. Recorded results are dropped so a script that quietly reads its
     # own previous output fails here rather than in review.
     work = os.path.dirname(os.path.abspath(runs))
-    tmp = tempfile.mkdtemp(prefix="reprogate-")
     kept = None
-    try:
-        copy_workspace(work, tmp)
+    tmps = []
+
+    def attempt(include: frozenset) -> tuple:
+        """One run of the entry in a fresh clean copy: (copy, process, seconds,
+        what it made, the large files the copy left out)."""
+        tmp = tempfile.mkdtemp(prefix="reprogate-")
+        tmps.append(tmp)
+        left_out = copy_workspace(work, tmp, include)
         # the output must be produced by the re-run, not inherited from it
         stale = os.path.join(tmp, "runs", out_rel)
         if os.path.exists(stale):
@@ -1510,6 +1542,17 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, feeds: list | Non
         dt = time.time() - t0
         after_run = snapshot(tmp)
         made = sorted((rel for rel, st in after_run.items() if before.get(rel) != st), key=natural)
+        return tmp, proc, dt, made, left_out
+
+    try:
+        tmp, proc, dt, made, left_out = attempt(frozenset())
+        # It crashed asking for a large file the copy left out: it reads it,
+        # so it runs once more with those files, and is judged on that run.
+        # Nothing else changes: an entry that did not ask runs as it always did.
+        asked = asked_for(left_out, (proc.stderr or "") + "\n" + (proc.stdout or "")) if proc.returncode != 0 else []
+        if asked:
+            base["given_large"] = [runs_relative(a) for a in asked]
+            tmp, proc, dt, made, _ = attempt(frozenset(asked))
         base["made"] = [runs_relative(m) for m in made[:MADE_MAX]]
         if len(made) > MADE_MAX:
             base["made_more"] = len(made) - MADE_MAX
@@ -1546,7 +1589,8 @@ def run_one(runs: str, exp: dict, env: dict, python_cmd: list, feeds: list | Non
                 "why": f"the re-run's {out_rel} is not JSON ({e})",
                 "hint": "a script writes its output as one JSON document."}, None
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        for t in tmps:
+            shutil.rmtree(t, ignore_errors=True)
 
     old, new = flatten(recorded), flatten(fresh)
     exact = exp.get("exact", [])
