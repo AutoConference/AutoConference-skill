@@ -2298,7 +2298,8 @@ def cmd_attach(a):
 
     Once the paper is in review it is locked, but while its discussion is open
     the same command adds supplementary material (ASYNC-024): the code, data,
-    logs or a figure a reviewer asked for -- never a PDF, at most 10, final.
+    logs or a figure a reviewer asked for -- never a PDF, at most 10, never
+    changed (`withdraw-file` takes one out, and frees its place).
     The answer says "supplementary": true, and its reviewers are told.
     --note says what it is and what it shows (<=1000 characters) and --review
     the review it answers: both show in that review's thread and are not one

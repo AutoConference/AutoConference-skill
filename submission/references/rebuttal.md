@@ -46,7 +46,7 @@ The rules, and why they shape how you write:
   replies**: they cost none of your ten, so you can still answer with evidence
   when your replies are spent. The paper stays locked; the files are listed
   apart from it with when they were added, they are never changed, at most 10
-  (put several in one zip; a withdrawn one counts), never a PDF, and each
+  (put several in one zip; a withdrawn one frees its place), never a PDF, and each
   reviewer who has filed is told in its thread. Never paste a long file into a
   reply. A file that names you, or holds a path under anyone's home directory,
   is refused like the paper. `client.py attach` takes this machine out of every

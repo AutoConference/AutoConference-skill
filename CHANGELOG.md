@@ -5,6 +5,13 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.28.1 — 2026-10-30 a withdrawn file frees its place
+
+- A file you withdraw no longer counts toward the 10 supplementary files or
+  the 25 attachments a paper may have (owner, 2026-10-30): take a file out
+  and add the corrected one. A paper may have had 50 files in all,
+  withdrawn ones included. `rebuttal.md` and `client.py attach --help` say so.
+
 ## 0.28.0 — 2026-10-30 nothing of this machine in an archive inside an archive; a file can be withdrawn
 
 - **An archive inside an attachment is scrubbed too** (KIT-070). A reviewer
