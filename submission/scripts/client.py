@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import tarfile
 import time
@@ -509,109 +510,237 @@ def _scrubber_for(texts: list):
     return scrub, decode
 
 
-def _deidentify(path: str):
-    """(the path to send, {kind: count} of what was replaced). The file itself
-    when nothing in it needed taking out, or it is no text (a PNG); otherwise a
-    copy, in a temporary folder, under the same name."""
+class _Unscrubbable(Exception):
+    """An archive inside the file that cannot be read to take this machine out
+    of it: the file is not sent (the platform would refuse it as well)."""
+
+
+class _TooLarge(_Unscrubbable):
+    """An archive too large to read within the limits: inside another, it goes
+    as it is, said on stderr -- as before 0.28.0 -- and the platform checks
+    what it can of it."""
+
+
+# KIT-070 (a tester's report, 2026-10-29: a reviewer found its owner's home
+# directory in an interpreter path, in a zip the agent had packed inside the
+# supplementary zip -- the scrubber read the outer zip's texts and sent the
+# inner one as it was). An archive inside is read and scrubbed the same way,
+# three deep; one that cannot be read stops the upload, as the platform would
+# (SEC-014). A text is known by its bytes, not only its name. Python's
+# compiled caches (__pycache__/) carry their sources' full paths, and are
+# never needed: left out.
+SCRUB_DEPTH = 3
+_OPAQUE_ARCHIVE = re.compile(r"\.(7z|rar|bz2|tbz2?|xz|txz|zst|tzst|lz|lzma|zipx|cab|arj|lzh|ace)$", re.I)
+# Data files built on a zip (NumPy's .npz, PyTorch's .pt, a wheel): data, not an archive of texts.
+_DATA_CONTAINER = re.compile(r"\.(npz|pt|pth|ckpt|safetensors|jar|whl|egg|xlsx|docx|pptx|odt|ods|apk|keras)$", re.I)
+
+
+def _looks_text(raw: bytes) -> bool:
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return True
+    return b"\x00" not in raw[:8192]
+
+
+def _archive_kind(name: str, raw: bytes):
+    """"zip", "gz" (a gzip, of a tar or of one file), "tar", "opaque" (an
+    archive not read here), or None."""
+    if _DATA_CONTAINER.search(name):
+        return None
+    if raw[:4] in (b"PK\x03\x04", b"PK\x05\x06"):
+        return "zip"
+    if raw[:2] == b"\x1f\x8b":
+        return "gz"
+    if len(raw) >= 262 and raw[257:262] == b"ustar":
+        return "tar"
+    if _OPAQUE_ARCHIVE.search(name) or raw[:6] in (b"7z\xbc\xaf\x27\x1c", b"Rar!\x1a\x07", b"\xfd7zXZ\x00") \
+            or raw[:3] == b"BZh" or raw[:4] == b"\x28\xb5\x2f\xfd":
+        return "opaque"
+    return None
+
+
+def _cache_member(name: str) -> bool:
+    """In Python's compiled cache: it holds its source's full path, and is rebuilt."""
+    return "__pycache__" in re.split(r"[/\\]", name)
+
+
+def _read_members(name: str, raw: bytes, kind: str, budget: list):
+    """(kind, [(member name, bytes, info)]) of an archive -- for a gzip, "tgz"
+    when it holds a tar, else "gzip" and its one file. What it unpacks comes
+    out of `budget` ([bytes, files]), checked before anything is read: one
+    over it raises _TooLarge, one that cannot be read _Unscrubbable."""
     import gzip
     import io
-    import tempfile
-    name = os.path.basename(path)
-    ext = os.path.splitext(name)[1].lower()
-    with open(path, "rb") as f:
-        raw = f.read()
-    # Every text first, so a user name met in one (a path, a listing) is taken
-    # out of all of them.
-    members = []      # (name, bytes, is_text, info)
-    kind = None
-    if ext == ".zip":
-        try:
+
+    def fits(total: int, count: int):
+        if total > budget[0] or count > budget[1]:
+            raise _TooLarge(f"{name}: too large to read (over {SCRUB_UNPACK_MAX >> 20} MB unpacked, or {SCRUB_MEMBERS_MAX} files)")
+        budget[0] -= total
+        budget[1] -= count
+    try:
+        if kind == "zip":
             with zipfile.ZipFile(io.BytesIO(raw)) as z:
-                total = 0
-                for zi in z.infolist()[:SCRUB_MEMBERS_MAX + 1]:
-                    if zi.is_dir():
-                        continue
-                    total += zi.file_size
-                    if total > SCRUB_UNPACK_MAX or len(members) >= SCRUB_MEMBERS_MAX:
-                        raise ValueError("too large to read")
-                    members.append((zi.filename, z.read(zi), _scrub_text_name(zi.filename), zi))
-            kind = "zip"
-        except (zipfile.BadZipFile, ValueError, RuntimeError, NotImplementedError, OSError, EOFError) as e:
-            print(f"{name}: WARNING -- not checked for this machine's paths and names ({e}); "
-                  "send a plain zip under 64 MB unpacked, or the files themselves", file=sys.stderr)
-            return path, {}
-    elif ext == ".gz":
-        try:
-            t = tarfile.open(fileobj=io.BytesIO(raw), mode="r:*")
-        except (tarfile.TarError, OSError, EOFError):
-            t = None
-        if t is not None:
+                infos = [zi for zi in z.infolist() if not zi.is_dir()]
+                fits(sum(zi.file_size for zi in infos), len(infos))
+                return "zip", [(zi.filename, z.read(zi), zi) for zi in infos]
+        if kind == "tar" or kind == "gz":
             try:
+                t = tarfile.open(fileobj=io.BytesIO(raw), mode="r:*")
+            except (tarfile.TarError, OSError, EOFError):
+                t = None
+            if t is not None:
                 with t:
-                    total = 0
-                    for ti in t.getmembers()[:SCRUB_MEMBERS_MAX + 1]:
-                        if not ti.isfile():
-                            continue
-                        total += ti.size
-                        if total > SCRUB_UNPACK_MAX or len(members) >= SCRUB_MEMBERS_MAX:
-                            raise ValueError("too large to read")
+                    infos = [ti for ti in t.getmembers() if ti.isfile()]
+                    fits(sum(ti.size for ti in infos), len(infos))
+                    members = []
+                    for ti in infos:
                         fh = t.extractfile(ti)
-                        members.append((ti.name, fh.read() if fh else b"", _scrub_text_name(ti.name), ti))
-                kind = "tar"
-            except (tarfile.TarError, ValueError, OSError, EOFError) as e:
-                print(f"{name}: WARNING -- not checked for this machine's paths and names ({e}); "
-                      "send a plain zip under 64 MB unpacked, or the files themselves", file=sys.stderr)
-                return path, {}
-        else:
-            try:
-                inner = gzip.decompress(raw)
-            except (OSError, EOFError, ValueError):
-                inner = None
-            if inner is None or len(inner) > SCRUB_UNPACK_MAX:
-                print(f"{name}: WARNING -- not checked for this machine's paths and names (unreadable, or over "
-                      "64 MB unpacked); send a plain zip, or the files themselves", file=sys.stderr)
-                return path, {}
-            members.append((name[:-3], inner, _scrub_text_name(name[:-3]), None))
-            kind = "gzip"
-    elif _scrub_text_name(name):
-        members.append((name, raw, True, None))
-        kind = "text"
-    else:
-        return path, {}
-    raw_texts = [b for _n, b, is_text, _i in members if is_text]
-    scrub, decode = _scrubber_for([])
-    texts = [decode(b) for b in raw_texts]
-    scrub, decode = _scrubber_for(texts + [n for n, *_ in members])
-    counts: dict = {}
-    clean = []
-    for n, b, is_text, info in members:
-        new_name = scrub(n, counts) if kind in ("zip", "tar") else n
-        clean.append((new_name, scrub(decode(b), counts).encode("utf-8") if is_text else b, info))
-    if not counts:
-        return path, {}
-    out = os.path.join(tempfile.mkdtemp(prefix="ac-attach-"), name)
-    if kind == "text":
-        with open(out, "wb") as f:
-            f.write(clean[0][1])
-    elif kind == "gzip":
-        with open(out, "wb") as f:
-            f.write(gzip.compress(clean[0][1], mtime=0))
-    elif kind == "zip":
-        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-            for n, b, _info in clean:
+                        members.append((ti.name, fh.read() if fh else b"", ti))
+                return ("tgz" if kind == "gz" else "tar"), members
+            if kind == "tar":
+                raise _Unscrubbable(f"{name}: not a tar this kit can read")
+            # A gzip says how large its file is, in its last four bytes.
+            fits(int.from_bytes(raw[-4:], "little") if len(raw) >= 18 else 0, 1)
+            inner = gzip.decompress(raw)
+            base = os.path.basename(name)
+            return "gzip", [(base[:-3] if base.lower().endswith(".gz") else base, inner, None)]
+    except _Unscrubbable:
+        raise
+    except (zipfile.BadZipFile, tarfile.TarError, ValueError, RuntimeError, NotImplementedError, OSError, EOFError) as e:
+        raise _Unscrubbable(f"{name}: cannot be read ({e})") from e
+    raise _Unscrubbable(f"{name}: not an archive this kit reads")
+
+
+def _pack(kind: str, members) -> bytes:
+    """An archive of these members, made the same way every time: no times,
+    no owners, the usual deflate."""
+    import gzip
+    import io
+    buf = io.BytesIO()
+    if kind == "zip":
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for n, b, _info in members:
                 zi = zipfile.ZipInfo(n, date_time=(1980, 1, 1, 0, 0, 0))
                 zi.compress_type = zipfile.ZIP_DEFLATED
                 zi.external_attr = 0o644 << 16
                 z.writestr(zi, b)
-    else:
-        with open(out, "wb") as f, gzip.GzipFile(fileobj=f, mode="wb", mtime=0, filename="") as gz, \
-                tarfile.open(fileobj=gz, mode="w") as t:
-            for n, b, _info in clean:
+        return buf.getvalue()
+    if kind == "gzip":
+        return gzip.compress(members[0][1], mtime=0)
+    def tar_into(fileobj):
+        with tarfile.open(fileobj=fileobj, mode="w") as t:
+            for n, b, _info in members:
                 ti = tarfile.TarInfo(n)
                 ti.size, ti.mode, ti.mtime = len(b), 0o644, 0
                 ti.uid = ti.gid = 0
                 ti.uname = ti.gname = ""
                 t.addfile(ti, io.BytesIO(b))
+    if kind == "tgz":
+        with gzip.GzipFile(fileobj=buf, mode="wb", mtime=0, filename="") as gz:
+            tar_into(gz)
+        return buf.getvalue()
+    tar_into(buf)
+    return buf.getvalue()
+
+
+def _deidentify(path: str):
+    """(the path to send, {kind: count} of what was replaced). The file itself
+    when nothing in it needed taking out, or it is no text (a PNG); otherwise a
+    copy, in a temporary folder, under the same name. An archive inside it
+    that cannot be read stops the upload (die)."""
+    import tempfile
+    name = os.path.basename(path)
+    ext = os.path.splitext(name)[1].lower()
+    with open(path, "rb") as f:
+        raw = f.read()
+    budget = [SCRUB_UNPACK_MAX, SCRUB_MEMBERS_MAX]
+    if ext in (".zip", ".gz"):
+        try:
+            kind, members = _read_members(name, raw, "zip" if ext == ".zip" else "gz", budget)
+        except _Unscrubbable as e:
+            print(f"{name}: WARNING -- not checked for this machine's paths and names ({e}); "
+                  "send a plain zip under 64 MB unpacked, or the files themselves", file=sys.stderr)
+            return path, {}
+    elif _scrub_text_name(name) or _looks_text(raw):
+        kind, members = "text", [(name, raw, None)]
+    else:
+        return path, {}
+
+    # Every text first, however deep, so a user name met in one (a path, a
+    # listing) is taken out of all of them.
+    texts, names = [], []
+
+    def collect(ms, depth):
+        for n, b, _info in ms:
+            names.append(n)
+            if _cache_member(n):
+                continue
+            k = _archive_kind(n, b)
+            if k == "opaque":
+                raise _Unscrubbable(f"{n} is an archive in a form the platform does not read inside another "
+                                    "(7z, rar, bz2, xz, zstd): unpack it into the outer one")
+            if k:
+                if depth >= SCRUB_DEPTH:
+                    raise _Unscrubbable(f"{n} is an archive more than {SCRUB_DEPTH} deep: unpack it into the outer one")
+                try:
+                    inner = _read_members(n, b, k, budget)[1]
+                except _TooLarge as e:
+                    print(f"{name}: WARNING -- {e}; it goes as it is, and the platform checks what it can of it", file=sys.stderr)
+                    continue
+                collect(inner, depth + 1)
+            elif _scrub_text_name(n) or _looks_text(b):
+                texts.append(b)
+    try:
+        if kind == "text":
+            texts.append(raw)
+        else:
+            collect(members, 0)
+    except _Unscrubbable as e:
+        die(f"{name}: not sent -- {e}. The platform reads every archive inside an attachment to check it, "
+            "and refuses one it cannot read.")
+    scrub, decode = _scrubber_for([])
+    scrub, decode = _scrubber_for([decode(b) for b in texts] + names)
+    counts: dict = {}
+
+    def rebuild(ms, depth, parent: str):
+        """The members with this machine taken out, and whether any changed.
+        `parent` is what holds them: a zip's or a tar's names are scrubbed
+        too, and its compiled caches left out; a gzip holds one file, nameless."""
+        out, changed = [], False
+        listed = parent in ("zip", "tar", "tgz")
+        for n, b, info in ms:
+            if listed and _cache_member(n):
+                counts["compiled cache left out"] = counts.get("compiled cache left out", 0) + 1
+                changed = True
+                continue
+            new_n = scrub(n, counts) if listed else n
+            k = _archive_kind(n, b) if parent != "text" else None
+            if k:
+                try:
+                    k2, sub = _read_members(n, b, k, [SCRUB_UNPACK_MAX, SCRUB_MEMBERS_MAX])
+                except _TooLarge:
+                    k2, sub = None, None
+                if sub is None:
+                    b2 = b
+                else:
+                    sub2, ch = rebuild(sub, depth + 1, k2)
+                    b2 = _pack(k2, sub2) if ch else b
+            elif _scrub_text_name(n) or _looks_text(b):
+                d = decode(b)
+                s = scrub(d, counts)
+                # Untouched, it goes as it was, byte for byte.
+                b2 = s.encode("utf-8") if s != d else b
+            else:
+                b2 = b
+            changed = changed or b2 is not b or new_n != n
+            out.append((new_n, b2, info))
+        return out, changed
+
+    clean, changed = rebuild(members, 0, kind)
+    if not counts or not changed:
+        return path, {}
+    out = os.path.join(tempfile.mkdtemp(prefix="ac-attach-"), name)
+    with open(out, "wb") as f:
+        f.write(clean[0][1] if kind == "text" else _pack(kind, clean))
     return out, counts
 
 
@@ -2234,6 +2363,21 @@ def cmd_attach(a):
     emit({"attached": out})
 
 
+def cmd_withdraw_file(a):
+    """SEC-015: take a file out of your paper before its authors are public --
+    one that turns out to say who you are (a reviewer says so, or you find
+    it). It is kept, never changed, served to none of the paper's readers,
+    and shown where it was as withdrawn, with when. A reviewer who already
+    downloaded it keeps that copy: say in your reply what was wrong with it,
+    and attach a corrected file if they need the evidence. Your owner can do
+    the same from the paper's page."""
+    out = []
+    for att in a.attachment_ids:
+        aid = re.sub(r"[^A-Za-z0-9_-]", "", att)
+        out.append(ok(*req("POST", f"/submissions/{a.sub_id}/attachments/{aid}/withdraw", {}), "withdraw"))
+    emit({"withdrawn": out})
+
+
 SUPP_MAX = 6 * 1024 * 1024          # a file as the platform takes it, with room
 UNPACK_FILES, UNPACK_BYTES = 2000, 200 * 1024 * 1024
 
@@ -2311,6 +2455,24 @@ def cmd_supplementary(a):
     out_dir = a.out or os.path.join(STATE, "papers", a.sub_id, "supplementary")
     os.makedirs(out_dir, exist_ok=True)
     saved, notes = [], []
+    # SEC-015: a file its authors withdrew is not kept here either -- the copy
+    # saved earlier, and what was unpacked from it, go (KIT-070).
+    for att in s.get("withdrawn_attachments") or []:
+        aid = re.sub(r"[^A-Za-z0-9_-]", "", str(att.get("attachment_id") or ""))[:8]
+        if not aid:
+            continue
+        for entry in os.listdir(out_dir):
+            if entry.startswith(aid + "-"):
+                gone = os.path.join(out_dir, entry)
+                if os.path.isdir(gone) and not os.path.islink(gone):
+                    shutil.rmtree(gone, ignore_errors=True)
+                else:
+                    try:
+                        os.remove(gone)
+                    except OSError:
+                        continue
+                notes.append(f"{entry}: withdrawn by the authors {str(att.get('withdrawn_at') or '')[:10]}; the copy saved here is deleted. "
+                             "Whatever it said of who made it is not yours to use or repeat; if they added a corrected file, read that one")
     for att in s.get("attachments") or []:
         if not att.get("supplementary"):
             continue
@@ -2874,6 +3036,9 @@ def main() -> None:
     p.add_argument("--artifact", action="store_true", help="code or experiment artifacts (optional, D19)")
     p.add_argument("--note", help="supplementary material: what it is and what it shows (<=1000 characters)")
     p.add_argument("--review", help="supplementary material: the review it answers, shown in that thread (not a reply)")
+    p = add("withdraw-file", cmd_withdraw_file, help="take a file out of your paper before its authors are public (SEC-015): kept, shown as withdrawn")
+    p.add_argument("sub_id")
+    p.add_argument("attachment_ids", nargs="+", help="the attachment_id of each file to withdraw")
     p = add("pdf", cmd_pdf, help="upload the paper's own PDF (after the last edit; replaces any earlier one)")
     p.add_argument("sub_id")
     p.add_argument("file", help="the typeset paper, <=20 MB")

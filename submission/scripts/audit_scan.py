@@ -170,6 +170,33 @@ def unpack(path: str) -> None:
         art_notes.append(f"{base}: could not unpack ({clip(str(e), 120)})")
 
 
+def forget_withdrawn(gone, dirs) -> None:
+    """SEC-015: a file its authors withdrew -- taken out because it said who
+    they are, say -- is not kept here: the copy saved earlier, and what was
+    unpacked from it, are deleted, and the scan says so."""
+    import shutil
+    for a in gone:
+        aid = re.sub(r"[^A-Za-z0-9_-]", "", str(a.get("attachment_id") or ""))[:8]
+        if not aid:
+            continue
+        for d in dirs:
+            if not os.path.isdir(d):
+                continue
+            for entry in os.listdir(d):
+                if not entry.startswith(aid + "-"):
+                    continue
+                path = os.path.join(d, entry)
+                if os.path.isdir(path) and not os.path.islink(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        continue
+                art_notes.append(f"{clip(entry, 80)}: withdrawn by its authors; the copy saved earlier is deleted. Whatever it said of "
+                                 "who made it is not yours to use or repeat; if they added a corrected file, read that one")
+
+
 def fetch_attachments(atts, dest: str) -> None:
     """Every attachment that is not an image, saved to `dest` and unpacked.
     The protocol is the client's -- its key, its rate limit, its check that a
@@ -248,7 +275,7 @@ try:
 except ValueError:
     obj = None
 
-meta = {"attachments": [], "pdf": False, "json": False, "abstract": "", "repro": "", "code": None}
+meta = {"attachments": [], "withdrawn": [], "pdf": False, "json": False, "abstract": "", "repro": "", "code": None}
 if isinstance(obj, dict):
     sub = obj["submission"] if isinstance(obj.get("submission"), dict) else obj
 
@@ -262,7 +289,10 @@ if isinstance(obj, dict):
         P("# Audit scan: this JSON has no body_md -- is it what `client.py submission <id>` prints?")
         done()
     atts_in = sub.get("attachments")
+    gone_in = sub.get("withdrawn_attachments")
     meta = {"attachments": [a for a in atts_in if isinstance(a, dict)] if isinstance(atts_in, list) else [],
+            # SEC-015: files its authors took out since; a copy saved here earlier goes (KIT-070).
+            "withdrawn": [a for a in gone_in if isinstance(a, dict)] if isinstance(gone_in, list) else [],
             "pdf": bool(sub.get("pdf")), "json": True,
             "abstract": as_text(sub.get("abstract")), "repro": as_text(sub.get("reproducibility")), "code": None}
     # Where its code and data are, as the authors said it (KIT-044): attached,
@@ -305,6 +335,8 @@ if isinstance(obj, dict):
         except OSError as e:
             P(f"(could not write {md_path}: {e}; line numbers below count the text as assembled)")
             md_path = None
+    if not os.path.isfile(TARGET) and meta["withdrawn"]:
+        forget_withdrawn(meta["withdrawn"], [os.path.join(paper_dir, "artifacts"), os.path.join(paper_dir, "supplementary")])
     if not os.path.isfile(TARGET) and meta["attachments"]:
         ART_DIR = os.path.join(paper_dir, "artifacts")
         fetch_attachments(meta["attachments"], ART_DIR)

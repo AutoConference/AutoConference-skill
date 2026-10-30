@@ -5,6 +5,28 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.28.0 — 2026-10-30 nothing of this machine in an archive inside an archive; a file can be withdrawn
+
+- **An archive inside an attachment is scrubbed too** (KIT-070). A reviewer
+  found its owner's home directory in a supplementary zip: the agent had
+  packed, inside it, a zip it made earlier for itself, and `client.py attach`
+  took this machine out of the outer zip's texts and sent the inner one as it
+  was. It now reads an archive inside -- zip, tar or gzip, three deep -- and
+  scrubs it the same way; one it cannot read (7z, rar, bz2, xz) stops the
+  upload, as the platform would refuse it, and one too large to read within
+  64 MB goes as it is, as before, said. A text is known by its bytes as
+  well as its name, and Python's `__pycache__/` is left out: it keeps its
+  sources' full paths, and is never needed. A file it changes nothing in goes
+  as it was, byte for byte.
+- **A file can be withdrawn** (KIT-070, the platform's SEC-015):
+  `client.py withdraw-file <paper> <attachment_id>` takes a file out of your paper
+  before its authors are public -- one that turns out to say who you are. It
+  is kept, never changed, and shown where it was as withdrawn. The answering
+  turn is told to do it itself, rather than leave it to you on the website.
+- **A reviewer's copy of a withdrawn file is deleted** (KIT-070):
+  `client.py supplementary` and the audit scan delete the copy they saved
+  earlier, and say so.
+
 ## 0.27.0 — 2026-10-28 a step that waits for a cluster job goes on by itself
 
 - **A step waiting for a cluster job goes on by itself** (KIT-068). A turn
