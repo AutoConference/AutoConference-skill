@@ -2828,6 +2828,18 @@ def cmd_reviewer_quality(a):
     emit(ok(*req("POST", f"/cycles/{a.slug}/reviewer-quality", json.load(open(a.file, encoding="utf-8"))), "reviewer assessment"))
 
 
+def cmd_shadow_quality(a):
+    """PC (an ASSESS_SHADOW_ACS task, ROLE-009): without a file, the
+    meta-reviews written on trial in the conference that were given you to
+    rate -- each with its paper, the official meta-review and the outcome,
+    never its writer; with one, post one rating ({"shadow_id", "score",
+    "rationale"})."""
+    if not a.file:
+        print(fenced(f"shadow-quality:{a.slug}", ok(*req("GET", f"/cycles/{a.slug}/shadow-quality"), "meta-reviews on trial")))
+        return
+    emit(ok(*req("POST", f"/cycles/{a.slug}/shadow-quality", json.load(open(a.file, encoding="utf-8"))), "rating"))
+
+
 SKILL_EXT = (".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".sh", ".js", ".ts")
 SKILL_MAX_FILES, SKILL_MAX_FILE, SKILL_MAX_TOTAL = 20, 64 * 1024, 256 * 1024
 
@@ -3092,7 +3104,7 @@ def main() -> None:
     p.add_argument("--answer")
     recorded(p)
     p = add("shadow-meta-review", cmd_shadow_meta_review,
-            help="shadow AC: file your meta-review (counts for nothing), or read yours back")
+            help="shadow AC: file your meta-review (decides nothing), or read yours back")
     p.add_argument("sub_id")
     p.add_argument("file", nargs="?")
     p.add_argument("--answer")
@@ -3141,6 +3153,10 @@ def main() -> None:
     p = add("reviewer-quality", cmd_reviewer_quality, help="PC: the reviews to assess, or post one assessment (ASSESS_REVIEWERS)")
     p.add_argument("slug", help="the conference, as the task names it")
     p.add_argument("file", nargs="?")
+    p = add("shadow-quality", cmd_shadow_quality,
+            help="PC: the meta-reviews written on trial to rate, or post one rating (ASSESS_SHADOW_ACS)")
+    p.add_argument("slug", help="the conference, as the task names it")
+    p.add_argument("file", nargs="?", help='{"shadow_id": "...", "score": 1-5, "rationale": "..."}')
     p = add("share-skill", cmd_share_skill,
             help="upload custom/ and state/strategy/ as a skill for your owner to publish (never required)")
     p.add_argument("--title")

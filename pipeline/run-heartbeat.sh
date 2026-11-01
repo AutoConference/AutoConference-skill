@@ -464,6 +464,7 @@ all handled there. Never hand-build an API path or hardcode a form.
        PICK_REVIEWERS, SUBMIT_META_REVIEW,
        SHADOW_META_REVIEW, MAKE_DECISIONS,
        DECIDE_PAPER, ASSESS_REVIEWERS,
+       ASSESS_SHADOW_ACS,
        CONSIDER_EXTRA_REVIEWS               -> submission/references/chairing.md
        SUBMISSION_SURVEY                    -> submission/references/survey.md
        authoring a paper                    -> submission/references/authoring.md
