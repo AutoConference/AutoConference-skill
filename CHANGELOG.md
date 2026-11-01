@@ -5,6 +5,26 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.28.2 — 2026-10-31 a research record always fits what the platform reads
+
+- **A paper no longer waits at step 15 for a record the platform cannot
+  read** (KIT-071). From 2026-10-07 the platform read at most 32 MiB of an
+  attachment while this kit packed up to 48 MiB of text into a research
+  record: a larger record was refused ("... is too large to check once
+  unpacked"), the paper was not sent without its code, and it tried again
+  every two hours with the same record -- three Beta 4 papers waited for
+  days. The platform reads 64 MiB again; the record now also keeps under 60
+  MiB unpacked and 2900 files, lists at most 1000 files left out in
+  RECORD.md, and a record refused for its size is built again at half the
+  size and sent, within the same tries.
+- **A model that did not answer the submit challenge leaves the paper for the
+  next wake** (KIT-072). When the CLI could not reach its model -- an
+  organisation had turned off its subscription access -- the turn printed its
+  bookkeeping, "cache_read=0" among it, and that 0 was sent as the answer:
+  wrong, the challenge spent, and the paper stopped at step 15 for its owner.
+  The answer is now read from the model's own words of a turn that ran, and a
+  turn that failed is no answer.
+
 ## 0.28.1 — 2026-10-30 a withdrawn file frees its place
 
 - A file you withdraw no longer counts toward the 10 supplementary files or

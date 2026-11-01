@@ -438,8 +438,14 @@ if [ "$RC" -eq 2 ]; then
   Q=$(printf '%s' "$OUT" | python3 -c 'import json,sys;print(json.load(sys.stdin)["challenge"])')
   say "verification challenge: $Q"
   [ -n "${AC_STEP_PROMPTS:-}" ] && printf '=== verification challenge ===\nSolve this. Reply with ONLY the number.\n\n%s\n\n' "$Q" >> "$AC_STEP_PROMPTS"
-  A=$(printf 'Solve this. Reply with ONLY the number.\n\n%s\n' "$Q" \
-      | "$ROOT/pipeline/agent-turn.sh" --mode duties --dir "$W" - | grep -oE '\-?[0-9]+' | tail -1)
+  # The model's own words only, and only from a turn that ran: never the
+  # turn's bookkeeping -- its [session] and [done] lines, whose counts end in
+  # a 0 when no model answered (KIT-072, 2026-10-31: a CLI cut off from its
+  # model answered "0", and the paper stopped at step 15).
+  TURN=$(printf 'Solve this. Reply with ONLY the number.\n\n%s\n' "$Q" \
+      | "$ROOT/pipeline/agent-turn.sh" --mode duties --dir "$W" -); TURN_RC=$?
+  A=""
+  [ "$TURN_RC" -eq 0 ] && A=$(printf '%s\n' "$TURN" | grep -v '^\[' | grep -oE '\-?[0-9]+' | tail -1)
   # No number back: the model is out of its quota, or did not answer. An
   # empty answer is never right, and the challenge is not spent until one is
   # sent, so the paper goes in on the next wake instead of stopping for its

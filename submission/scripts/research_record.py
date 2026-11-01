@@ -58,6 +58,14 @@ STATE = os.environ.get("AC_STATE", os.path.join(ROOT, "state"))
 ZIP_MAX = 4_600_000              # the platform takes 5 MiB an attachment
 FILE_MAX = 2 * 1024 * 1024       # one file, read and scrubbed
 TOTAL_MAX = 48 * 1024 * 1024     # everything, before compression
+# KIT-071: what the platform reads of an attachment to check it -- 3000 files
+# and 64 MiB unpacked (SEC-011) -- with room for RECORD.md. From 2026-10-07 to
+# 10-31 the platform read 32 MiB, refused records of 32-48 MiB, and papers
+# waited at step 15 for days: the record now always fits, and one refused for
+# its size is sent again at half the size.
+FILES_MAX = 2900
+UNPACKED_MAX = 60 * 1024 * 1024
+LEFT_ROWS_MAX = 1000             # RECORD.md lists at most this many files left out
 DIRS = ("runs", "refine-logs")
 TOP = ("STUDY_KIND",)
 SKIP_DIRS = {"__pycache__", ".git", ".cache", "cache", "hf_cache", "huggingface", "wandb", "mlruns", ".ipynb_checkpoints",
@@ -318,10 +326,12 @@ def decode(raw: bytes) -> str:
     return raw.decode("utf-8", "replace")
 
 
-def build(workspace: str, out_zip: str, extra_drops=None, whole=False) -> dict:
+def build(workspace: str, out_zip: str, extra_drops=None, whole=False, total_max=TOTAL_MAX, files_max=FILES_MAX) -> dict:
     """The record, scrubbed and zipped within the platform's size. Returns what
     went in and what did not. `extra_drops`: {entry: {line, ...}} the platform
-    found naming an author, taken out."""
+    found naming an author, taken out. `total_max` and `files_max` bound the
+    text it holds and its files (a record refused for its size is built again
+    with less)."""
     who = identity(workspace)
     counts, left, total = {}, [], 0
     links = []
@@ -358,7 +368,7 @@ def build(workspace: str, out_zip: str, extra_drops=None, whole=False) -> dict:
         if size > FILE_MAX:
             left.append((rel, f"larger than {FILE_MAX >> 20} MiB ({size:,} bytes; sha256 {sha256_file(path)})"))
             continue
-        if total + size > TOTAL_MAX:
+        if total + size > total_max:
             left.append((rel, "over the record's total size"))
             continue
         try:
@@ -394,14 +404,23 @@ def build(workspace: str, out_zip: str, extra_drops=None, whole=False) -> dict:
     # the files kept by priority (code first), the rest listed as left out --
     # never a zip rebuilt file by file (red-team: minutes on a large run).
     budget = ZIP_MAX - 64 * 1024
-    kept, used = [], 0
+    kept, used, unpacked = [], 0, 0
     for rel, data in blobs:
+        # The platform reads 3000 files and 64 MiB of an attachment: RECORD.md
+        # is one of them, and it is given room.
+        if len(kept) >= files_max - 1:
+            left.append((rel, f"left out: the platform reads at most {files_max} files of a record"))
+            continue
+        if unpacked + len(data) > UNPACKED_MAX - 2 * 1024 * 1024:
+            left.append((rel, "left out to fit what the platform reads of a record"))
+            continue
         cost = len(zlib.compress(data, 6)) + 120 + 2 * len(rel.encode("utf-8"))
         if used + cost > budget:
             left.append((rel, "left out to fit the platform's 5 MiB"))
             continue
         kept.append((rel, data))
         used += cost
+        unpacked += len(data)
 
     def entry(rel):
         # A fixed time: the same record is the same zip, so a paper sent again
@@ -443,7 +462,9 @@ def sha256_file(path: str) -> str:
 
 def record_md(items, left, counts, whole=False) -> str:
     rows = "\n".join(f"| `{rel}` | {len(data):,} | {hashlib.sha256(data).hexdigest()[:16]} |" for rel, data in items)
-    out = "\n".join(f"| `{rel}` | {why} |" for rel, why in left) or "| - | - |"
+    out = "\n".join(f"| `{rel}` | {why} |" for rel, why in left[:LEFT_ROWS_MAX]) or "| - | - |"
+    if len(left) > LEFT_ROWS_MAX:
+        out += f"\n| ... | and {len(left) - LEFT_ROWS_MAX:,} more files left out, not listed |"
     rep = ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "nothing"
     what = ("""# Code and data
 
@@ -491,8 +512,9 @@ def attach(sub_id: str, workspace: str, whole=False) -> int:
     fname = "code-and-data.zip" if whole else "research-record.zip"
     out = os.path.join(STATE, "own-paper", ".record", fname) if whole else os.path.join(workspace, ".record", fname)
     drops = {}
+    total_max, files_max = TOTAL_MAX, FILES_MAX
     for attempt in range(4):
-        made = build(workspace, out, drops, whole)
+        made = build(workspace, out, drops, whole, total_max, files_max)
         if made["files"] == 0:
             print(f"code: nothing to attach in {workspace}" if whole else
                   "research record: nothing to attach (no runs/ or refine-logs/ in the workspace)")
@@ -522,6 +544,15 @@ def attach(sub_id: str, workspace: str, whole=False) -> int:
             except ValueError:
                 err = {}
             found = err.get("found") or []
+            # Refused for its size (a platform that reads less than this kit
+            # packs): sent again at half the size, never the same record
+            # again and again (KIT-071).
+            said = str(err.get("message") or "")
+            if e.code == 400 and err.get("code") == "unreadable_attachment" and attempt < 3 and \
+                    re.search(r"too large to check|more than \d+ files|too many to check", said):
+                total_max, files_max = total_max // 2, max(100, files_max // 2)
+                print(f"{what}: the platform could not read all of it ({said[:160]}); sending it again at half the size")
+                continue
             if e.code == 400 and err.get("code") == "identity_in_attachment" and found and attempt < 3:
                 for f in found:
                     drops.setdefault(f.get("entry"), set()).add(int(f.get("line") or 0))
