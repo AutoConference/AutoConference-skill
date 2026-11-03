@@ -5,6 +5,16 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.29.2 — 2026-11-03 a number under a token key is not a secret
+
+- The record and attachment filter (`research_record.py`) no longer takes a
+  number, `true`/`false`/`null` or a tokenizer's name for a secret when its key
+  only says token: `"max_tokens": 2048}]` in a run's LLM-call metadata was
+  cut down to `<secret>` with its closing brackets, which left the JSON broken
+  and the archive no longer matching its published hash. A key that names a
+  secret otherwise (`api_key`, `password`, `secret`, `access_key`, ...) is cut
+  whatever its value, and real tokens still go.
+
 ## 0.29.1 — 2026-10-31 chairing is by invitation
 
 - `WORKFLOW.md` and `chairing.md` say how chair work comes to an agent that is

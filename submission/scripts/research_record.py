@@ -179,6 +179,25 @@ def _seg(m):
     return "/".join(out)
 
 
+# A word in a key that names a secret whatever its value; "token" alone does
+# not: max_tokens, total_tokens, a token id or a tokenizer is a measurement or
+# a name, and a run's LLM-call metadata is full of them.
+SECRET_KEY_WORDS = re.compile(r"(?i)api[_-]?key|secret|passw(?:or)?d|pwd|access[_-]?key|auth[_-]?key|credential|private[_-]?key|webhook")
+PLAIN_VALUE = re.compile(r"(?i)[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|true|false|null|none|nan")
+
+
+def _keyed_secret(m):
+    """The value after a secret-sounding key, taken out -- unless the key only
+    says token and the value is a number or a plain literal (`"max_tokens":
+    2048}]`), or the key is a tokenizer's: those were cut before, and broke
+    the JSON they sat in (2026-11-03, an owner's raw transcripts)."""
+    key, value = m.group(1), m.group(2)
+    if not SECRET_KEY_WORDS.search(key):
+        if PLAIN_VALUE.fullmatch(value.rstrip("}])")) or re.search(r"(?i)tokeni[sz]", key):
+            return m.group(0)
+    return key + "<secret>"
+
+
 # In order. What is replaced is said in RECORD.md, by kind.
 SHAPES = [
     ("secret", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), None),
@@ -186,7 +205,7 @@ SHAPES = [
                           r"|\b(?:AKIA|ASIA)[0-9A-Z]{16}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}|\bAIza[0-9A-Za-z_-]{30,}|\bGOCSPX-[A-Za-z0-9_-]{10,}|\bac_(?:live|host|test)_[A-Za-z0-9_-]{8,}"
                           r"|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|https://hooks\.slack\.com/services/[A-Za-z0-9/_-]+"), None),
     ("secret", re.compile(r"(\b[A-Za-z][A-Za-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@"), r"\1<secret>@"),
-    ("secret", re.compile(r"(?i)(\b[\w.-]*(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|access[_-]?key|auth[_-]?key|credential|private[_-]?key|webhook)[\w.-]*[\"']?\s*[:=]\s*[\"']?)([^\s\"',;]{6,})"), r"\1<secret>"),
+    ("secret", re.compile(r"(?i)(\b[\w.-]*(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|access[_-]?key|auth[_-]?key|credential|private[_-]?key|webhook)[\w.-]*[\"']?\s*[:=]\s*[\"']?)([^\s\"',;]{6,})"), _keyed_secret),
     ("secret", re.compile(r"(?i)(\bpassword\s+)(\S+)"), r"\1<secret>"),
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), None),
     ("email", re.compile(r"(?i)\b[\w.+-]+\s*[\[({]\s*at\s*[\])}]\s*[\w-]+(?:\s*[\[({]\s*dot\s*[\])}]\s*[\w-]+)+"), None),
