@@ -337,6 +337,33 @@ SHAPES = [
 ]
 
 
+def partitions(t) -> set:
+    """Slurm partitions a text names, distinctive ones only: a compound of
+    letters and digits joined by _ or - (gl40s_short), no word, never a lone
+    word -- the platform's own rule (lib/deidentify.ts, partitions)."""
+    out = set()
+
+    def take(lst):
+        for v in (lst or "").split(","):
+            p = v.strip().strip("'\"`").rstrip(".;:)'\"`")
+            if 4 <= len(p) <= 40 and re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+", p) \
+                    and p.lower() not in COMMON and p.lower() not in words():
+                out.add(p)
+    for line in t.split("\n"):
+        if len(line) > 4000:
+            continue
+        # The -p of the scheduler's own command, never one before it on the line.
+        for m in re.finditer(r"(?i)(?:#SBATCH|(?<![\w-])(?:sbatch|srun|salloc|bp_run(?:\.sh)?))(?![\w-])([^;&|\n]{0,400})", line):
+            for f in re.finditer(r"(?:^|\s)(?:-p|--partition)(?:\s{1,4}|=)([\w.,-]{2,200})", m.group(1)):
+                take(f.group(1))
+        for m in re.finditer(r"\b(?:SLURM_JOB_PARTITION|SBATCH_PARTITION)=['\"]?([\w.,-]{2,200})|\bPartition=([\w.,-]{2,200})", line):
+            take(m.group(1) or m.group(2))
+        # "partitions: a,b" or "partitions `a,b`": a list said to be partitions.
+        for m in re.finditer(r"(?i)\bpartitions?\s{0,2}(?:[:=]\s{0,4}[`'\"]?|\s{1,4}[`'\"])([A-Za-z][\w.-]{1,40}(?:\s{0,2},\s{0,2}[A-Za-z][\w.-]{1,40}){0,12})", line):
+            take(m.group(1))
+    return out
+
+
 def learn(texts) -> tuple:
     """The user and host names the record itself shows -- in a path, an
     environment line, a listing, a prompt -- to take out wherever else they
@@ -364,6 +391,9 @@ def learn(texts) -> tuple:
         for m in re.finditer(r"(?m)^(?:export\s+)?(?:HOSTNAME|HOST|SLURM_SUBMIT_HOST)=['\"]?([^\s'\"]+)", t):
             if len(m.group(1)) >= 3:
                 hosts.add(m.group(1))
+        # Its partitions, named as only that cluster names them (gl40s_short,
+        # a100_long): a compound, and only where a scheduler is named.
+        hosts.update(partitions(t))
         # The Slurm cluster a job ran in: its environment, scontrol, sacct.
         for m in re.finditer(r"(?:(?m:^)(?:export\s+)?SLURM_CLUSTER_NAME=|\bClusterName\s*=\s*|\bCluster=)['\"]?([A-Za-z][\w.-]{3,62})", t):
             v = m.group(1)

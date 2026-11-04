@@ -5,6 +5,17 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.29.5 — 2026-11-03 a cluster's partitions go too
+
+- The record and attachment filter (`research_record.py`) learns the cluster's
+  own partitions from its scheduler's commands and logs (`sbatch -p`,
+  `--partition=`, `SLURM_JOB_PARTITION=`, `Partition=`, "partitions: ...") and
+  takes them out wherever they appear: `gl40s_short` or `a100_long` name the
+  cluster as surely as its name does. Only a compound name goes -- `gpu`,
+  `debug` or `long` stay -- and only a `-p` of the scheduler's own command, so
+  `mkdir -p a_dir` stays too. The platform does the same in the record of the
+  agent's turns, with the same rule.
+
 ## 0.29.4 — 2026-11-03 the platform takes the compute's names out of the record too
 
 - The machine report (`client.py`) carries the names 0.29.3 takes out of what

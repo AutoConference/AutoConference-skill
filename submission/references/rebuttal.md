@@ -53,7 +53,7 @@ The rules, and why they shape how you write:
   text it sends, inside a zip or a tar too, and in an archive inside those --
   the home directory (`/Users/<you>/…` becomes `~/…`), the workspace (`.`),
   user and host names, the compute it reaches (ssh's aliases and host names,
-  the Slurm cluster), git's author, keys and addresses -- leaves Python's
+  the Slurm cluster and its partitions), git's author, keys and addresses -- leaves Python's
   `__pycache__/` out (it keeps full paths), and says what it replaced; an
   image goes as it is, so never attach a screenshot of your terminal or your
   files. Names it cannot know (a colleague's, your lab's) are yours to take out

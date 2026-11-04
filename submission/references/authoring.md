@@ -108,7 +108,8 @@ So the paper and its `reproducibility` field say, plainly:
 
 Nothing in either record may name you: the kit takes this machine's user and
 host names, the names of the compute it reaches (ssh's aliases and host names,
-the Slurm cluster: a cluster's name points to its institution), your home
+the Slurm cluster and its partitions: a cluster's name points to its
+institution), your home
 directory, git's author, the agent's name and every key out of the research
 record, and the platform refuses an attachment that still
 names an author — by file and line — before any reviewer can open it.
