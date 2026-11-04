@@ -337,6 +337,25 @@ SHAPES = [
 ]
 
 
+# GPU and accelerator models: what a record says it ran on -- never a
+# cluster's stem (the platform's own list, lib/deidentify.ts HARDWARE).
+HARDWARE = re.compile(r"(?i)(?:[ahlpkt]\d{1,4}s?|v\d{2,3}s?|a\d{4}|h\d{3}|mi\d{3}x?|rtx\w*|gtx\w*|tpu\w*|a10g)")
+
+
+def stem_of(name):
+    """A partition's or a node's stem, as only its cluster names it (gl40s of
+    gl40s_short and of gl40s-8003; gpu4 of gpu4_dev): letters and digits,
+    both, before the first _, - or [, at least four, no hardware model and no
+    word -- the platform's own rule (lib/deidentify.ts, stemOf)."""
+    m = re.match(r"([A-Za-z][A-Za-z0-9]*)[_\-\[]", name or "")
+    if not m:
+        return None
+    st = m.group(1)
+    if len(st) < 4 or not re.search(r"\d", st) or HARDWARE.fullmatch(st) or st.lower() in COMMON or st.lower() in words():
+        return None
+    return st
+
+
 def partitions(t) -> set:
     """Slurm partitions a text names, distinctive ones only: a compound of
     letters and digits joined by _ or - (gl40s_short), no word, never a lone
@@ -361,6 +380,10 @@ def partitions(t) -> set:
         # "partitions: a,b" or "partitions `a,b`": a list said to be partitions.
         for m in re.finditer(r"(?i)\bpartitions?\s{0,2}(?:[:=]\s{0,4}[`'\"]?|\s{1,4}[`'\"])([A-Za-z][\w.-]{1,40}(?:\s{0,2},\s{0,2}[A-Za-z][\w.-]{1,40}){0,12})", line):
             take(m.group(1))
+    # The keys of a "partitions" mapping (a machine's description, echoed).
+    for m in re.finditer(r"(?i)[\"']partitions[\"']\s{0,4}:\s{0,4}\{([^{}]{0,4000})\}", t):
+        for k in re.finditer(r"[\"']([A-Za-z][\w.-]{1,40})[\"']\s{0,4}:", m.group(1)):
+            take(k.group(1))
     return out
 
 
@@ -368,7 +391,7 @@ def learn(texts) -> tuple:
     """The user and host names the record itself shows -- in a path, an
     environment line, a listing, a prompt -- to take out wherever else they
     appear (a kernel's name, a log line)."""
-    users, hosts, people = set(), set(), set()
+    users, hosts, people, stems = set(), set(), set(), set()
 
     def user(v):
         v = (v or "").strip("'\"")
@@ -393,7 +416,16 @@ def learn(texts) -> tuple:
                 hosts.add(m.group(1))
         # Its partitions, named as only that cluster names them (gl40s_short,
         # a100_long): a compound, and only where a scheduler is named.
-        hosts.update(partitions(t))
+        for p in partitions(t):
+            hosts.add(p)
+            st = stem_of(p)
+            if st:
+                stems.add(st)
+        # Its nodes (gl40s-8003, gl40s-[8001-8005]): their stem goes wherever it is.
+        for m in re.finditer(r"\b(?:NodeName|NodeList|BatchHost|ExcNodeList|ReqNodeList)=([A-Za-z][\w.,\[\]-]{1,200})", t):
+            st = stem_of(m.group(1))
+            if st:
+                stems.add(st)
         # The Slurm cluster a job ran in: its environment, scontrol, sacct.
         for m in re.finditer(r"(?:(?m:^)(?:export\s+)?SLURM_CLUSTER_NAME=|\bClusterName\s*=\s*|\bCluster=)['\"]?([A-Za-z][\w.-]{3,62})", t):
             v = m.group(1)
@@ -404,7 +436,8 @@ def learn(texts) -> tuple:
             for w in re.findall(r"[A-Z][\w'’-]{2,}", m.group(1)):
                 if w.lower() not in COMMON:
                     people.add(w)
-    return sorted(users, key=len, reverse=True), sorted(hosts, key=len, reverse=True), sorted(people, key=len, reverse=True)
+    return (sorted(users, key=len, reverse=True), sorted(hosts, key=len, reverse=True), sorted(people, key=len, reverse=True),
+            sorted(stems, key=len, reverse=True))
 
 
 def scrubber(who: dict, keys: list, learned=((), (), ())):
@@ -426,6 +459,10 @@ def scrubber(who: dict, keys: list, learned=((), (), ())):
         exact.append(("host", r"(?<![A-Za-z0-9-])" + re.escape(h) + r"(?![A-Za-z0-9-])"))
     for n in (learned[2] if len(learned) > 2 else ()):
         exact.append(("name", r"(?<![A-Za-z0-9_])" + re.escape(n) + r"(?![A-Za-z0-9_])"))
+    # A cluster's stem (gl40s, gpu4) after its whole names, inside a longer
+    # name too: gl40s-8003, qos_gpu4_dev.
+    for st in (learned[3] if len(learned) > 3 else ()):
+        exact.append(("host", r"(?<![A-Za-z0-9])" + re.escape(st) + r"(?![A-Za-z0-9])"))
     compiled = [(k, re.compile(p, re.I)) for k, p in exact]
 
     def scrub(text: str, counts: dict) -> str:

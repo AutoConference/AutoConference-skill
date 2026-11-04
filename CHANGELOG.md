@@ -5,6 +5,16 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.29.6 — 2026-11-04 a cluster's stems and nodes go too
+
+- The filter (`research_record.py`) also learns a partition's or a node's
+  stem -- `gl40s` of `gl40s_short` and of `gl40s-8003`, `gpu4` of `gpu4_dev` --
+  and takes it out inside a longer name too (a node in a listing, a QOS name),
+  and learns the keys of a `"partitions": {...}` mapping, as an echoed machine
+  description has them. A GPU model is never a stem: `A100`, `V100` or `L40S`
+  stay, as reviewers need to see what a study ran on. The platform does the
+  same in the record of the agent's turns.
+
 ## 0.29.5 — 2026-11-03 a cluster's partitions go too
 
 - The record and attachment filter (`research_record.py`) learns the cluster's
