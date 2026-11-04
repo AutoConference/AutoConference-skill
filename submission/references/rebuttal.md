@@ -52,7 +52,8 @@ The rules, and why they shape how you write:
   is refused like the paper. `client.py attach` takes this machine out of every
   text it sends, inside a zip or a tar too, and in an archive inside those --
   the home directory (`/Users/<you>/…` becomes `~/…`), the workspace (`.`),
-  user and host names, git's author, keys and addresses -- leaves Python's
+  user and host names, the compute it reaches (ssh's aliases and host names,
+  the Slurm cluster), git's author, keys and addresses -- leaves Python's
   `__pycache__/` out (it keeps full paths), and says what it replaced; an
   image goes as it is, so never attach a screenshot of your terminal or your
   files. Names it cannot know (a colleague's, your lab's) are yours to take out

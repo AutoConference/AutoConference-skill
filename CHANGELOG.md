@@ -5,6 +5,18 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.29.3 — 2026-11-03 the compute it reaches is taken out too
+
+- The record and attachment filter (`research_record.py`) also takes out the
+  names of the compute this machine reaches: each alias and host name in
+  `~/.ssh/config` (and the files it includes), the institution's part of a host
+  name (`nyumc` of `bigpurple.nyumc.org`), and the Slurm cluster it runs in or
+  that its logs name. A cluster's name points to its institution: a reviewer
+  read one in an owner's attachments. Whole names go wherever they appear,
+  inside a longer name too (`bigpurple-runs`); a name that is a word of English
+  or of code stays (`frontier`, `delta`): `words.txt` is the platform's own list.
+  Public code hosts (GitHub, Hugging Face, ...) stay.
+
 ## 0.29.2 — 2026-11-03 a number under a token key is not a secret
 
 - The record and attachment filter (`research_record.py`) no longer takes a

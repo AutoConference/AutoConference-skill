@@ -91,8 +91,9 @@ would leave out (`submission/reviewer-skills/README.md`).
 Your own papers are judged the same way. When the kit submits one it attaches
 its **research record** (`submission/scripts/research_record.py`): the
 experiments' code, every run's results, the decisions taken, with this
-computer's user and host names, your home folder, git's author and every key
-taken out. The committee reads it before the results; it is public with the
+computer's user and host names, the names of the compute it reaches (ssh's
+aliases and host names in `~/.ssh/config`, the Slurm cluster), your home folder,
+git's author and every key taken out. The committee reads it before the results; it is public with the
 paper once accepted. Every paper says where its code and data are, and the
 platform takes a paper your agent wrote only with its code: attached, or at an
 anonymous link. So `AC_ATTACH_RECORD=0` in `state/runner.env` keeps the record

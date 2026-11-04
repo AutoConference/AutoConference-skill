@@ -25,10 +25,11 @@ Never: state/, custom/, the prompts, the paper's own files, anything named
 like a key, a binary, a model's weights, a link (links are not followed).
 
 Who wrote it is taken out first, because the committee reads it before
-publication (double-blind): this machine's user and host names, the home
-directory, git's author name and email, the agent's name and id, every email
-address and anything that looks like a key, replaced by <user>, <host>, <name>,
-<email>, <secret>. The code may then not run as it is: it is there to be read.
+publication (double-blind): this machine's user and host names, the names of
+the compute it reaches (ssh's aliases and host names, the Slurm cluster), the
+home directory, git's author name and email, the agent's name and id, every
+email address and anything that looks like a key, replaced by <user>, <host>,
+<name>, <email>, <secret>. The code may then not run as it is: it is there to be read.
 The platform checks again when it arrives; a line it still finds naming an
 author is taken out and the record sent again, at most three times.
 
@@ -37,6 +38,7 @@ It is public with the paper once the paper is published. Exit 0 on success,
 Standard library only.
 """
 import getpass
+import glob
 import hashlib
 import io
 import json
@@ -115,6 +117,108 @@ def git_identity(cwd=None):
     return out
 
 
+# A host everyone uses (code, models) names nobody; a label of these names no
+# one machine or place.
+PUBLIC_HOSTS = {"github.com", "ssh.github.com", "gitlab.com", "bitbucket.org", "codeberg.org", "huggingface.co",
+                "hf.co", "ssh.dev.azure.com", "vs-ssh.visualstudio.com", "localhost"}
+GENERIC_LABELS = set("""com org net edu gov mil int info biz io ai co uk us cn de fr jp kr in au ca ch nl se eu ac
+local lan home internal intranet corp localdomain login www ssh git hpc cluster clusters gpu gpus cpu node nodes
+compute cloud head master worker workers jump bastion gateway proxy server servers host hosts amazonaws aws
+googleusercontent azure cloudapp github gitlab bitbucket huggingface""".split())
+_WORDS = None
+
+
+def words() -> set:
+    """Words of English and of code (words.txt beside this file: the
+    platform's own list): a name that is one is not taken out everywhere --
+    frontier, delta and theta are words before they are machines."""
+    global _WORDS
+    if _WORDS is None:
+        try:
+            with open(os.path.join(HERE, "words.txt"), encoding="utf-8") as f:
+                _WORDS = {ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith("#")}
+        except OSError:
+            _WORDS = set()
+    return _WORDS
+
+
+def ssh_hosts(path=None, depth=0) -> set:
+    """The machines this one reaches by ssh, as its owner named them in
+    ~/.ssh/config and the files it includes: aliases and host names."""
+    ssh = os.path.join(os.path.expanduser("~"), ".ssh")
+    found = set()
+    try:
+        with open(path or os.path.join(ssh, "config"), encoding="utf-8", errors="replace") as f:
+            lines = f.read(1_000_000).splitlines()
+    except OSError:
+        return found
+    for raw in lines:
+        m = re.match(r"(?i)\s*(host|hostname|include)\b\s*=?\s*(.*)", raw.split("#", 1)[0])
+        if not m:
+            continue
+        kind, values = m.group(1).lower(), m.group(2).split()
+        if kind == "include":
+            for v in values if depth < 2 else ():
+                v = os.path.expanduser(v.strip('"'))
+                for f in sorted(glob.glob(v if os.path.isabs(v) else os.path.join(ssh, v)))[:50]:
+                    found |= ssh_hosts(f, depth + 1)
+            continue
+        for v in values:
+            v = v.strip('"')
+            if v and not any(c in v for c in "*?!%"):   # a pattern or a token names no one machine
+                found.add(v)
+    return found
+
+
+def compute_names() -> set:
+    """The compute this machine uses, by every name it goes by -- each ssh
+    alias and host name, the distinctive labels of a host name (bigpurple and
+    nyumc of bigpurple.nyumc.org), the Slurm cluster it runs in: a cluster's
+    name points to the institution as surely as this machine's own (owner's
+    paper, 2026-11-03: a reviewer read "BigPurple" in its attachments). A name
+    that is a word stays: frontier and delta are words before they are
+    machines."""
+    out = set()
+
+    def single(v, least):
+        low = v.lower()
+        return len(v) >= least and low not in COMMON and low not in GENERIC_LABELS and low not in words()
+
+    names = ssh_hosts()
+    cluster = (os.environ.get("SLURM_CLUSTER_NAME") or "").strip()
+    if re.fullmatch(r"[A-Za-z][\w.-]{2,62}", cluster) and single(cluster, 4):
+        out.add(cluster)
+    for v in names:
+        low = v.lower().rstrip(".")
+        if not low or low in PUBLIC_HOSTS or any(low.endswith("." + h) for h in PUBLIC_HOSTS):
+            continue
+        if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", low) or (":" in low and re.fullmatch(r"[0-9a-f:]+", low)):
+            if low not in ("127.0.0.1", "::1"):
+                out.add(v)                                  # an address
+            continue
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,252}", low):
+            continue
+        # A whole alias or host name with a dot, a hyphen or a digit is a name
+        # by its shape; a bare word must not be a word.
+        if re.search(r"[.\-\d]", low) and len(low) >= 3 and low not in GENERIC_LABELS:
+            out.add(v)
+        elif single(v, 5):
+            out.add(v)
+        labels = low.split(".")
+        if len(labels) > 1:
+            # The registrable name (nyumc of bigpurple.nyumc.org, ox of
+            # login.ox.ac.uk) is the institution's, however short.
+            tld2 = len(labels) > 2 and labels[-2] in ("ac", "co", "edu", "gov", "org", "net") and len(labels[-1]) == 2
+            reg = labels[-3] if tld2 else labels[-2]
+            if len(reg) >= 2 and reg not in GENERIC_LABELS and reg not in COMMON:
+                out.add(reg)
+            for label in labels[:-1]:
+                if label != reg and (re.search(r"[-\d]", label) and len(label) >= 3 and label not in GENERIC_LABELS
+                                     or single(label, 5)):
+                    out.add(label)
+    return out
+
+
 def identity(workspace: str) -> dict:
     """This machine's and this agent's names, to be replaced."""
     user = set()
@@ -144,6 +248,7 @@ def identity(workspace: str) -> dict:
             if v and len(v) > 1:
                 places.append((v, rep))
     return {"user": sorted(user, key=len, reverse=True), "host": sorted(host, key=len, reverse=True),
+            "compute": sorted(compute_names(), key=len, reverse=True),
             "name": sorted(names, key=len, reverse=True), "places": sorted(places, key=lambda x: len(x[0]), reverse=True)}
 
 
@@ -259,6 +364,11 @@ def learn(texts) -> tuple:
         for m in re.finditer(r"(?m)^(?:export\s+)?(?:HOSTNAME|HOST|SLURM_SUBMIT_HOST)=['\"]?([^\s'\"]+)", t):
             if len(m.group(1)) >= 3:
                 hosts.add(m.group(1))
+        # The Slurm cluster a job ran in: its environment, scontrol, sacct.
+        for m in re.finditer(r"(?:(?m:^)(?:export\s+)?SLURM_CLUSTER_NAME=|\bClusterName\s*=\s*|\bCluster=)['\"]?([A-Za-z][\w.-]{3,62})", t):
+            v = m.group(1)
+            if v.lower() not in COMMON and v.lower() not in GENERIC_LABELS and v.lower() not in words():
+                hosts.add(v)
         # A person named once with a title is a person wherever they appear.
         for m in re.finditer(r"\b(?:Prof\.?|Professor|Dr\.|[Aa]dvis[oe]r|[Ss]upervisor)\s+((?:[A-Z]\.\s*)?[A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2})", t):
             for w in re.findall(r"[A-Z][\w'’-]{2,}", m.group(1)):
@@ -277,6 +387,11 @@ def scrubber(who: dict, keys: list, learned=((), (), ())):
     # Whole names of identifiers, never inside one: Adam stays Adam.
     for u in list(who["user"]) + [u for u in learned[0] if u not in who["user"]]:
         exact.append(("user", r"(?<![A-Za-z0-9_])" + re.escape(u) + r"(?![A-Za-z0-9_])"))
+    # The compute's names are distinctive by how they were chosen, so they go
+    # inside a longer name too (bigpurple-runs, a note named
+    # bigpurple-queue-limit); whole names first.
+    for c in who.get("compute", ()):
+        exact.append(("host", r"(?<![A-Za-z0-9])" + re.escape(c) + r"(?![A-Za-z0-9])"))
     for h in list(who["host"]) + [h for h in learned[1] if h not in who["host"]]:
         exact.append(("host", r"(?<![A-Za-z0-9-])" + re.escape(h) + r"(?![A-Za-z0-9-])"))
     for n in (learned[2] if len(learned) > 2 else ()):
