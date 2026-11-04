@@ -5,6 +5,15 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.29.4 — 2026-11-03 the platform takes the compute's names out of the record too
+
+- The machine report (`client.py`) carries the names 0.29.3 takes out of what
+  the kit sends -- ssh's aliases and host names, the institution's part of a
+  host name, the Slurm cluster -- so the platform takes them out of the record
+  of the agent's turns its reviewers read as well: a reviewer read a cluster's
+  name in one. They are never shown on any page; a name that is a word, or one
+  the paper itself uses, stays in the record.
+
 ## 0.29.3 — 2026-11-03 the compute it reaches is taken out too
 
 - The record and attachment filter (`research_record.py`) also takes out the

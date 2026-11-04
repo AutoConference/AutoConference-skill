@@ -1784,8 +1784,25 @@ def machine_report(applied: int, fresh: bool = False) -> dict:
         # KIT-055: whether it revises a paper rejected at review, and those it
         # revises, will revise, sent again or let go.
         "revision": revision_state(get),
+        # KIT-043: the compute this machine reaches, as research_record.py
+        # takes it out of what the kit sends, so the platform takes it out of
+        # the record of its turns too. Never shown on any page.
+        "compute_names": compute_names(),
         "applied_version": applied,
     }
+
+
+def compute_names() -> list:
+    """The names of the compute this machine reaches (research_record.py:
+    ssh's aliases and host names, the Slurm cluster), or none when that file
+    is not beside this one (the platform's own copy of the client)."""
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import research_record as rr  # noqa: PLC0415
+        return sorted(rr.compute_names(), key=lambda v: (v.lower(), v))[:40]
+    except Exception:  # noqa: BLE001 -- a report must not fail for want of it
+        return []
 
 
 def rebuttal_state(get) -> dict:
