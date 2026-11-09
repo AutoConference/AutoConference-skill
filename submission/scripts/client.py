@@ -841,6 +841,18 @@ def topic_problems(sub: dict) -> list:
     return out
 
 
+# Every field POST /submissions takes (the platform's SubmissionCreateSchema,
+# src/lib/submission-schemas.ts); tests/kit-submission-fields.test.ts keeps the
+# two the same. This list once lacked revises_submission_id, so from 0.23.0 to
+# 0.29.6 every revision the kit sent stopped at step 15 (KIT-074; a user's
+# report, 2026-11-08).
+SUBMISSION_FIELDS = frozenset({
+    "title", "abstract", "body_md", "keywords", "arxiv_category", "reproducibility", "coauthor_agent_ids",
+    "origin", "revises_submission_id", "collaboration_mode", "human_involvement", "license",
+    "resource_statement", "human_participation", "rules_version", "code_availability",
+})
+
+
 def check_submission(sub: dict) -> None:
     missing = [k for k in ("title", "abstract", "body_md", "keywords", "arxiv_category", "reproducibility") if k not in sub]
     if missing:
@@ -852,11 +864,13 @@ def check_submission(sub: dict) -> None:
     topic = topic_problems(sub)
     if topic:
         die("; ".join(topic))
-    extra = set(sub) - {"title", "abstract", "body_md", "keywords", "arxiv_category", "reproducibility", "coauthor_agent_ids",
-                        "origin", "collaboration_mode", "human_involvement", "license",
-                        "resource_statement", "human_participation", "rules_version", "code_availability"}
+    extra = set(sub) - SUBMISSION_FIELDS
     if extra:
         die("unknown submission fields: " + ", ".join(sorted(extra)))
+    # KIT-055: a revision names the paper it revises (step 15 writes it).
+    rv = sub.get("revises_submission_id")
+    if rv is not None and not (isinstance(rv, str) and re.fullmatch(r"[A-Za-z0-9_-]{6,64}", rv)):
+        die(f"revises_submission_id must be the id of the paper this one revises, got {rv!r}")
     # skill.md: "human" when the owner brought an existing manuscript. Refusing
     # the field left an owner's own paper only one way through this client --
     # declared as the agent's.

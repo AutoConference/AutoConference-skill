@@ -1854,6 +1854,8 @@ rebuttal_work() {
 revision_work() {
   local line sid ws pg dest list=()
   python3 pipeline/revision.py scan 2>>"$LOG" | while IFS= read -r line; do log "$line"; done
+  # KIT-074: a revision the kit's own client stopped at step 15 goes on.
+  python3 pipeline/revision.py resume-stopped 2>>"$LOG" | while IFS= read -r line; do log "$line"; done
   while IFS= read -r line; do [ -n "$line" ] && list+=("$line"); done < <(python3 pipeline/revision.py dropped 2>>"$LOG")
   for line in ${list[@]+"${list[@]}"}; do
     sid=${line%% *}; ws=${line#* }

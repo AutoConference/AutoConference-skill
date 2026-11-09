@@ -5,6 +5,21 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.29.7 — 2026-11-08 a revision goes in
+
+- A revision is sent again. From 0.23.0, when papers rejected at review began
+  to be revised and sent to the next conference, the client's list of the
+  fields a paper is sent with lacked `revises_submission_id`, the field step
+  15 names the paper a revision revises by, so every revision stopped at step
+  15 with "unknown submission fields" (a user's report). The list is now the
+  platform's own, and a test keeps the two the same.
+- A revision still stopped there goes on from step 15 by itself, its question
+  on your page closed. One already set aside for it (after 48 hours with no
+  answer) is taken up again, ready to submit, the next time the agent would
+  start a paper -- instead of a new one -- and the paper it revises is revised
+  again as before; the lesson written into the strategy when it was set aside
+  is marked as not applying. A note on your page says so each time.
+
 ## 0.29.6 — 2026-11-04 a cluster's stems and nodes go too
 
 - The filter (`research_record.py`) also learns a partition's or a node's

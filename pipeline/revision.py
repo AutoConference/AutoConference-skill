@@ -42,6 +42,7 @@ Commands, which the loop runs (none asks a model anything):
   dropped                  revisions let go whose workspace is still being written: "<id> <workspace>"
   set-aside <id> <where>   its workspace was set aside after it was let go
   aside <workspace>        a revision set aside after it stopped (KIT-054): not revised again
+  resume-stopped           revisions stopped at step 15 by the kit's own fault (KIT-074): they go on
   drop <id> | undrop <id>  let a paper go, or take that back while it is still queued
   apply <ids,...>          the owner's list from the website: each one in it let go, each one gone from it taken back
   report                   what it is doing, for its owner's page (JSON)
@@ -264,12 +265,132 @@ def queued() -> list:
 
 
 def next_one() -> str:
-    """The revision to start when the agent next starts a paper: the oldest
+    """The revision to start when the agent next starts a paper: one the kit
+    set aside by its own fault, ready to submit (KIT-074), else the oldest
     queued, while revising is on."""
     if not revising_on():
         return ""
+    back = faulted_aside()
+    if back:
+        return str(back[0]["submission_id"])
     q = queued()
     return str(q[0]["submission_id"]) if q else ""
+
+
+# ── KIT-074: revisions the kit itself stopped ──────────────────────────────
+#
+# From 0.23.0 to 0.29.6 the client refused the field by which step 15 names the
+# paper a revision revises (submission/scripts/client.py SUBMISSION_FIELDS), so
+# every revision stopped there: waiting for its owner, then set aside after 48
+# hours, its paper kept from being revised again, and a lesson drawn from it.
+# The fault was the kit's, never the paper's. A revision still stopped so goes
+# on from step 15; one set aside so is taken up again, ready to submit, the
+# next time the agent starts a paper, and the lesson is marked as not applying.
+
+KIT_FAULT = re.compile(r"unknown submission fields: [^\n]*\brevises_submission_id\b")
+
+
+def tail(path: str, n: int = 400_000) -> str:
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - n))
+            return f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def stopped_by_kit(ws: str) -> bool:
+    """A revision whose last stop was step 15, and the client's refusal of
+    revises_submission_id what stopped it."""
+    if not os.path.isfile(os.path.join(ws, "REVISION.json")):
+        return False
+    step = read(os.path.join(ws, "PIPELINE_STOPPED"), 20).strip()
+    if step != "15":
+        return False
+    return bool(KIT_FAULT.search(tail(os.path.join(ws, "pipeline.out"))))
+
+
+def resume_stopped() -> list:
+    """Revisions still waiting at step 15 for the kit's fault go on from there:
+    their stop is lifted (which also closes its question on the owner's page)."""
+    said = []
+    for f in sorted(glob.glob(os.path.join(WORK, "*", "PIPELINE_STOPPED"))):
+        ws = os.path.dirname(f)
+        if not stopped_by_kit(ws):
+            continue
+        for g in glob.glob(os.path.join(ws, ".retry-*")):
+            os.remove(g)
+        with open(os.path.join(ws, "pipeline.next"), "w") as fh:
+            fh.write("15\n")
+        os.remove(f)
+        cyc = os.path.basename(ws)
+        info = load_json(os.path.join(ws, "REVISION.json"), {}) or {}
+        note_owner(
+            f"the revision in work/{cyc} goes on: its stop at step 15 was the kit's fault",
+            f"The revision of \"{info.get('title') or cyc}\" stopped at step 15 because the kit's client refused the field that names the paper it revises (revises_submission_id). That was a bug in the kit, fixed in 0.29.7 (KIT-074); nothing about the paper caused it. It is being submitted again by itself, from step 15. Nothing for you to do.",
+        )
+        said.append(f"revision: work/{cyc} stopped at step 15 by the kit's fault (KIT-074); it goes on from step 15")
+    return said
+
+
+def faulted_aside() -> list:
+    """Revisions set aside after the kit stopped them (state kept, why stopped),
+    whose workspace is still where it was put: ready to submit."""
+    out = []
+    for r in records():
+        if r.get("state") != "kept" or r.get("why") != "stopped" or not r.get("set_aside"):
+            continue
+        ws = os.path.join(KIT, str(r["set_aside"]))
+        if os.path.isdir(ws) and stopped_by_kit(ws):
+            out.append(r)
+    return sorted(out, key=lambda r: str(r.get("at") or ""))
+
+
+def take_back(sid: str, cycle: str) -> str:
+    """A revision the kit set aside by its own fault, back in work/<cycle>/ to
+    be submitted from step 15; its paper revised again, as before the fault."""
+    rec = record(sid) or {}
+    src = os.path.join(KIT, str(rec.get("set_aside") or ""))
+    new = os.path.join(WORK, cycle)
+    if not os.path.isdir(src) or not stopped_by_kit(src):
+        raise SystemExit(f"revision: {sid} is not one the kit set aside by its own fault")
+    if os.path.abspath(src) == os.path.abspath(new):
+        raise SystemExit("revision: it is already there")
+    if os.path.exists(new) and any(os.path.exists(os.path.join(new, f)) for f in ("pipeline.next", "SUBMITTED", "SUBMISSION_ID")):
+        raise SystemExit(f"revision: work/{cycle} already holds a paper; not written over")
+    os.makedirs(new, exist_ok=True)
+    for name in os.listdir(src):
+        dst = os.path.join(new, name)
+        if not os.path.lexists(dst):
+            shutil.move(os.path.join(src, name), dst)
+    try:
+        os.rmdir(src)
+    except OSError:
+        pass
+    for name in ("PIPELINE_STOPPED",) + tuple(os.path.basename(g) for g in glob.glob(os.path.join(new, ".retry-*"))):
+        try:
+            os.remove(os.path.join(new, name))
+        except OSError:
+            pass
+    with open(os.path.join(new, "pipeline.next"), "w") as fh:
+        fh.write("15\n")
+    info = load_json(os.path.join(new, "REVISION.json"), {}) or {}
+    title = info.get("title") or rec.get("title") or sid
+    # The lesson drawn when it was set aside (KIT-054) was drawn from the
+    # kit's bug: say so where the agent reads its strategy.
+    sdir = os.path.join(STATE, "strategy")
+    os.makedirs(sdir, exist_ok=True)
+    with open(os.path.join(sdir, "CHANGELOG.md"), "a", encoding="utf-8") as fh:
+        fh.write(f"\n## {time.strftime('%Y-%m-%d')} -- KIT-074: the revision of \"{title}\" was not at fault\n"
+                 "- It stopped at step 15 because the kit's client refused revises_submission_id, a bug fixed in 0.29.7. "
+                 "A rule written when it was set aside does not apply; the revision is submitted again.\n")
+    keep(sid, state="revising", to=os.path.relpath(new, KIT), why=None, set_aside=None, resumed="KIT-074")
+    note_owner(
+        f"the revision of \"{title}\" is taken up again",
+        f"It was set aside after stopping at step 15, which was the kit's fault: its client refused the field that names the paper a revision revises (revises_submission_id), a bug fixed in 0.29.7 (KIT-074). The finished revision is back in work/{cycle} and goes in from step 15 for this conference, instead of a new paper. Nothing for you to do.",
+    )
+    return new
 
 
 # ── its reviews, as the platform gives them after publication ──────────────
@@ -353,10 +474,13 @@ def prepare(sid: str, cycle: str) -> str:
     reviewers said; nothing in the earlier workspace changes. Fails (raises)
     rather than writing over a paper in progress."""
     rec = record(sid)
-    if not rec or rec.get("state") != "queued":
-        raise SystemExit(f"revision: {sid} is not queued")
     if not CYCLE.match(cycle):
         raise SystemExit(f"revision: {cycle!r} is not a conference")
+    # KIT-074: one the kit set aside by its own fault goes in as it is.
+    if rec and rec.get("state") == "kept" and any(r["submission_id"] == sid for r in faulted_aside()):
+        return take_back(sid, cycle)
+    if not rec or rec.get("state") != "queued":
+        raise SystemExit(f"revision: {sid} is not queued")
     old = os.path.join(KIT, rec["ws"])
     new = os.path.join(WORK, cycle)
     if not os.path.isdir(old):
@@ -607,6 +731,10 @@ def main(argv: list) -> int:
         return 0
     if cmd == "aside":
         aside(args[0])
+        return 0
+    if cmd == "resume-stopped":
+        for line in resume_stopped():
+            print(line)
         return 0
     if cmd == "drop":
         print(drop(args[0]))
