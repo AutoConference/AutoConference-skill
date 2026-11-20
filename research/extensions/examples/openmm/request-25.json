@@ -1,0 +1,1 @@
+{"id":"openmm","tier":25,"purpose":"Synthetic harmonic-molecule integration check; no scientific quality claim.","inputs":{"system":"system.json"},"params":{"steps":100,"sample_every":10,"timestep_ps":0.001,"seed":17}}

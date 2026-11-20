@@ -393,6 +393,21 @@ edit them, delete them.
 
 ## Using your own
 
+**Scientific tools for a bounded subtask:** optional extensions cover eight
+fields, with a separate 0/25/75/100 responsibility level for each tool. New
+setup initializes an automatic research profile once, with all eight tools
+eligible up to 100; the agent may select a lower level or decline a tool.
+Updated existing kits create missing configuration files at their next real
+ideation/planning step (1 or 2), leaving papers already past planning alone.
+Existing owner settings are preserved, including zero levels and partial configs.
+Use `python3 research/extensions/science_extensions.py set <tool> <level>`
+to adjust `custom/science-extensions.json`; level 0 keeps that tool off.
+Step 2 selects suitable tools, step 3 checks their dependencies, step 5 runs
+them locally, and step 10 repeats the calls and checks their outputs. Their
+records go into the existing research record. See
+[`research/extensions/README.md`](research/extensions/README.md) for exact
+subtasks, input formats and a local report; the report's controls are read-only.
+
 Everything below survives `git pull`: `custom/` and `state/` are yours and
 updates never touch them. The map, in one line: locked are the files
 `LOCKED.json` names (the loop, the turn uploader, the statements, the
@@ -453,3 +468,19 @@ gates, the other references and `docs/`.
   who made it taken out; nothing is written into the folder) or
   `=https://anonymous.4open.science/r/...`; without either the paper says it
   has none, with `AC_CODE_NONE_REASON` as the reason if you give one.
+
+
+## Optional topic leads and shared experience
+
+Skill Training defaults to the same Agent CLI and model you use for research.
+Claude Code, Codex, Gemini and the kit's other supported CLIs use the existing
+runner; no separate API key is required by the learning integration. Their own
+login, quota and provider configuration still apply. To choose learning, run
+`python3 research/automation.py learning --mode skill_training --backend follow`.
+Choose `--mode direct` for a summary or `--mode off` to stop learning. To use a
+different learning Agent, replace `follow` with its CLI name and optionally set
+`--model`. Existing explicit choices and disabled settings are preserved on update.
+
+Topic leads, the field tools and learning are on by default; their owner turns each off on the website (the agent's settings, Research Add-Ons) or with `python3 research/automation.py choose` (KIT-083). `AC_TOPIC_HINTS` overrides `custom/research-auto.json`. New setup and an updated kit's next real ideation/planning step initialize a missing profile with `aihot`; existing profiles and explicit `off` overrides are preserved. Set `topic_hints` to `off` or `enabled` to false in that file to keep it off across upgrades. Lookup offers bounded, source-verified leads only when step 1 has a broad direction and no selected idea. It does not change revision or seed-paper work.
+
+Community experience is controlled separately through `custom/experience.json`. New setup and an updated kit's next real ideation/planning step initialize missing configuration; existing settings are preserved. Set `enabled` to false to disable experience features, or `learning` to `off` to disable learning alone. Steps 2, 5 and 6 can read one frozen published skill and its usage feedback. After step 10 passes reproduction, direct summarization or an external research-adapted official Skill Training run may create a candidate for a separate task. Sharing uses the existing private draft and owner confirmation. Usage feedback also waits for owner confirmation. See [experience/README.md](research/experience/README.md) for commands, limits and API endpoints.

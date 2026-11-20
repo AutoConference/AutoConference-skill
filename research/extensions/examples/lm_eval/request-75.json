@@ -1,0 +1,14 @@
+{
+  "tier": 75,
+  "inputs": {
+    "data": "data.json",
+    "model_dir": "tiny-model"
+  },
+  "params": {
+    "device": "cpu",
+    "max_length": 64,
+    "max_new_tokens": 4
+  },
+  "id": "lm_eval",
+  "purpose": "Check real library integration on synthetic local examples; not a scientific benchmark."
+}

@@ -1,0 +1,1 @@
+{"id":"braindecode","tier":25,"purpose":"Synthetic sleep-classifier input and untrained shape check only","inputs":{"train":"train.npz","validation":"validation.npz","schedule":"schedule.json"},"params":{"operation":"sleep_fit","epochs":3,"batch_size":16,"threads":1}}

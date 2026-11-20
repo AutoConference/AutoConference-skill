@@ -1,0 +1,118 @@
+[
+  {
+    "id": "lm_eval",
+    "name": "LM Evaluation Harness",
+    "domain": "llm",
+    "summary": {
+      "en": "Evaluate a local causal language model on supplied examples.",
+      "zh": "使用本地样本评测本地因果语言模型。"
+    },
+    "project_url": "https://github.com/EleutherAI/lm-evaluation-harness",
+    "docs_url": "https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/models/huggingface.py",
+    "license": "MIT; local model and dataset licenses remain separate",
+    "packages": {
+      "lm_eval": "lm_eval",
+      "transformers": "transformers",
+      "torch": "torch",
+      "accelerate": "accelerate"
+    },
+    "task": "offline-causal-lm-evaluation",
+    "input_description": "inputs.data: JSON {records:[{context,continuation,choices,target_index}]}; inputs.model_dir: local HF directory with safetensors weights. All paths stay inside the paper workspace.",
+    "tiers": {
+      "25": {
+        "en": "Check the likelihood of supplied reference completions.",
+        "zh": "辅助检查给定参考回答的似然。"
+      },
+      "75": {
+        "en": "Run the multiple-choice evaluation module and report predictions and accuracy.",
+        "zh": "承担多选评测模块，输出选择结果及准确率。"
+      },
+      "100": {
+        "en": "Complete the bounded evaluation with reference likelihoods, choice ranking, and deterministic generation.",
+        "zh": "完成限定样本的似然、多选及确定性生成评测。"
+      }
+    },
+    "limitations": [
+      "Requires an explicitly supplied local model; no automatic download or API calls.",
+      "No general research-idea quality judge. Results apply only to supplied data.",
+      "Choice ranking uses unnormalized log-likelihood; unequal completion lengths may affect ranking.",
+      "The bundled tiny-model example uses random weights solely to check integration."
+    ]
+  },
+  {
+    "id": "inspect_ai",
+    "name": "Inspect AI",
+    "domain": "agent",
+    "summary": {
+      "en": "Score recorded Agent outputs against reference answers.",
+      "zh": "对已有 Agent 输出按参考答案评分并比较。"
+    },
+    "project_url": "https://github.com/UKGovernmentBEIS/inspect_ai",
+    "docs_url": "https://inspect.aisi.org.uk/scorers.html",
+    "license": "MIT",
+    "packages": {
+      "inspect-ai": "inspect_ai"
+    },
+    "task": "offline-agent-replay-evaluation",
+    "input_description": "inputs.data: JSON {records:[{id,input,output,target,group,baseline_output,tokens?,cost?}]}. Groups required for 75/100; matched baseline outputs required for 100.",
+    "tiers": {
+      "25": {
+        "en": "Check outputs with Inspect's exact reference-answer scorer.",
+        "zh": "使用 Inspect 的参考答案匹配辅助检查输出。"
+      },
+      "75": {
+        "en": "Handle the replay-scoring module, including subgroup results.",
+        "zh": "承担记录评分模块，并按任务分组分析。"
+      },
+      "100": {
+        "en": "Complete paired baseline comparison and summarize recorded resource use.",
+        "zh": "完成同题基线对比，并汇总记录中的资源使用。"
+      }
+    },
+    "limitations": [
+      "Evaluates supplied records only; no live Agent is executed.",
+      "Exact-answer checks do not evaluate open-ended research quality or prove Agent improvement.",
+      "Token and cost totals are reported only when every input record supplies them."
+    ]
+  },
+  {
+    "id": "sam2",
+    "name": "SAM 2.1 Tiny",
+    "domain": "vision",
+    "summary": {
+      "en": "Segment an image using local pretrained SAM 2.1 weights.",
+      "zh": "用本地 SAM 2.1 权重完成图像分割。"
+    },
+    "project_url": "https://github.com/facebookresearch/sam2",
+    "docs_url": "https://github.com/facebookresearch/sam2/blob/main/notebooks/image_predictor_example.ipynb",
+    "license": "Apache-2.0 (SAM 2 code and checkpoints); bundled components carry their own notices",
+    "packages": {
+      "SAM-2": "sam2",
+      "torch": "torch",
+      "torchvision": "torchvision",
+      "Pillow": "PIL"
+    },
+    "task": "image-segmentation",
+    "input_description": "inputs.image: RGB image; inputs.checkpoint: local sam2.1_hiera_tiny.pt; inputs.prompts: JSON {points:[[x,y]],labels:[1],box?:[x1,y1,x2,y2]} for 25/75. params.device: cpu or cuda.",
+    "tiers": {
+      "25": {
+        "en": "Produce one mask from supplied point prompts for a local check.",
+        "zh": "根据给定点击提示生成单个掩码，辅助局部检查。"
+      },
+      "75": {
+        "en": "Handle point/box-guided segmentation and return alternative masks.",
+        "zh": "承担点击或边框引导的分割模块，返回候选掩码。"
+      },
+      "100": {
+        "en": "Complete bounded automatic mask proposal and export masks with quality estimates.",
+        "zh": "完成限定采样范围的自动分割，导出掩码及质量估计。"
+      }
+    },
+    "limitations": [
+      "Image segmentation only; does not perform OpenVLA action inference or LIBERO rollout.",
+      "Requires a locally supplied official tiny checkpoint; runtime never downloads it.",
+      "Predicted IoU is a model estimate; measured accuracy requires ground-truth masks.",
+      "Tier 100 uses a bounded grid and can legitimately return zero surviving masks."
+    ]
+  }
+]

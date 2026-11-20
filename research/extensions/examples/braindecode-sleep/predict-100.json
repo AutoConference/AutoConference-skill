@@ -1,0 +1,1 @@
+{"id":"braindecode","tier":100,"purpose":"Held-out synthetic fixture prediction without labels; integration check only","inputs":{"data":"test.npz","model":"model.json"},"params":{"operation":"sleep_predict","batch_size":16,"threads":1}}

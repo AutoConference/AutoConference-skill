@@ -1,0 +1,16 @@
+{
+  "enabled": false,
+  "learning": "off",
+  "auto_discover": true,
+  "auto_draft": false,
+  "auto_report": false,
+  "skill_training": {
+    "adapter": "protocol",
+    "checkout": "vendor/skill-training",
+    "allow_download": true,
+    "backend": "follow",
+    "model": "",
+    "epochs": 1,
+    "timeout_seconds": 2400
+  }
+}

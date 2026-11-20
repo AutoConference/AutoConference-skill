@@ -1,0 +1,71 @@
+[
+  {
+    "id": "braindecode",
+    "name": "Braindecode",
+    "domain": "bio",
+    "summary": {"en": "Window/check EEG, or explicitly train a bounded sleep-stage classifier on subject-disjoint data.", "zh": "对脑电切窗检查，或明确选择睡眠分期模型，在按受试者隔离的数据上训练和预测。"},
+    "project_url": "https://github.com/braindecode/braindecode",
+    "docs_url": "https://braindecode.org/stable/generated/braindecode.preprocessing.create_fixed_length_windows.html",
+    "license": "BSD-3-Clause",
+    "packages": {"braindecode": "braindecode", "mne": "mne", "numpy": "numpy"},
+    "task": "eeg-preprocessing-and-sleep-staging",
+    "input_description": "Default preprocess: inputs.eeg JSON (sfreq_hz, unit uV/V, records with id/split/signals), <=32768 values; normalization=none preserves amplitude. Explicit sleep_fit: inputs.train/validation NPZ and schedule JSON, fixed Chambon2018 single-channel 100Hz/30s/5-stage model. sleep_predict: unlabelled data NPZ plus saved model JSON, development subjects rejected. See examples/braindecode-sleep. Do not apply a sleep model to unrelated EEG tasks or replace a study's preprocessing silently.",
+    "tiers": {
+      "25": {"en": "Preprocess: first-window preview. Sleep fit: data/shape check without training; predict: one-batch preview.", "zh": "预处理时预览首个窗口；分期训练时仅检查输入和模型形状；预测时预览一个批次。"},
+      "75": {"en": "Preprocess: all windows. Explicit sleep fit: supervised training and validation checkpoint selection; predict: all supplied held-out epochs.", "zh": "预处理时完成全部切窗；明确选择分期模式时完成训练、验证集选模型或全量留出预测。"},
+      "100": {"en": "Same preprocessing/training as 75 plus signal or validation QC; inference still uses only the fixed fitted model.", "zh": "在 75 档相同处理或训练方法上增加信号或验证集质量检查；预测仍使用已固定的模型。"}
+    },
+    "limitations": [
+      "Levels control scope, not normalization strength. Default none preserves amplitude in uV. Explicit exponential_moving removes absolute amplitude and restarts at every chunk; validate it against the original method before adoption.",
+      "The adapter does not fit train-fold z-scores or apply band-pass filtering. Do not infer preprocessing suitability from the bio category alone.",
+      "The preprocessing mode does not train a classifier. The separate sleep modes use a fixed Chambon2018 baseline, not a current-SOTA claim, and never download pretrained weights.",
+      "Sleep training is limited to 12000 epochs per split and 5000 optimizer steps. Test labels, validation-only temperature fitting and scientific endpoint comparisons remain downstream. No temporal context or automatic model search is added.",
+      "Split labels are retained and records are normalized independently. Subject overlap or duplicate-record leakage requires a separate study-level check.",
+      "The bundled signal is synthetic and verifies integration only. Real EEG must be provided locally."
+    ]
+  },
+  {
+    "id": "deepxde",
+    "name": "DeepXDE",
+    "domain": "physics",
+    "summary": {"en": "Solve a bounded oscillator or decay subproblem with a CPU PINN and independent residual checks.", "zh": "用 CPU 上的 PINN 求解小规模振子或衰减方程，并独立检查残差。"},
+    "project_url": "https://github.com/lululxvi/deepxde",
+    "docs_url": "https://deepxde.readthedocs.io/en/latest/demos/pinn_forward/ode.system.html",
+    "license": "LGPL-2.1",
+    "packages": {"deepxde": "deepxde", "torch": "torch", "numpy": "numpy"},
+    "task": "bounded-ode-solve",
+    "input_description": "inputs.problem: JSON with equation (harmonic_oscillator/exponential_decay), duration and explicit equation parameters. params sets bounded CPU iterations, collocation points and network size; no equation code is evaluated.",
+    "tiers": {
+      "25": {"en": "Check the analytic reference against the equation with DeepXDE autodiff.", "zh": "用自动微分核对解析参考解是否满足方程。"},
+      "75": {"en": "Train the PINN on the supplied bounded ODE and report reference error.", "zh": "训练 PINN 求解指定方程，输出解和参考误差。"},
+      "100": {"en": "Solve and independently check held-out residuals and initial conditions.", "zh": "完成求解，并在独立点上检查方程残差和初值误差。"}
+    },
+    "limitations": [
+      "Only harmonic-oscillator and exponential-decay ODE families are supported by this first adapter. Other PDEs require a dedicated validated adapter.",
+      "Training runs on PyTorch CPU with an explicit seed and bounded iterations. A completed run does not guarantee convergence.",
+      "The bundled analytic problem is an integration check, not evidence of improvement on existing research papers."
+    ]
+  },
+  {
+    "id": "openmm",
+    "name": "OpenMM",
+    "domain": "chem",
+    "summary": {"en": "Run a small CPU reference simulation from explicit molecular parameters or a prepared local PDB.", "zh": "根据显式分子参数或准备好的本地 PDB，运行小规模 CPU 参考模拟。"},
+    "project_url": "https://github.com/openmm/openmm",
+    "docs_url": "https://docs.openmm.org/latest/userguide/application/02_running_sims.html",
+    "license": "MIT for the API and Reference platform; accelerator plugins have separate LGPL terms",
+    "packages": {"openmm": "openmm", "numpy": "numpy"},
+    "task": "molecular-reference-simulation",
+    "input_description": "inputs.system: JSON masses_dalton, positions_nm, velocities_nm_ps (optional), bonds [[i,j,length_nm,k_kj_mol_nm2]]; or inputs.pdb: local prepared PDB compatible with bundled Amber14/TIP3P. 2–256 particles, Reference CPU, Verlet integration, no downloads.",
+    "tiers": {
+      "25": {"en": "Evaluate the starting energy and forces without running a trajectory.", "zh": "先检查初始结构的能量与受力，不推进轨迹。"},
+      "75": {"en": "Produce the requested bounded reference trajectory.", "zh": "生成指定时长内的参考模拟轨迹。"},
+      "100": {"en": "Produce the trajectory and check energy, momentum and half-step consistency.", "zh": "完成参考模拟，并检查能量、动量和步长减半的一致性。"}
+    },
+    "limitations": [
+      "The explicit JSON format includes harmonic bonds only. A prepared PDB uses bundled Amber14/TIP3P, NoCutoff and no constraints; molecule preparation and parameterization validation remain the researcher's task.",
+      "The Reference CPU adapter uses Verlet (NVE). Initial temperature sets velocities and is not a thermostat. Matching an existing Langevin study requires a separate integrator extension.",
+      "The bundled harmonic molecule is synthetic. It checks execution and conservation, not the quality of a learned molecular propagator."
+    ]
+  }
+]

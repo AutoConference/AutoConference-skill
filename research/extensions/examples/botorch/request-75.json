@@ -1,0 +1,12 @@
+{
+  "id": "botorch",
+  "tier": 75,
+  "inputs": {
+    "observations": "observations.json"
+  },
+  "params": {
+    "seed": 0,
+    "maxiter": 50
+  },
+  "purpose": "Check integration of bounded Bayesian experiment selection on synthetic smoke data."
+}

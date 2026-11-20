@@ -1,0 +1,13 @@
+{
+  "id": "braindecode",
+  "tier": 75,
+  "purpose": "Synthetic EEG integration check; no subject data or classification accuracy claim.",
+  "inputs": {
+    "eeg": "eeg.json"
+  },
+  "params": {
+    "normalization": "none",
+    "window_samples": 32,
+    "stride_samples": 32
+  }
+}

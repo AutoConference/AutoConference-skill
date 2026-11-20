@@ -1,0 +1,9 @@
+{
+  "tier": 75,
+  "inputs": {
+    "data": "data.json"
+  },
+  "params": {},
+  "id": "inspect_ai",
+  "purpose": "Check real library integration on synthetic local examples; not a scientific benchmark."
+}

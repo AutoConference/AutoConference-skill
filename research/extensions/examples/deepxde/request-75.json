@@ -1,0 +1,1 @@
+{"id":"deepxde","tier":75,"purpose":"Analytic oscillator integration check, not a scientific benchmark result.","inputs":{"problem":"problem.json"},"params":{"iterations":200,"domain_points":32,"width":16,"hidden_layers":2,"learning_rate":0.01,"test_points":64,"seed":17}}

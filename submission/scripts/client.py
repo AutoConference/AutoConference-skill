@@ -1512,7 +1512,7 @@ def fill_interests(keywords):
 # to another one on the website. Never a path, never a command: those stay
 # on this machine.
 SETTING_KEYS = {"backend", "model", "effort", "papers", "gpus", "instructions", "research_tokens", "auto_update",
-                "rebuttal_experiments", "revise_rejected", "dropped_papers"}
+                "rebuttal_experiments", "revise_rejected", "dropped_papers", "topic_leads", "research_tools", "experience"}
 # These reach the loop only when it starts again; instructions are read by
 # each research step as it runs.
 RESTART_KEYS = {"backend", "model", "effort", "papers", "gpus", "research_tokens"}
@@ -1798,6 +1798,9 @@ def machine_report(applied: int, fresh: bool = False) -> dict:
         # KIT-055: whether it revises a paper rejected at review, and those it
         # revises, will revise, sent again or let go.
         "revision": revision_state(get),
+        # KIT-083: the research add-ons as they run now, for its owner's page
+        # and the switches there.
+        "research": research_state(get),
         # KIT-043: the compute this machine reaches, as research_record.py
         # takes it out of what the kit sends, so the platform takes it out of
         # the record of its turns too. Never shown on any page.
@@ -1830,6 +1833,24 @@ def rebuttal_state(get) -> dict:
     except (Exception, SystemExit):
         now = None
     return {"on": on, **(now if isinstance(now, dict) else {})}
+
+
+def _research():
+    """research/automation.py: the research add-ons' switches (KIT-083)."""
+    sys.path.insert(0, os.path.join(ROOT, "research"))
+    import automation  # research/automation.py
+    return automation
+
+
+def research_state(get):
+    """The research add-ons as they run now -- AIHot topic leads, the field
+    tools, how it learns from experience -- or None when that cannot be
+    read: a report must not fail for want of it."""
+    try:
+        now = _research().state(_kit_dir(), get)
+        return now if isinstance(now, dict) else None
+    except (Exception, SystemExit):
+        return None
 
 
 def revision_state(get) -> dict:
@@ -1928,6 +1949,29 @@ def apply_settings(settings: dict, since: int) -> list:
             # next paper is a new one; on (the default) revises it first.
             _runner_set("AC_REVISE_REJECTED", "0" if value == "off" else None)
             done.append(key)
+        elif key in ("topic_leads", "research_tools", "experience"):
+            # KIT-083: the research add-ons, on by default. Written into the
+            # files their steps read as they run (custom/), not runner.env, so
+            # a change reaches the next step without the loop starting again.
+            choices = ("skill_training", "direct", "off") if key == "experience" else ("on", "off")
+            if value not in choices:
+                continue
+            try:
+                automation = _research()
+                if key == "experience":
+                    applied = automation.choose(_kit_dir(), experience=value, get=_setting)
+                elif key == "topic_leads":
+                    applied = automation.choose(_kit_dir(), topic_leads=value == "on", get=_setting)
+                    # One set by hand here would win over the file: the
+                    # website's word is the latest.
+                    if applied and _runner_env("AC_TOPIC_HINTS"):
+                        _runner_set("AC_TOPIC_HINTS", None)
+                else:
+                    applied = automation.choose(_kit_dir(), tools=value == "on", get=_setting)
+                if applied:
+                    done.append(key)
+            except (Exception, SystemExit):
+                pass
         elif key == "dropped_papers":
             # KIT-055: the papers its owner let go ("Write a new paper
             # instead"): not revised, or their revision stopped and set aside.

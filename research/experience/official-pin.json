@@ -1,0 +1,26 @@
+{
+  "repository": "https://github.com/skilltraining-project/skill-training",
+  "commit": "5a72d0ec26ee4207f153935000e0b193137f6f53",
+  "files": {
+    "skilltrain/agent.py": "7154ae5b2917523cf6c0258a715c309aeebacc062275371f37f9694ec957cf1d",
+    "skilltrain/dataset.py": "0b6b9065738c3198e39a7a1ee3ec247ab1ff8aef7852b7d5097ebb2d29062b32",
+    "skilltrain/memory.py": "e41719c5c5281048bd0e3e74ca9fd53e80f9440dcbca5a757826a76192db3d85",
+    "skilltrain/prompts.py": "bae747e4aac2740bffb31f90099475d87191a52ec32f94ffb50ee2d4a24ddaa8",
+    "skilltrain/run.py": "0d2b39c29cfd59a6780f94b57cc50b56413c5c2d96ae5d0d84b725527057eeb3",
+    "skilltrain/trajectory.py": "3fb6383a6f833559f02ff18cf77474c5379be5e84ebf4966b633068852fcb73f",
+    "skilltrain/__init__.py": "8537316bfdf2a5f24b546aaf3af55fb55eb2a4b7ef1eac22b03678d76f920643",
+    "skilltrain/__main__.py": "62f6a01dccd28d184950d4a99f1a9a68d03cd04d0185f1aca2c8a722ac0a1f7e",
+    "tests/test_cli.py": "8406f0a1e492b1987a8efa5001455461aa670ea40c3647336311b8dda9234468",
+    "tests/test_offline.py": "1a7c025ce59645c11eb02efeff33ac54c873a16e120da6fa086e73a6461e83fc",
+    "skilltrain/workflows/s0_prepare_data.py": "a70e223e56a4cff9fbee58935df8fe43b6e5ce736c538bf8265a663fbfb7cda5",
+    "skilltrain/workflows/s1_diffuse.py": "808b06ba3a9eb259dec863de75a9f4a551346fa7cf6e740c0c277f185a3db3e0",
+    "skilltrain/workflows/s2_forward.py": "5806c3bcbaa2718e7ec87243ed0b224a944ef039e28bcd0ce0edb4e1c219dafe",
+    "skilltrain/workflows/s3_loss.py": "d5ad08bef4bbfb2f67c114e602d43572bd03d452ead3be63b5dabd0bcc9aa13a",
+    "skilltrain/workflows/s4_backward.py": "a772c70d99d339ad3ddd2245c7e8687bae72be3f34ca3c50b52b9172069a3605",
+    "skilltrain/workflows/s5_train.py": "5ad923d062f5d61294da0a3a097f8a4522ed1a1ab2a843edef02d73fd6cc0f0d",
+    "skilltrain/workflows/__init__.py": "d20112a220b8138a3896774ae81af054d2044412ea47288452fb36cd9a5f8246",
+    "prompts/memory_policy.md": "46fa5c8313e86f4eab744a47b0755e479eafaff68639377f02a050adcc7d1cff"
+  },
+  "archive_url": "https://codeload.github.com/skilltraining-project/skill-training/zip/5a72d0ec26ee4207f153935000e0b193137f6f53",
+  "archive_sha256": "4ab1a48329fca95a3fe8dd9623de85d2df9b270e1bfc0176d85f7c52528c80d4"
+}

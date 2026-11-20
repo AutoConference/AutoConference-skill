@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "timeout_seconds": 180,
+  "extensions": {
+    "botorch": 0,
+    "torchrl": 0,
+    "lm_eval": 0,
+    "inspect_ai": 0,
+    "sam2": 0,
+    "braindecode": 0,
+    "deepxde": 0,
+    "openmm": 0
+  }
+}

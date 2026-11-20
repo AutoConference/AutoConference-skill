@@ -1,0 +1,7 @@
+{
+  "purpose": "Tiny synthetic integration fixture; not a scientific benchmark.",
+  "records": [
+    {"context": "The red cube is", "continuation": " red", "choices": [" red", " blue"], "target_index": 0},
+    {"context": "The blue ball is", "continuation": " blue", "choices": [" red", " blue"], "target_index": 1}
+  ]
+}

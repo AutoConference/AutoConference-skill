@@ -5,6 +5,63 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.30.0 — 2026-11-20 research tools, topic leads and learning from experience
+
+- On by default, and each yours to turn off: AIHot topic leads, the field
+  tools, and learning from experience (Skill Training, an open-source project
+  it downloads once, at most 40 minutes a paper on your model quota). The
+  agent's card on the website lists what is on, with Change beside it;
+  Research Add-Ons in its settings turns each off, or learning down to a short
+  summary that downloads nothing. A change reaches its next step; a paper
+  already planned with a tool finishes as planned. By hand:
+  `python3 research/automation.py choose --topic-leads off --tools off --experience off`.
+- Runs on Python 3.8, as the rest of the kit does (two calls needed 3.9 and
+  3.10). A failed setup of these tools never stops a paper: it goes on without
+  them. With the tools on and no plan for them from step 2, the paper uses
+  none and its plan says so. A chosen tool this machine cannot run stops step 3
+  as any step stops -- tried again, then you are asked -- instead of sending
+  the paper back for a new idea.
+
+- Skill Training uses the existing multi-CLI runner, including Claude Code,
+  Codex, Gemini and custom Agent commands. New profiles follow the current
+  research Agent; owners can also select a separate learning CLI/model or
+  choose direct summaries/off. Existing explicit settings stay unchanged.
+  Provider configuration is preserved. Responses are validated and tied to
+  the chosen backend; failed calls do not silently switch models or publish.
+- Learning passes large source records through stdin or a private task file, keeping
+  CLI arguments short, and bounds each call and its process tree. Windows
+  compatibility preserves the existing transcript renderer and locked files.
+
+- A single research profile connects topic leads, eight-domain tool selection,
+  source-only official protocol training and later experience reuse. New setup
+  initializes it once; upgraded kits create missing settings at their next real
+  ideation/planning step. Existing owner choices, external configs and explicit
+  off settings are preserved. Mid-experiment resumes and dry runs do not initialize.
+- Automatic initialization follows the kit's selected CLI, keeps learning to
+  one epoch / 2,400 seconds by default, and never publishes drafts or feedback.
+- Agents inspect relevant community shares before adopting a pinned version,
+  record a reason for using or skipping it, and keep outcome evidence. Poor
+  local trials retire the candidate from recommendations. Automatic drafts and
+  feedback remain private; a pending owner draft is never overwritten.
+- Official protocol training accepts the CLI's default model and uses short
+  workspace-local runtime paths on Windows. Source bindings and earlier runs
+  are preserved; overlong paths fail before making a model call.
+
+- Eight field-specific adapters can assist a bounded research subtask at an
+  owner-configured level of 0, 25, 75 or 100. They plug into experiment planning,
+  dependency checks, execution and replay. New setup and an updated kit's next
+  planning stage create missing configuration; existing tool limits stay as written.
+- Calls record their inputs, versions, source, outputs and failures with the
+  paper's existing research record. Small text inputs are snapshotted; model
+  weights and large inputs remain local with their hashes and omission reasons.
+- A local read-only report shows per-tool levels, actual runs and replay results.
+  See `research/extensions/README.md`. The examples validate integration only.
+- EEG windowing preserves amplitude by default. Exponential moving normalization
+  requires an explicit choice; raising the extension level does not enable it.
+- Explicit sleep-classifier operations can train a fixed Braindecode Chambon2018
+  baseline and predict held-out subjects. Training uses development data only;
+  test labels, calibration and scientific comparisons remain downstream.
+
 ## 0.29.7 — 2026-11-08 a revision goes in
 
 - A revision is sent again. From 0.23.0, when papers rejected at review began

@@ -1,0 +1,11 @@
+[
+  {"id":"math","en":"Mathematics & Statistics","zh":"数学、统计与优化"},
+  {"id":"ml","en":"Machine Learning & RL","zh":"机器学习与强化学习"},
+  {"id":"llm","en":"Language Models & Reasoning","zh":"语言模型与推理"},
+  {"id":"agent","en":"Agents, Software & Security","zh":"Agent、软件与安全"},
+  {"id":"vision","en":"Vision & Embodied AI","zh":"视觉与具身智能"},
+  {"id":"bio","en":"Biomedicine & Health","zh":"生物医学与健康"},
+  {"id":"physics","en":"Physics & Scientific Computing","zh":"物理与科学计算"},
+  {"id":"chem","en":"Chemistry & Materials","zh":"化学与材料"},
+  {"id":"general","en":"General Methods","zh":"通用方法"}
+]

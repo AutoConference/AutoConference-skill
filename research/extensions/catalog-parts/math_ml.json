@@ -1,0 +1,38 @@
+[
+  {
+    "id": "botorch",
+    "name": "BoTorch",
+    "domain": "math",
+    "summary": {"en": "Fit observed experiments and propose the next bounded experiment.", "zh": "根据已有实验拟合代理模型，检查或推荐下一组实验参数。"},
+    "project_url": "https://github.com/meta-pytorch/botorch",
+    "docs_url": "https://botorch.org/docs/v0.15.0/getting_started",
+    "license": "MIT",
+    "packages": {"torch": "torch", "botorch": "botorch", "gpytorch": "gpytorch"},
+    "task": "bayesian-experiment-selection",
+    "input_description": "inputs.observations: JSON with train_x (3..256 rows, 1..8 dimensions), train_y and bounds [lower, upper]. Tier 25 also needs candidates; tier 100 needs separate holdout_x and holdout_y. Maximize by default; params.maximize=false minimizes. Noise variance is in target units squared.",
+    "tiers": {
+      "25": {"en": "Check the GP predictions and uncertainty of candidate points supplied by the researcher.", "zh": "检查用户给定候选参数的预测值和不确定性。"},
+      "75": {"en": "Fit the observed data and optimize log expected improvement to propose one new experiment.", "zh": "根据已有观测，自动推荐下一组值得验证的实验参数。"},
+      "100": {"en": "Own the bounded candidate-selection subtask, including predictive diagnostics on separate held-out observations.", "zh": "完成候选参数选择，并用独立留出观测检查预测误差和不确定性。"}
+    },
+    "limitations": ["CPU-only bounded single-objective Gaussian-process fitting; this is an optimization framework, not a universal SOTA model.", "A recommended point is a proposal, not an observed improvement. The original experiment must evaluate it.", "Tier 100 held-out data must not be selected or tuned using these diagnostics. No theorem proving is implemented."]
+  },
+  {
+    "id": "torchrl",
+    "name": "TorchRL",
+    "domain": "ml",
+    "summary": {"en": "Prepare and audit supplied reinforcement-learning trajectories.", "zh": "整理强化学习轨迹，计算优势估计并检查终止边界。"},
+    "project_url": "https://github.com/pytorch/rl",
+    "docs_url": "https://docs.pytorch.org/rl/stable/reference/generated/torchrl.objectives.value.GAE.html",
+    "license": "MIT",
+    "packages": {"torch": "torch", "torchrl": "torchrl", "tensordict": "tensordict"},
+    "task": "trajectory-advantage-audit",
+    "input_description": "inputs.trajectory: JSON with aligned rewards, values, next_values, done and terminated arrays (1..10000 steps). Trajectories are ordered in time; done marks every episode boundary, terminated distinguishes terminal states from time-limit truncation. params.gamma and params.lambda lie in [0,1].",
+    "tiers": {
+      "25": {"en": "Validate trajectory boundaries and round-trip the supplied transitions through a real TorchRL replay buffer.", "zh": "检查轨迹边界，并验证数据经过 TorchRL 回放缓冲区后保持一致。"},
+      "75": {"en": "Compute generalized advantage estimates and value targets for the supplied trajectories.", "zh": "承担轨迹的优势估计和价值目标计算。"},
+      "100": {"en": "Complete trajectory preparation: compute targets, audit the terminal/truncation recurrence and export a reproducible replay minibatch.", "zh": "完成轨迹处理，独立核对终止与截断计算，并输出可复现的小批量样本。"}
+    },
+    "limitations": ["This adapter prepares supplied trajectories; it does not train a policy or measure policy improvement.", "Use trajectories and value predictions from the original experiment. The included tiny synthetic dataset checks integration only.", "The independent audit checks recurrence consistency, not whether the supplied value model is scientifically valid."]
+  }
+]

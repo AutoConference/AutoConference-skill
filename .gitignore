@@ -8,3 +8,5 @@ __pycache__/
 /.claude/
 /.aris/
 /custom/
+/vendor/
+.st/

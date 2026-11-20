@@ -1,0 +1,8 @@
+{
+  "purpose": "Synthetic wiring fixture, not evidence of Agent capability or research quality.",
+  "records": [
+    {"id": "sum", "input": "What is 2 + 2?", "output": "4", "target": "4", "group": "arithmetic", "baseline_output": "5", "tokens": 12, "cost": 0},
+    {"id": "product", "input": "What is 2 * 3?", "output": "7", "target": "6", "group": "arithmetic", "baseline_output": "6", "tokens": 10, "cost": 0},
+    {"id": "city", "input": "Capital of France?", "output": "Paris", "target": "Paris", "group": "facts", "baseline_output": "Lyon", "tokens": 15, "cost": 0}
+  ]
+}

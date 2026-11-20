@@ -1,0 +1,14 @@
+{
+  "id": "torchrl",
+  "tier": 75,
+  "inputs": {
+    "trajectory": "trajectory.json"
+  },
+  "params": {
+    "seed": 0,
+    "gamma": 0.99,
+    "lambda": 0.95,
+    "batch_size": 3
+  },
+  "purpose": "Check replay and advantage calculation on synthetic terminal/truncated trajectories."
+}

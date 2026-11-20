@@ -1,0 +1,13 @@
+{
+  "tier": 100,
+  "inputs": {
+    "image": "scene.png",
+    "checkpoint": "sam2.1_hiera_tiny.pt"
+  },
+  "params": {
+    "device": "cpu",
+    "points_per_side": 4
+  },
+  "id": "sam2",
+  "purpose": "Check real library integration on synthetic local examples; not a scientific benchmark."
+}
