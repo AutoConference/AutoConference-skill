@@ -42,7 +42,8 @@ Commands, which the loop runs (none asks a model anything):
   dropped                  revisions let go whose workspace is still being written: "<id> <workspace>"
   set-aside <id> <where>   its workspace was set aside after it was let go
   aside <workspace>        a revision set aside after it stopped (KIT-054): not revised again
-  resume-stopped           revisions stopped at step 15 by the kit's own fault (KIT-074): they go on
+  resume-stopped           papers stopped at step 15 that need no person: a revision by the kit's own
+                           fault (KIT-074) goes on, once; one over the page budget goes back to step 11
   drop <id> | undrop <id>  let a paper go, or take that back while it is still queued
   apply <ids,...>          the owner's list from the website: each one in it let go, each one gone from it taken back
   report                   what it is doing, for its owner's page (JSON)
@@ -79,7 +80,8 @@ FEEDBACK_CHARS = 80_000
 SKIP = {
     "SUBMITTED", "SUBMISSION_ID", "pipeline.pid", "pipeline.next", "pipeline.out", "pipeline.log",
     "PIPELINE_STOPPED", "QUOTA_WAIT", "ASYNC", ".paper-ready", ".evidence.sha", ".step-prompts",
-    ".no-go-count", ".untraceable-count", ".shape-count", ".quota-count", ".quota-noted", ".too-late-noted",
+    ".no-go-count", ".untraceable-count", ".shape-count", ".page-count", ".kit-fault-resumed",
+    ".quota-count", ".quota-noted", ".too-late-noted",
     ".prereq-asked", ".waiting-for-rebuttal", ".attachments.json", "submission.json", "rebuttal", "revision",
     "REVISION.json", "REVISION.md",
 }
@@ -288,6 +290,15 @@ def next_one() -> str:
 # next time the agent starts a paper, and the lesson is marked as not applying.
 
 KIT_FAULT = re.compile(r"unknown submission fields: [^\n]*\brevises_submission_id\b")
+# Step 15's refusal of a main text over the platform's page budget
+# (submit-paper.sh), which step 11 is to fix by rewriting it shorter.
+OVER_BUDGET = "not sent: the main text is over the platform's page budget"
+# Where each attempt at step 15 begins in pipeline.out (run-pipeline.sh).
+SUBMIT_MARK = "15/15 submit (ours)"
+# How many times a paper goes back from step 15 to step 11 for its length, in
+# all: the loop's own go-back (run-heartbeat.sh, exit 5 at step 15) and the one
+# here count together, in .page-count, as the shape gate's two do.
+PAGE_TRIES = 2
 
 
 def tail(path: str, n: int = 400_000) -> str:
@@ -300,37 +311,92 @@ def tail(path: str, n: int = 400_000) -> str:
         return ""
 
 
+def last_submit(ws: str) -> str:
+    """What the last attempt at step 15 printed: pipeline.out from its last
+    step-15 line on, or nothing. pipeline.out keeps every attempt, so a
+    refusal months old is still in its tail: 0.29.7 read the whole tail, took
+    a revision stopped by its page budget for the kit's old fault, and sent it
+    to step 15 again on every wake (a user's agent, 2026-11-20: ten notes)."""
+    t = tail(os.path.join(ws, "pipeline.out"))
+    i = t.rfind(SUBMIT_MARK)
+    return t[i:] if i >= 0 else ""
+
+
+def stopped_at_15(ws: str) -> bool:
+    return read(os.path.join(ws, "PIPELINE_STOPPED"), 20).strip() == "15"
+
+
 def stopped_by_kit(ws: str) -> bool:
-    """A revision whose last stop was step 15, and the client's refusal of
-    revises_submission_id what stopped it."""
-    if not os.path.isfile(os.path.join(ws, "REVISION.json")):
+    """A revision stopped at step 15, by the client's refusal of
+    revises_submission_id at its last attempt, and not lifted for it before:
+    the fault was the kit's once, and a second stop is the paper's."""
+    if not os.path.isfile(os.path.join(ws, "REVISION.json")) or not stopped_at_15(ws):
         return False
-    step = read(os.path.join(ws, "PIPELINE_STOPPED"), 20).strip()
-    if step != "15":
+    if os.path.exists(os.path.join(ws, ".kit-fault-resumed")):
         return False
-    return bool(KIT_FAULT.search(tail(os.path.join(ws, "pipeline.out"))))
+    return bool(KIT_FAULT.search(last_submit(ws)))
+
+
+def page_tries(ws: str) -> int:
+    v = read(os.path.join(ws, ".page-count"), 20).strip()
+    return int(v) if v.isdigit() else 0
+
+
+def stopped_over_budget(ws: str) -> bool:
+    """Any paper stopped at step 15 because its main text was over the
+    platform's page budget at its last attempt, with its go-backs to step 11
+    not used up. A kit before 0.30.1 stopped there and waited for a person."""
+    return stopped_at_15(ws) and page_tries(ws) < PAGE_TRIES and OVER_BUDGET in last_submit(ws)
+
+
+def lift(ws: str, step: int) -> None:
+    """Its stop lifted (which closes its question on the owner's page) and
+    the paper set to go on from `step`, its tries afresh."""
+    for g in glob.glob(os.path.join(ws, ".retry-*")):
+        os.remove(g)
+    with open(os.path.join(ws, "pipeline.next"), "w") as fh:
+        fh.write(f"{step}\n")
+    os.remove(os.path.join(ws, "PIPELINE_STOPPED"))
 
 
 def resume_stopped() -> list:
-    """Revisions still waiting at step 15 for the kit's fault go on from there:
-    their stop is lifted (which also closes its question on the owner's page)."""
+    """Papers stopped at step 15 that need no person: a revision stopped by
+    the kit's fault goes on from step 15, once; a paper stopped by its page
+    budget goes back to step 11, which rewrites it shorter, at most twice in
+    all. Each is said once on the owner's page."""
     said = []
     for f in sorted(glob.glob(os.path.join(WORK, "*", "PIPELINE_STOPPED"))):
         ws = os.path.dirname(f)
-        if not stopped_by_kit(ws):
-            continue
-        for g in glob.glob(os.path.join(ws, ".retry-*")):
-            os.remove(g)
-        with open(os.path.join(ws, "pipeline.next"), "w") as fh:
-            fh.write("15\n")
-        os.remove(f)
         cyc = os.path.basename(ws)
-        info = load_json(os.path.join(ws, "REVISION.json"), {}) or {}
-        note_owner(
-            f"the revision in work/{cyc} goes on: its stop at step 15 was the kit's fault",
-            f"The revision of \"{info.get('title') or cyc}\" stopped at step 15 because the kit's client refused the field that names the paper it revises (revises_submission_id). That was a bug in the kit, fixed in 0.29.7 (KIT-074); nothing about the paper caused it. It is being submitted again by itself, from step 15. Nothing for you to do.",
-        )
-        said.append(f"revision: work/{cyc} stopped at step 15 by the kit's fault (KIT-074); it goes on from step 15")
+        if stopped_by_kit(ws):
+            lift(ws, 15)
+            open(os.path.join(ws, ".kit-fault-resumed"), "w").close()
+            info = load_json(os.path.join(ws, "REVISION.json"), {}) or {}
+            note_owner(
+                f"the revision in work/{cyc} goes on: its stop at step 15 was the kit's fault",
+                f"The revision of \"{info.get('title') or cyc}\" stopped at step 15 because the kit's client refused the field that names the paper it revises (revises_submission_id). That was a bug in the kit, fixed in 0.29.7 (KIT-074); nothing about the paper caused it. It is being submitted again by itself, from step 15. Nothing for you to do.",
+            )
+            said.append(f"revision: work/{cyc} stopped at step 15 by the kit's fault (KIT-074); it goes on from step 15")
+        elif stopped_over_budget(ws):
+            n = page_tries(ws) + 1
+            with open(os.path.join(ws, ".page-count"), "w") as fh:
+                fh.write(f"{n}\n")
+            try:
+                os.remove(os.path.join(ws, ".paper-ready"))
+            except OSError:
+                pass
+            subprocess.run([sys.executable, os.path.join(ROOT, "pipeline", "resume.py"), "forget", ws, "11"],
+                           capture_output=True, timeout=60)
+            lift(ws, 11)
+            # Only where 0.29.7 told its owner otherwise: an earlier attempt's
+            # client fault still in pipeline.out is what it misread.
+            misread = (" The notes before this one saying its stop at step 15 was the kit's fault were wrong:"
+                       " a kit before 0.30.1 misread this stop.") if KIT_FAULT.search(tail(os.path.join(ws, "pipeline.out"))) else ""
+            note_owner(
+                f"the paper in work/{cyc} goes back to step 11: it is over the platform's page budget",
+                f"Step 15 did not send it: its main text is longer than the platform takes (work/{cyc}/refine-logs/PAGE_BUDGET.md says by how much). Step 11 rewrites it shorter, and it goes on from there by itself (try {n} of {PAGE_TRIES}). Nothing for you to do.{misread}",
+            )
+            said.append(f"paper: work/{cyc} stopped at step 15 over the page budget; back to step 11 to shorten it (try {n} of {PAGE_TRIES})")
     return said
 
 

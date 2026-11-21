@@ -183,7 +183,10 @@ open(sys.argv[1], "w").write(
 PAGES
   rm -f "$W/.paper-ready"
   say "not sent: the main text is over the platform's page budget ($PC); refine-logs/PAGE_BUDGET.md says by how much -- step 11 again rewrites it shorter"
-  exit 1
+  # 5, not 1: the loop sends a paper it wrote back to step 11 for this
+  # (run-heartbeat.sh; before 0.30.1 it stopped there and waited for a person).
+  # An owner's own paper stops on it, as on any refusal.
+  exit 5
 fi
 
 # The two statements every paper carries (the platform's rules.md §4; owner,

@@ -1637,7 +1637,12 @@ def questions() -> list:
             held = None
         found.append((held, {"id": qid, "at": at[:40], "title": title[:200], "body": body[:QUESTION_BODY_MAX],
                              "resume": bool(held), "cycle": stop.group(1) if stop else None, "own": own}))
-    out = [q for i, (held, q) in enumerate(found) if held is None or newest[held] == i]
+    # A note said again under the same title (an event that repeated) is
+    # shown once, as it was said last: ten copies of one note filled a user's
+    # page (2026-11-20) and pushed the rest off it.
+    last_note = {q["title"]: i for i, (held, q) in enumerate(found) if held is None}
+    out = [q for i, (held, q) in enumerate(found)
+           if (held is None and last_note[q["title"]] == i) or (held is not None and newest[held] == i)]
     return list(reversed(out))[:10]
 
 

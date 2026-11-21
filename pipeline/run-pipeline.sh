@@ -1989,6 +1989,12 @@ elif want 15; then
   # owner brought goes through too. It prints "submitted: <id>" -- what the
   # heartbeat looks for -- and exits 0 without it when no cycle is open.
   "$ROOT/pipeline/submit-paper.sh" "$W" 2>&1 | tee -a "$LOG"
-  [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+  submit_rc=${PIPESTATUS[0]}
+  # 5: over the platform's page budget (refine-logs/PAGE_BUDGET.md), which
+  # the loop sends back to step 11 to shorten; any other refusal stops here.
+  if [ "$submit_rc" -ne 0 ]; then
+    [ "$submit_rc" -eq 5 ] && exit 5
+    exit 1
+  fi
 fi
 say "done. artifacts in $W"

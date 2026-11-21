@@ -1162,6 +1162,25 @@ UNTRACE
         rm -f "$out"; n=11; echo 11 > "$ws/pipeline.next"; continue
       fi
     fi
+    # Step 15 found the main text over the platform's page budget (exit 5;
+    # submit-paper.sh wrote refine-logs/PAGE_BUDGET.md, by how much) -- step
+    # 13's answers can lengthen a paper past what step 11 rendered. The
+    # writing loop's to fix, as the shape gate's is: twice in all (with
+    # revision.py resume-stopped, which counts in the same file), back to
+    # step 11, whose prompt reads PAGE_BUDGET.md; then its owner is asked.
+    # Before 0.30.1 the step said so and stopped (a user's agent, 2026-11-20).
+    if [ "$rc" -eq 5 ] && [ "$n" -eq 15 ]; then
+      local ptries
+      ptries=$(cat "$ws/.page-count" 2>/dev/null || echo 0)
+      case "$ptries" in ''|*[!0-9]*) ptries=0 ;; esac
+      if [ "$ptries" -lt 2 ]; then
+        echo $((ptries + 1)) > "$ws/.page-count"
+        rm -f "$ws/.paper-ready"
+        log "paper $cyc: over the platform's page budget at step 15; back to step 11 to shorten it (try $((ptries + 1)) of 2)"
+        python3 "$ROOT/pipeline/resume.py" forget "$ws" 11 >/dev/null 2>&1
+        rm -f "$out"; n=11; echo 11 > "$ws/pipeline.next"; continue
+      fi
+    fi
     # A usage limit is not a fault in the paper: the same step runs again
     # when the limit resets, and the owner is told once, not asked (A36).
     local retry_at qtries mb why
@@ -1854,7 +1873,9 @@ rebuttal_work() {
 revision_work() {
   local line sid ws pg dest list=()
   python3 pipeline/revision.py scan 2>>"$LOG" | while IFS= read -r line; do log "$line"; done
-  # KIT-074: a revision the kit's own client stopped at step 15 goes on.
+  # A paper stopped at step 15 that needs no person: a revision the kit's
+  # own client stopped goes on, once (KIT-074); one over the page budget goes
+  # back to step 11 to be shortened.
   python3 pipeline/revision.py resume-stopped 2>>"$LOG" | while IFS= read -r line; do log "$line"; done
   while IFS= read -r line; do [ -n "$line" ] && list+=("$line"); done < <(python3 pipeline/revision.py dropped 2>>"$LOG")
   for line in ${list[@]+"${list[@]}"}; do

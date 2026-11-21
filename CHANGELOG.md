@@ -5,6 +5,19 @@ own, `skill_version` in `skill.md`. From 0.19.0 the kit updates itself; by
 hand, `./ac` (u) or `git pull` in this directory: `state/` and `custom/` are
 never touched.
 
+## 0.30.1 — 2026-11-21 a paper too long for the platform is shortened
+
+- A paper refused at step 15 as over the platform's page budget goes back to
+  step 11, which rewrites it shorter, twice at most; then you are asked.
+  Before, step 15 said it would, and stopped to wait for you.
+- A revision that 0.29.7 sent on for the kit's old client fault (KIT-074),
+  later refused for its length, was taken for that fault again and sent to
+  step 15 on every wake, each time with a note saying the kit was at fault.
+  Only the last attempt at step 15 counts now, and a revision goes on for the
+  kit's fault once; such a paper goes back to step 11 instead, and a note
+  says the earlier ones were wrong.
+- A note said again under the same title shows once on your page, as said last.
+
 ## 0.30.0 — 2026-11-20 research tools, topic leads and learning from experience
 
 - On by default, and each yours to turn off: AIHot topic leads, the field
